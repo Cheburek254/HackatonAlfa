@@ -68,7 +68,9 @@ CREATE TABLE IF NOT EXISTS account_details (
     first_name TEXT NOT NULL,
     last_name TEXT NOT NULL,
     company TEXT NOT NULL,
-    avatar BLOB
+    avatar BLOB,
+    email TEXT NOT NULL DEFAULT '',
+    phone TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS account_sessions (
     token_hash TEXT PRIMARY KEY NOT NULL,
@@ -127,6 +129,12 @@ def configure_accounts(app: Flask, database_path: Path) -> None:
         connection = _db()
         connection.executescript(SCHEMA)
         with connection:
+            connection.execute("BEGIN IMMEDIATE")
+            detail_columns = {row["name"] for row in connection.execute("PRAGMA table_info(account_details)")}
+            if "email" not in detail_columns:
+                connection.execute("ALTER TABLE account_details ADD COLUMN email TEXT NOT NULL DEFAULT ''")
+            if "phone" not in detail_columns:
+                connection.execute("ALTER TABLE account_details ADD COLUMN phone TEXT NOT NULL DEFAULT ''")
             connection.execute(
                 INSERT_USER,
                 {
@@ -182,7 +190,7 @@ def current_account() -> sqlite3.Row | None:
         return None
     account = _db().execute(
         """SELECT users.id, username, stage, industry, experience, team_size, learning_topic, preferred_format,
-                  first_name, last_name, company, avatar IS NOT NULL AS has_avatar
+                  first_name, last_name, company, email, phone, avatar IS NOT NULL AS has_avatar
            FROM account_sessions
            JOIN users ON users.id = account_sessions.user_id
            LEFT JOIN account_details ON account_details.user_id = users.id
@@ -259,10 +267,11 @@ def update_profile(
         )
         if details is not None:
             connection.execute(
-                """INSERT INTO account_details (user_id, first_name, last_name, company, avatar)
-                   VALUES (:user_id, :first_name, :last_name, :company, :avatar)
+                """INSERT INTO account_details (user_id, first_name, last_name, company, avatar, email, phone)
+                   VALUES (:user_id, :first_name, :last_name, :company, :avatar, :email, :phone)
                    ON CONFLICT(user_id) DO UPDATE SET first_name = excluded.first_name,
                        last_name = excluded.last_name, company = excluded.company,
+                       email = excluded.email, phone = excluded.phone,
                        avatar = CASE WHEN :replace_avatar THEN excluded.avatar ELSE account_details.avatar END""",
                 {**details, "user_id": account["id"], "avatar": avatar,
                  "replace_avatar": remove_avatar or avatar is not None},

@@ -1,6 +1,7 @@
 """Веб-демо подбора материалов."""
 
 import os
+import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -29,6 +30,10 @@ IDENTITY_FIELDS = {
     "last_name": ("Фамилия", 60, "family-name"),
     "company": ("Название компании", 120, "organization"),
 }
+CONTACT_FIELDS = {
+    "email": ("Электронная почта", 254, "email"),
+    "phone": ("Телефон", 40, "tel"),
+}
 
 
 def _material_destination(url: str) -> str:
@@ -51,6 +56,7 @@ def create_app(recommender: Recommender = recommend, *, database_path: Path | No
     catalog = load_catalog(FIXTURES / "catalog.demo.json")
     materials_by_id = {material.id: material for material in catalog}
     sample_history = load_history(FIXTURES / "history.demo.json")
+    app.jinja_env.globals["signed_in"] = lambda: current_account() is not None
 
     @app.get("/health")
     def health():
@@ -68,6 +74,8 @@ def create_app(recommender: Recommender = recommend, *, database_path: Path | No
             )
             if request.endpoint == "index":
                 response.headers["Content-Security-Policy"] += "; script-src 'self'; connect-src 'self'"
+            elif request.endpoint in {"accounts.login", "accounts.register"}:
+                response.headers["Content-Security-Policy"] += "; script-src 'self'"
             response.headers["Referrer-Policy"] = "no-referrer"
         return response
 
@@ -85,6 +93,7 @@ def create_app(recommender: Recommender = recommend, *, database_path: Path | No
             profile_fields=PROFILE_FIELDS,
             profile_values=saved_profile(account) if values is None else values,
             identity_fields=IDENTITY_FIELDS,
+            contact_fields=CONTACT_FIELDS,
             identity_values=account if details is None else details,
             avatar_max_mb=AVATAR_MAX_MB,
             error=error,
@@ -120,13 +129,19 @@ def create_app(recommender: Recommender = recommend, *, database_path: Path | No
         check_csrf()
         values = profile_values(request.form)
         details = {field: request.form.get(field, "").strip() for field in IDENTITY_FIELDS}
+        details.update({field: request.form.get(field, account[field] or "").strip() for field in CONTACT_FIELDS})
         upload = request.files.get("avatar")
         remove_avatar = request.form.get("remove_avatar") == "1"
         try:
-            for field, (label, maximum, _) in IDENTITY_FIELDS.items():
+            for field, (label, maximum, _) in (IDENTITY_FIELDS | CONTACT_FIELDS).items():
                 value = details[field]
                 if value and (len(value) > maximum or not value.isprintable()):
                     raise ValueError(f"Проверьте поле «{label}». Максимум {maximum} символов.")
+            if details["email"] and not re.fullmatch(r"[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+", details["email"]):
+                raise ValueError("Проверьте адрес электронной почты.")
+            phone = details["phone"]
+            if phone and (not re.fullmatch(r"\+?[0-9() .-]+", phone) or not 7 <= len(re.findall(r"[0-9]", phone)) <= 15):
+                raise ValueError("Укажите телефон с 7–15 цифрами.")
             if upload and remove_avatar:
                 raise ValueError("Выберите одно действие: загрузить новое фото или удалить текущее.")
             avatar = prepare_avatar(upload) if upload else None

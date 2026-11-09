@@ -31,7 +31,7 @@
 {% block content %}
         <section class="account-hero" aria-labelledby="profile-title">
             <div class="wrap">
-                <p class="eyebrow"><span></span> ЛИЧНЫЙ КАБИНЕТ</p>
+                <p class="eyebrow">ЛИЧНЫЙ КАБИНЕТ</p>
                 <h1 id="profile-title">Профиль</h1>
                 <div class="account-banner">
                     {{ avatar() }}
@@ -82,6 +82,18 @@
                             {% endfor %}
                         </div>
                     </section>
+                    <section class="account-card" aria-labelledby="contacts-title">
+                        <h3 id="contacts-title">Контакты</h3>
+                        <p class="account-muted">Необязательные поля. Контакты видны только в вашем профиле.</p>
+                        <div class="account-edit-fields account-contact-fields">
+                            {% for field, (label, maximum, type) in contact_fields.items() %}
+                            <label for="{{ field }}">{{ label }}
+                                <input type="{{ type }}" id="{{ field }}" name="{{ field }}" value="{{ identity_values[field] or '' }}"
+                                       maxlength="{{ maximum }}" autocomplete="{{ type }}">
+                            </label>
+                            {% endfor %}
+                        </div>
+                    </section>
                     <section class="account-card" aria-labelledby="preferences-title">
                         <h3 id="preferences-title">Бизнес и обучение</h3>
                         <p class="account-muted">По этим данным мы подбираем материалы для вас.</p>
@@ -98,6 +110,16 @@
                 <div class="account-grid">
                     {{ profile_card('О бизнесе', ['stage', 'industry', 'team_size'], 'business') }}
                     {{ profile_card('Об обучении', ['experience', 'learning_topic', 'preferred_format'], 'learning') }}
+                    {% if not is_demo %}
+                    <section class="account-card account-contacts" aria-labelledby="contacts-title">
+                        <h2 id="contacts-title">Контакты</h2>
+                        <dl class="account-values account-contact-values">
+                            {% for field, (label, _, _) in contact_fields.items() %}
+                            <div><dt>{{ label }}</dt><dd>{{ account[field] or 'Не указано' }}</dd></div>
+                            {% endfor %}
+                        </dl>
+                    </section>
+                    {% endif %}
                 </div>
                 {% endif %}
                 <form class="logout-form" method="post" action="{{ url_for('accounts.logout') }}">

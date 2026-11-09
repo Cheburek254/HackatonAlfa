@@ -302,6 +302,43 @@ class WebFlowTest(unittest.TestCase):
         self.assertEqual(self.post_form("/logout", {}, page="/profile").status_code, 303)
         self.assertEqual(self.client.get("/profile").location, "/login")
 
+    def test_contact_fields_are_added_to_existing_profiles_and_stay_private(self):
+        public = self.client.get("/").get_data(as_text=True)
+        self.assertIn('href="/login">Войти</a>', public)
+        self.assertEqual(self.register().status_code, 303)
+        settings = "/profile/settings"
+        data = {**self.business, "first_name": "Анна"}
+        self.assertEqual(self.post_form(settings, data).status_code, 303)
+        with closing(sqlite3.connect(self.database_path)) as connection:
+            connection.execute("ALTER TABLE account_details DROP COLUMN email")
+            connection.execute("ALTER TABLE account_details DROP COLUMN phone")
+
+        app = create_app(self.recommend, database_path=self.database_path)
+        self.client = app.test_client()
+        self.assertEqual(self.post_form("/login", {
+            "username": "owner", "password": self.password,
+        }).status_code, 303)
+        existing = self.client.get(settings).get_data(as_text=True)
+        self.assertIn('name="first_name" value="Анна"', existing)
+        self.assertIn('type="email" id="email"', existing)
+        self.assertIn('type="tel" id="phone"', existing)
+
+        contacts = {"email": "demo-owner@example.com", "phone": "+7 (900) 000-00-00"}
+        self.assertEqual(self.post_form(settings, {**data, **contacts}).status_code, 303)
+        invalid = self.post_form(settings, {**data, "email": "invalid", "phone": "1"})
+        self.assertEqual(invalid.status_code, 400)
+        overview = self.client.get("/profile").get_data(as_text=True)
+        self.assertIn('href="/profile" aria-current="page"', overview)
+        for value in contacts.values():
+            self.assertIn(value, overview)
+            self.assertNotIn(value, self.client.get("/").get_data(as_text=True))
+
+        visitor = app.test_client()
+        self.assertEqual(self.post_form("/login/demo", {}, client=visitor, page="/login").status_code, 303)
+        other_profile = visitor.get("/profile").get_data(as_text=True)
+        for value in contacts.values():
+            self.assertNotIn(value, other_profile)
+
     def test_registration_requires_profile_and_csrf_and_keeps_legacy_values(self):
         self.client.set_cookie("alfahack_profile", json.dumps({"industry": "услуги"}))
         page = self.client.get("/register").get_data(as_text=True)

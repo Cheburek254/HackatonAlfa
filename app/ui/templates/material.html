@@ -3,7 +3,7 @@
 {% block content %}
     <section class="hero" aria-labelledby="material-title">
         <div class="wrap">
-            <p class="eyebrow"><span></span> {{ material.format | upper if material.format else 'МАТЕРИАЛ' }}</p>
+            <p class="eyebrow">{{ material.format | upper if material.format else 'МАТЕРИАЛ' }}</p>
             <h1 id="material-title">{{ material.title }}</h1>
             {% if material.description %}<p class="hero-copy">{{ material.description }}</p>{% endif %}
             <div class="auth-options">

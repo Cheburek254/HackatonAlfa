@@ -3,7 +3,7 @@
         <section class="hero" aria-labelledby="hero-title">
             <div class="wrap hero-layout">
                 <div class="hero-content">
-                    <p class="eyebrow"><span></span> ОБУЧЕНИЕ ДЛЯ ПРЕДПРИНИМАТЕЛЕЙ</p>
+                    <p class="eyebrow">ОБУЧЕНИЕ ДЛЯ ПРЕДПРИНИМАТЕЛЕЙ</p>
                     <h1 id="hero-title">Что хотите решить<br class="hero-break"> в&nbsp;бизнесе?</h1>
                     <p class="hero-copy">Опишите задачу, и мы предложим материалы, с которых можно начать.</p>
 
@@ -43,10 +43,10 @@
             </div>
         </section>
 
-        <section class="results" id="recommendations" aria-labelledby="results-title">
+        <section class="results recommendations-results" id="recommendations" aria-labelledby="results-title">
             <div class="wrap">
                 <div class="results-heading">
-                    <p class="eyebrow"><span></span> АЛЬФА-КУРС</p>
+                    <p class="eyebrow">АЛЬФА-КУРС</p>
                     <h2 id="results-title">Рекомендации для вас</h2>
                     {% if profile.goal %}<p class="goal-caption">Задача · {{ profile.goal }}</p>{% endif %}
                     {% set selected_profile = profile_values.values() | select | list %}
@@ -139,7 +139,7 @@
                         <form method="dialog" class="material-preview-close">
                             <button class="button" type="submit" aria-label="Закрыть" autofocus>×</button>
                         </form>
-                        <p class="eyebrow"><span></span> О МАТЕРИАЛЕ</p>
+                        <p class="eyebrow">О МАТЕРИАЛЕ</p>
                         <h2 id="preview-title"></h2>
                         <p id="preview-description"></p>
                         <a class="button button-primary material-preview-link" target="_blank" rel="noopener noreferrer">Открыть материал <span aria-hidden="true">↗</span></a>
