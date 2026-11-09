@@ -7,6 +7,7 @@ from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 
 from PIL import Image
 
@@ -56,7 +57,7 @@ class WebFlowTest(unittest.TestCase):
         self.assertIn("Подходит для старта", page)
         self.assertIn("Сверьте план запуска", page)
         self.assertIn("Что уже сделали?", page)
-        self.assertIn('href="/materials/start-checklist"', page)
+        self.assertIn('href="/materials/start-checklist?impression=', page)
 
     def test_quick_goal_and_sample_history_reach_recommend(self):
         response = self.client.post("/", data={
@@ -89,7 +90,7 @@ class WebFlowTest(unittest.TestCase):
         client = create_app(database_path=self.database_path).test_client()
 
         def card_ids(html):
-            return re.findall(r'class="material-link" href="/materials/([^"/]+)"', html)
+            return re.findall(r'class="material-link" href="/materials/([^"/?]+)\?', html)
 
         initial = client.get("/").get_data(as_text=True)
         default = card_ids(initial)
@@ -141,9 +142,69 @@ class WebFlowTest(unittest.TestCase):
             html = first_page if page == 1 else client.post("/", data={
                 "current_order": "popularity", "show_page": page,
             }).get_data(as_text=True)
-            ids = re.findall(r'class="material-link" href="/materials/item-(\d+)"', html)
+            ids = re.findall(r'class="material-link" href="/materials/item-(\d+)\?', html)
             self.assertEqual([int(item) for item in ids], list(range(14, 14 - count, -1)))
             self.assertEqual("Показать больше" in html, count < 14)
+
+    def test_impressions_preserve_positions_deduplicate_pages_and_attribute_clicks(self):
+        app = create_app(database_path=self.database_path, algorithm_name="demo:v1")
+        client = app.test_client()
+        endpoint = "/recommendations/impressions"
+
+        def cards(html):
+            return re.findall(r'class="material-link" href="([^"]+)"', html)
+
+        def token(url):
+            return parse_qs(urlsplit(url).query)["impression"][0]
+
+        def show(html, *urls, browser=client):
+            csrf = re.search(r'data-impression-csrf="([^"]+)"', html).group(1)
+            return browser.post(endpoint, data={"csrf_token": csrf, "impression": [token(url) for url in urls]})
+
+        initial = client.get("/").get_data(as_text=True)
+        first, second, *_ = cards(initial)
+        batch = re.search(r'name="impression_batch" value="([^"]+)"', initial).group(1)
+        self.assertEqual(client.post(endpoint, data={"impression": token(first)}).status_code, 400)
+        with closing(sqlite3.connect(self.database_path)) as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM recommendation_impressions").fetchone()[0], 0)
+        self.assertEqual(show(initial, first, second, first).status_code, 204)
+        expanded = client.post("/", data={"show_page": 2, "impression_batch": batch}).get_data(as_text=True)
+        self.assertEqual(show(expanded, cards(expanded)[0], cards(expanded)[-1]).status_code, 204)
+
+        visitor = app.test_client()
+        other = visitor.get("/").get_data(as_text=True)
+        self.assertEqual(show(other, cards(initial)[2], browser=visitor).status_code, 204)
+        json_headers = {"Accept": "application/json"}
+        preview = client.get(first, headers=json_headers).get_json()
+        for _ in range(2):
+            self.assertEqual(client.post(preview["open_url"], data={
+                "csrf_token": preview["csrf_token"],
+            }, headers=json_headers).status_code, 204)
+        mismatched = preview["open_url"].replace("start-checklist", "marketing-first-sales")
+        self.assertEqual(client.post(mismatched, data={
+            "csrf_token": preview["csrf_token"],
+        }, headers=json_headers).status_code, 204)
+
+        sorted_html = client.post("/", data={"result_order": "popularity"}).get_data(as_text=True)
+        sorted_first = cards(sorted_html)[0]
+        self.assertEqual(client.get(sorted_first).status_code, 200)
+        clicked = self.post_form(
+            sorted_first.replace("?", "/open?"), {}, page=sorted_first, client=client,
+        )
+        self.assertEqual(clicked.status_code, 303)
+
+        with closing(sqlite3.connect(self.database_path)) as connection:
+            rows = connection.execute("""SELECT material_id, position, algorithm, result_order, audience, user_id,
+                                                clicked_at IS NOT NULL
+                                         FROM recommendation_impressions ORDER BY result_order DESC, position""").fetchall()
+            batches = connection.execute("SELECT COUNT(DISTINCT batch_id) FROM recommendation_impressions").fetchone()[0]
+        self.assertEqual(rows, [
+            ("start-checklist", 1, "demo:v1", "recommended", "guest", None, 1),
+            ("marketing-first-sales", 2, "demo:v1", "recommended", "guest", None, 0),
+            ("operations-week-plan", 7, "demo:v1", "recommended", "guest", None, 0),
+            ("marketing-first-sales", 1, "demo:v1", "popularity", "guest", None, 1),
+        ])
+        self.assertEqual(batches, 2)
 
     def test_material_history_is_persistent_and_isolated_by_account(self):
         self.assertEqual(self.register().status_code, 303)

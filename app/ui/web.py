@@ -14,6 +14,7 @@ from app.ui.accounts import (
     profile_values, recent_interactions, record_interaction, saved_profile, update_profile,
 )
 from app.ui.avatars import AVATAR_MAX_BYTES, AVATAR_MAX_MB, prepare_avatar
+from app.ui.impressions import issue_impression_tickets, record_impressions
 from app.ui.stub import recommend
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
@@ -46,7 +47,9 @@ def _material_destination(url: str) -> str:
     return url
 
 
-def create_app(recommender: Recommender = recommend, *, database_path: Path | None = None) -> Flask:
+def create_app(
+    recommender: Recommender = recommend, *, database_path: Path | None = None, algorithm_name: str | None = None,
+) -> Flask:
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = 8 * 1024
     database_path = database_path or Path(
@@ -56,6 +59,11 @@ def create_app(recommender: Recommender = recommend, *, database_path: Path | No
     catalog = load_catalog(FIXTURES / "catalog.demo.json")
     materials_by_id = {material.id: material for material in catalog}
     sample_history = load_history(FIXTURES / "history.demo.json")
+    recommender_type = type(recommender)
+    algorithm = algorithm_name or (
+        f"{getattr(recommender, '__module__', recommender_type.__module__)}."
+        f"{getattr(recommender, '__qualname__', recommender_type.__qualname__)}"
+    )
     app.jinja_env.globals["signed_in"] = lambda: current_account() is not None
 
     @app.get("/health")
@@ -167,15 +175,17 @@ def create_app(recommender: Recommender = recommend, *, database_path: Path | No
             "prefetch" in request.headers.get(header, "").lower() for header in ("Sec-Purpose", "Purpose")
         ):
             record_interaction(current_account(), material_id, "view")
+        impression = request.args.get("impression")
+        open_url = url_for("open_material", material_id=material_id, impression=impression)
         if request.accept_mimetypes.best == "application/json":
             return {
                 "title": material.title,
                 "description": material.description,
                 "url": _material_destination(material.url),
-                "open_url": url_for("open_material", material_id=material_id),
+                "open_url": open_url,
                 "csrf_token": csrf_token(),
             }
-        return render_template("material.html", material=material)
+        return render_template("material.html", material=material, open_url=open_url)
 
     @app.post("/materials/<material_id>/open")
     def open_material(material_id):
@@ -184,10 +194,18 @@ def create_app(recommender: Recommender = recommend, *, database_path: Path | No
             abort(404)
         target = _material_destination(material.url)
         check_csrf()
-        record_interaction(current_account(), material_id, "click")
+        account = current_account()
+        record_interaction(account, material_id, "click")
+        record_impressions((request.args.get("impression"),), account, clicked_material=material_id)
         if request.accept_mimetypes.best == "application/json":
             return "", 204
         return redirect(target, code=303)
+
+    @app.post("/recommendations/impressions")
+    def recommendation_impressions():
+        check_csrf()
+        record_impressions(request.form.getlist("impression"), current_account())
+        return "", 204
 
     @app.route("/", methods=["GET", "POST"])
     def index():
@@ -214,6 +232,10 @@ def create_app(recommender: Recommender = recommend, *, database_path: Path | No
             cards.sort(key=lambda card: getattr(card[0], result_order), reverse=True)
         page = max(1, form.get("show_page", default=1, type=int))
         visible_cards = cards[:page * RESULTS_PER_PAGE]
+        impression_batch, impression_tickets = issue_impression_tickets(
+            [material.id for material, _ in visible_cards], algorithm, result_order,
+            form.get("impression_batch") if page > 1 else None,
+        )
         return render_template(
             "recommendations.html",
             profile=profile,
@@ -229,6 +251,8 @@ def create_app(recommender: Recommender = recommend, *, database_path: Path | No
             result_orders=RESULT_ORDERS,
             result=result,
             cards=visible_cards,
+            impression_batch=impression_batch,
+            impression_tickets=impression_tickets,
             total_cards=len(cards),
             next_page=page + 1 if len(visible_cards) < len(cards) else None,
         )

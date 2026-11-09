@@ -5,7 +5,7 @@ import os
 import re
 import secrets
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
@@ -86,6 +86,18 @@ CREATE TABLE IF NOT EXISTS interaction_events (
     occurred_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS interaction_events_user_time ON interaction_events (user_id, occurred_at DESC);
+CREATE TABLE IF NOT EXISTS recommendation_impressions (
+    batch_id TEXT NOT NULL,
+    material_id TEXT NOT NULL,
+    position INTEGER NOT NULL CHECK (position > 0),
+    algorithm TEXT NOT NULL,
+    result_order TEXT NOT NULL,
+    audience TEXT NOT NULL CHECK (audience IN ('guest', 'demo', 'account')),
+    user_id INTEGER REFERENCES users (id) ON DELETE CASCADE,
+    shown_at INTEGER NOT NULL,
+    clicked_at INTEGER,
+    PRIMARY KEY (batch_id, material_id, position)
+);
 """
 
 INSERT_USER = """
@@ -218,6 +230,31 @@ def record_interaction(
         connection.execute(
             "INSERT INTO interaction_events (user_id, material_id, kind, occurred_at) VALUES (?, ?, ?, ?)",
             (account["id"], material_id, kind, int(time())),
+        )
+
+
+def save_recommendation_impressions(
+    account: sqlite3.Row | None,
+    placements: Sequence[tuple[str, str, int, str, str]],
+    *,
+    clicked: bool,
+) -> None:
+    audience = "guest"
+    user_id = None
+    if account is not None:
+        audience = "demo" if account["username"] == DEMO_USERNAME else "account"
+        if audience == "account":
+            user_id = account["id"]
+    now = int(time())
+    connection = _db()
+    with connection:
+        connection.executemany(
+            """INSERT INTO recommendation_impressions (
+                   batch_id, material_id, position, algorithm, result_order, audience, user_id, shown_at, clicked_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(batch_id, material_id, position) DO UPDATE SET
+                   clicked_at = COALESCE(recommendation_impressions.clicked_at, excluded.clicked_at)""",
+            [(*placement, audience, user_id, now, now if clicked else None) for placement in placements],
         )
 
 

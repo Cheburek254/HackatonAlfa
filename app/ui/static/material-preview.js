@@ -1,6 +1,41 @@
 const materialGrid = document.querySelector(".card-grid");
 const materialPreview = document.querySelector("#material-preview");
 
+if (materialGrid && "IntersectionObserver" in window) {
+    const pendingCards = new Set(materialGrid.querySelectorAll(".card"));
+    const impressions = new IntersectionObserver((entries, observer) => {
+        if (document.visibilityState !== "visible") {
+            return;
+        }
+        const tickets = [];
+        for (const entry of entries) {
+            if (entry.intersectionRatio >= 0.5 && pendingCards.delete(entry.target)) {
+                const link = entry.target.querySelector(".material-link");
+                tickets.push(new URL(link.href).searchParams.get("impression"));
+                observer.unobserve(entry.target);
+            }
+        }
+        for (let start = 0; start < tickets.length; start += 16) {
+            const body = new URLSearchParams({ csrf_token: materialGrid.dataset.impressionCsrf });
+            for (const ticket of tickets.slice(start, start + 16)) {
+                body.append("impression", ticket);
+            }
+            fetch(materialGrid.dataset.impressionUrl, { method: "POST", body, keepalive: true }).catch(() => {});
+        }
+    }, { threshold: 0.5 });
+    function observeVisibleTab() {
+        if (document.visibilityState === "visible") {
+            for (const card of pendingCards) {
+                impressions.observe(card);
+            }
+        } else {
+            impressions.disconnect();
+        }
+    }
+    document.addEventListener("visibilitychange", observeVisibleTab);
+    observeVisibleTab();
+}
+
 if (materialGrid && typeof materialPreview?.showModal === "function") {
     materialGrid.classList.add("has-material-preview");
     const previewTitle = materialPreview.querySelector("#preview-title");

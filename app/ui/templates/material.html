@@ -7,7 +7,7 @@
             <h1 id="material-title">{{ material.title }}</h1>
             {% if material.description %}<p class="hero-copy">{{ material.description }}</p>{% endif %}
             <div class="auth-options">
-                <form method="post" action="{{ url_for('open_material', material_id=material.id) }}">
+                <form method="post" action="{{ open_url }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button class="button button-primary" type="submit">Открыть на сайте <span aria-hidden="true">↗</span></button>
                 </form>

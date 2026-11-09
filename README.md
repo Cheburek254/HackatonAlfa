@@ -47,6 +47,20 @@ python -m venv .venv
 
 Без Docker база создаётся в `data/accounts/users.sqlite3`. Путь можно задать через `ALFA_DATABASE_PATH`.
 
+Таблица `recommendation_impressions` хранит ID карточки, позицию после сортировки, алгоритм, тип сортировки, аудиторию и время показа и перехода в UTC (Unix-секунды). Показ засчитывается, когда в область просмотра активной вкладки попала хотя бы половина карточки. Переход к материалу также подтверждает показ. Повторное появление той же карточки на той же позиции после «Показать больше» учитывается один раз. Идентификатор алгоритма берётся из имени функции, а для различения версий можно передать `algorithm_name` в `create_app`.
+
+Доля показов с переходом по алгоритму и позиции. Здесь тестовый аккаунт исключён, а повторный переход с одного показа учитывается один раз.
+
+```sql
+SELECT algorithm, result_order, position,
+       COUNT(*) AS impressions, COUNT(clicked_at) AS clicked_impressions,
+       ROUND(100.0 * COUNT(clicked_at) / COUNT(*), 2) AS ctr_percent
+FROM recommendation_impressions
+WHERE audience <> 'demo'
+GROUP BY algorithm, result_order, position
+ORDER BY algorithm, result_order, position;
+```
+
 Консольное демо работает на стандартной библиотеке. Для тестов используйте окружение с зависимостями веб-демо.
 
 ```powershell

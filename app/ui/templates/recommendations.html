@@ -60,6 +60,7 @@
                 <form class="result-orders" id="result-orders" aria-label="Порядок выдачи" method="post" action="{{ url_for('index', _anchor='recommendations') }}">
                     <input type="hidden" name="goal" value="{{ profile.goal or '' }}">
                     <input type="hidden" name="current_order" value="{{ result_order }}">
+                    {% if impression_batch %}<input type="hidden" name="impression_batch" value="{{ impression_batch }}">{% endif %}
                     {% if skip_profile %}<input type="hidden" name="action" value="skip_profile">{% endif %}
                     {% if use_sample_history %}<input type="hidden" name="history" value="sample">{% endif %}
                     {% for field, value in profile_values.items() %}
@@ -86,7 +87,7 @@
 
                 {% if cards %}
                 <script src="{{ url_for('static', filename='material-preview.js') }}" defer></script>
-                <div class="card-grid">
+                <div class="card-grid" data-impression-url="{{ url_for('recommendation_impressions') }}" data-impression-csrf="{{ csrf_token() }}">
                     {% for material, item in cards %}
                     <article class="card" id="result-card-{{ loop.index }}" tabindex="-1">
                         <div class="card-cover cover-{{ loop.cycle(1, 2, 3) }}">
@@ -119,7 +120,7 @@
                                 <dt>Следующий шаг</dt>
                                 <dd>{{ item.next_step }}</dd>
                             </dl>
-                            <a class="material-link" href="{{ url_for('material_page', material_id=material.id) }}" aria-label="Подробнее: {{ material.title }}">
+                            <a class="material-link" href="{{ url_for('material_page', material_id=material.id, impression=impression_tickets[loop.index0]) }}" aria-label="Подробнее: {{ material.title }}">
                                 Подробнее о материале <span aria-hidden="true">→</span>
                             </a>
                         </div>
