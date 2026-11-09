@@ -28,22 +28,22 @@ def _read_ticket(signer: URLSafeTimedSerializer, ticket: str | None, size: int) 
 
 
 def issue_impression_tickets(
-    material_ids: Sequence[str], algorithm: str, result_order: str, previous_batch: str | None,
-) -> tuple[str, tuple[str, ...]]:
+    material_ids: Sequence[str], algorithm: str, result_order: str, selection_key: str, previous_batch: str | None,
+) -> tuple[str, str, tuple[str, ...]]:
     if not material_ids:
-        return "", ()
+        return "", "", ()
     if "recommendation_visit" not in session:
         session["recommendation_visit"] = secrets.token_urlsafe(16)
-    scope = [session["recommendation_visit"], algorithm, result_order]
+    scope = [session["recommendation_visit"], algorithm, result_order, selection_key]
     batch_signer = _signer("batch")
-    previous = _read_ticket(batch_signer, previous_batch, 4)
-    batch_id = previous[3] if previous and previous[:3] == scope else secrets.token_urlsafe(16)
+    previous = _read_ticket(batch_signer, previous_batch, len(scope) + 1)
+    batch_id = previous[-1] if previous and previous[:-1] == scope else secrets.token_urlsafe(16)
     card_signer = _signer("card")
     tickets = tuple(
         card_signer.dumps([scope[0], batch_id, material_id, position, algorithm, result_order])
         for position, material_id in enumerate(material_ids, start=1)
     )
-    return batch_signer.dumps([*scope, batch_id]), tickets
+    return batch_signer.dumps([*scope, batch_id]), batch_id, tickets
 
 
 def record_impressions(

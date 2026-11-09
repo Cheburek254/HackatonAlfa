@@ -1,102 +1,160 @@
-const materialGrid = document.querySelector(".card-grid");
 const materialPreview = document.querySelector("#material-preview");
+const seenCards = new WeakSet();
 
-if (materialGrid && "IntersectionObserver" in window) {
-    const pendingCards = new Set(materialGrid.querySelectorAll(".card"));
-    const impressions = new IntersectionObserver((entries, observer) => {
-        if (document.visibilityState !== "visible") {
-            return;
+const impressionObserver = "IntersectionObserver" in window ? new IntersectionObserver((entries, observer) => {
+    const grid = document.querySelector("#recommendations .card-grid");
+    if (!grid || document.visibilityState !== "visible") {
+        return;
+    }
+    const tickets = [];
+    for (const entry of entries) {
+        if (entry.intersectionRatio < 0.5 || !grid.contains(entry.target) || seenCards.has(entry.target)) {
+            continue;
         }
-        const tickets = [];
-        for (const entry of entries) {
-            if (entry.intersectionRatio >= 0.5 && pendingCards.delete(entry.target)) {
-                const link = entry.target.querySelector(".material-link");
-                tickets.push(new URL(link.href).searchParams.get("impression"));
-                observer.unobserve(entry.target);
-            }
+        seenCards.add(entry.target);
+        observer.unobserve(entry.target);
+        const link = entry.target.querySelector(".material-link");
+        tickets.push(new URL(link.href).searchParams.get("impression"));
+    }
+    for (let start = 0; start < tickets.length; start += 16) {
+        const body = new URLSearchParams({ csrf_token: grid.dataset.impressionCsrf });
+        for (const ticket of tickets.slice(start, start + 16)) {
+            body.append("impression", ticket);
         }
-        for (let start = 0; start < tickets.length; start += 16) {
-            const body = new URLSearchParams({ csrf_token: materialGrid.dataset.impressionCsrf });
-            for (const ticket of tickets.slice(start, start + 16)) {
-                body.append("impression", ticket);
-            }
-            fetch(materialGrid.dataset.impressionUrl, { method: "POST", body, keepalive: true }).catch(() => {});
-        }
-    }, { threshold: 0.5 });
-    function observeVisibleTab() {
-        if (document.visibilityState === "visible") {
-            for (const card of pendingCards) {
-                impressions.observe(card);
-            }
-        } else {
-            impressions.disconnect();
+        fetch(grid.dataset.impressionUrl, { method: "POST", body, keepalive: true }).catch(() => {});
+    }
+}, { threshold: 0.5 }) : null;
+
+function prepareCards() {
+    const grid = document.querySelector("#recommendations .card-grid");
+    if (typeof materialPreview?.showModal === "function") {
+        grid?.classList.add("has-material-preview");
+    }
+    impressionObserver?.disconnect();
+    if (!impressionObserver || !grid || document.visibilityState !== "visible") {
+        return;
+    }
+    for (const card of grid.querySelectorAll(".card")) {
+        if (!seenCards.has(card)) {
+            impressionObserver.observe(card);
         }
     }
-    document.addEventListener("visibilitychange", observeVisibleTab);
-    observeVisibleTab();
 }
 
-if (materialGrid && typeof materialPreview?.showModal === "function") {
-    materialGrid.classList.add("has-material-preview");
-    const previewTitle = materialPreview.querySelector("#preview-title");
-    const previewDescription = materialPreview.querySelector("#preview-description");
+document.addEventListener("visibilitychange", prepareCards);
+prepareCards();
 
-    function escapeHtml(str) {
-        return str.replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+let activeUpdate;
+document.addEventListener("submit", async (event) => {
+    const form = event.target;
+    const isQuery = form.id === "recommendation-query";
+    if (!isQuery && form.id !== "result-orders") {
+        return;
     }
-
-    function renderFormattedDescription(container, rawHtml, rawText) {
-        const content = (rawHtml || rawText || "").trim();
-        if (!content) {
-            container.innerHTML = "<p>Краткое описание пока недоступно.</p>";
+    event.preventDefault();
+    activeUpdate?.abort();
+    const update = new AbortController();
+    activeUpdate = update;
+    const section = document.querySelector("#recommendations");
+    const status = document.querySelector("#recommendation-status");
+    const submitter = event.submitter;
+    const loadMore = submitter?.name === "show_page";
+    const data = new FormData(form);
+    if (submitter?.name) {
+        data.append(submitter.name, submitter.value);
+    }
+    status.textContent = "";
+    section.setAttribute("aria-busy", "true");
+    try {
+        const response = await fetch(submitter?.hasAttribute("formaction") ? submitter.formAction : form.action, {
+            method: "POST",
+            headers: { "X-Recommendation-Fragment": "1" },
+            body: new URLSearchParams(data),
+            signal: update.signal,
+        });
+        if (!response.ok) {
+            throw new Error("Не удалось обновить рекомендации");
+        }
+        const fragment = document.createElement("template");
+        fragment.innerHTML = await response.text();
+        const next = fragment.content.querySelector("#recommendations");
+        if (update.signal.aborted) {
             return;
         }
-        if (content.includes("<") && content.includes(">")) {
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(content, "text/html");
-            doc.querySelectorAll("script, style, iframe, object, embed").forEach((el) => el.remove());
-            doc.querySelectorAll("span").forEach((span) => {
-                span.removeAttribute("style");
-                if (!span.attributes.length) {
-                    span.replaceWith(...span.childNodes);
-                }
-            });
-            doc.querySelectorAll("*").forEach((el) => el.removeAttribute("style"));
-            doc.querySelectorAll("p").forEach((p) => {
-                if (!p.textContent.trim() && !p.querySelector("img, svg")) {
-                    p.remove();
-                }
-            });
-            container.innerHTML = doc.body.innerHTML || "<p>Краткое описание пока недоступно.</p>";
-        } else {
-            const paragraphs = content.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
-            if (!paragraphs.length) {
-                container.innerHTML = `<p>${escapeHtml(content)}</p>`;
-            } else {
-                container.innerHTML = paragraphs.map((p) => `<p>${escapeHtml(p).replace(/\n/g, "<br>")}</p>`).join("");
+        if (!next) {
+            throw new Error("Выдача недоступна");
+        }
+
+        const previousCards = [...section.querySelectorAll(".card")];
+        const nextCards = [...next.querySelectorAll(".card")];
+        if (loadMore && section.dataset.impressionBatch === next.dataset.impressionBatch &&
+            previousCards.length < nextCards.length &&
+            previousCards.every((card, index) => card.dataset.materialId === nextCards[index].dataset.materialId)) {
+            previousCards.forEach((card, index) => nextCards[index].replaceWith(card));
+        }
+        section.replaceWith(next);
+        prepareCards();
+
+        const query = document.querySelector("#recommendation-query");
+        const controls = next.querySelector("#result-orders");
+        const carriedFields = ["result_order", "format_filter", "page_size"];
+        if (isQuery) {
+            carriedFields.push("goal", "stage", "industry", "experience", "team_size", "learning_topic", "preferred_format");
+        }
+        for (const name of carriedFields) {
+            const source = controls.elements.namedItem(name === "result_order" ? "current_order" : name);
+            query.elements.namedItem(name).value = source.value;
+        }
+        if (isQuery) {
+            const sampleHistory = query.querySelector('input[name="history"]');
+            if (sampleHistory) {
+                sampleHistory.checked = Boolean(controls.elements.namedItem("history"));
             }
+            for (const button of query.querySelectorAll('button[name="quick_goal"]')) {
+                button.classList.toggle("chip-selected", button.value === query.elements.goal.value);
+            }
+            next.scrollIntoView({ block: "start" });
+        } else if (loadMore) {
+            (nextCards[previousCards.length] || next.querySelector("#results-title"))?.focus({ preventScroll: true });
+        } else {
+            const matching = [...next.querySelectorAll("button")].find(
+                (button) => button.name === submitter?.name && button.value === submitter?.value,
+            );
+            matching?.focus({ preventScroll: true });
+        }
+    } catch {
+        if (!update.signal.aborted) {
+            status.textContent = "Не удалось обновить подборку. Попробуйте ещё раз.";
+            status.scrollIntoView({ block: "nearest" });
+        }
+    } finally {
+        if (activeUpdate === update) {
+            section.removeAttribute("aria-busy");
+            activeUpdate = undefined;
         }
     }
+});
 
+if (typeof materialPreview?.showModal === "function") {
+    const previewTitle = materialPreview.querySelector("#preview-title");
+    const previewDescription = materialPreview.querySelector("#preview-description");
     const materialLink = materialPreview.querySelector(".material-preview-link");
     let currentPreview;
     let openingLink;
     let isLoading = false;
 
-    materialGrid.addEventListener("click", async (event) => {
+    document.addEventListener("click", async (event) => {
         if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
             return;
         }
-        const link = event.target.closest(".card")?.querySelector(".material-link");
+        const link = event.target.closest("#recommendations .card")?.querySelector(".material-link");
         if (!link || (!event.target.closest(".material-link") && window.getSelection()?.toString())) {
             return;
         }
-
         event.preventDefault();
         if (isLoading || materialPreview.open) {
             return;
         }
-
         isLoading = true;
         try {
             const response = await fetch(link.href, { headers: { Accept: "application/json" } });
@@ -105,7 +163,7 @@ if (materialGrid && typeof materialPreview?.showModal === "function") {
             }
             currentPreview = await response.json();
             previewTitle.textContent = currentPreview.title;
-            renderFormattedDescription(previewDescription, currentPreview.description_html, currentPreview.description);
+            previewDescription.innerHTML = currentPreview.description_html;
             materialLink.href = currentPreview.url;
             openingLink = link;
             materialPreview.showModal();

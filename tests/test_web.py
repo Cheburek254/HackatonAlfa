@@ -3,6 +3,7 @@ import re
 import sqlite3
 import unittest
 from contextlib import closing
+from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -12,7 +13,7 @@ from urllib.parse import parse_qs, urlsplit
 from PIL import Image
 
 from app.contracts import Material, Profile, Recommendation, RecommendationResult
-from app.ctr_report import Metrics, read_report
+from app.ctr_report import Metrics, read_daily_activity, read_report, read_top_cards
 from app.ui.stub import recommend as stub_recommend
 from app.ui.web import create_app
 
@@ -106,7 +107,8 @@ class WebFlowTest(unittest.TestCase):
                  ("3", 2, "algorithm-a", "popularity", "account", None),
                  ("4", 1, "algorithm-a", "recommended", "demo", 101),
                  ("5", 1, "algorithm-b", "recommended", "guest", None),
-                 ("6", 1, "demo-only", "recommended", "demo", 101)],
+                 ("6", 1, "demo-only", "recommended", "demo", 101),
+                 ("7", 1, "app.ai.stub.recomend", "recommended", "guest", 101)],
             )
         totals, detail = read_report(self.database_path)
         self.assertEqual(totals, {"algorithm-a": Metrics(3, 1), "algorithm-b": Metrics(1, 0)})
@@ -116,6 +118,29 @@ class WebFlowTest(unittest.TestCase):
         self.assertIn("Сводка по алгоритмам", page)
         self.assertIn("50,00%", page)
         self.assertNotIn("demo-only", page)
+        self.assertIn("Архив · исходный тестовый сценарий", page)
+        self.assertIn("app.ai.stub.recomend", page)
+        self.assertIn("Эффективность карточек", page)
+        self.assertIn("Динамика за 30 дней", page)
+        comparison = self.post_form("/admin", {}, page="/admin", client=new_admin).get_data(as_text=True)
+        self.assertIn("Проверено сценариев: 50", comparison)
+        self.assertIn("Hit@3", comparison)
+        self.assertIn("MRR@3", comparison)
+        self.assertIn("outside-catalog", comparison)
+
+        with closing(sqlite3.connect(self.database_path)) as connection, connection:
+            connection.execute(
+                """INSERT INTO interaction_events (user_id, material_id, kind, occurred_at)
+                   SELECT id, 'test-card', 'view', 100 FROM users WHERE username IN ('owner', 'nextadmin')"""
+            )
+        response = self.post_form("/admin/history/clear", {"confirm": "1"}, page="/admin")
+        self.assertEqual(response.location, "/admin#admin-history")
+        with closing(sqlite3.connect(self.database_path)) as connection:
+            remaining = connection.execute(
+                "SELECT username FROM interaction_events JOIN users ON users.id = user_id"
+            ).fetchall()
+        self.assertEqual(remaining, [("nextadmin",)])
+        self.assertEqual(read_report(self.database_path)[0], totals)
 
         weak = runner.invoke(args=["admin", "reset-password", "owner"], input="12345\n12345\n")
         self.assertEqual(weak.exit_code, 1)
@@ -128,6 +153,23 @@ class WebFlowTest(unittest.TestCase):
         self.assertEqual(self.post_form("/admin/login", {
             **credentials, "password": replacement,
         }).location, "/admin")
+
+    def test_activity_and_card_metrics_exclude_demo_and_legacy(self):
+        shown_at = int(datetime(2026, 11, 9, 23, tzinfo=UTC).timestamp())
+        clicked_at = int(datetime(2026, 11, 10, 1, tzinfo=UTC).timestamp())
+        with closing(sqlite3.connect(self.database_path)) as connection, connection:
+            connection.executemany(
+                """INSERT INTO recommendation_impressions
+                   (batch_id, material_id, position, algorithm, result_order, audience, shown_at, clicked_at)
+                   VALUES (?, 'test-card', 1, ?, 'recommended', ?, ?, ?)""",
+                [("guest-row", "algorithm", "guest", shown_at, clicked_at),
+                 ("demo-row", "algorithm", "demo", shown_at, clicked_at),
+                 ("legacy-row", "app.ui.stub.recommend", "guest", shown_at, clicked_at)],
+            )
+        activity = read_daily_activity(self.database_path, datetime(2026, 11, 10, tzinfo=UTC).date())
+        self.assertEqual(len(activity), 30)
+        self.assertEqual(activity[-2:], [("2026-11-09", Metrics(1, 0)), ("2026-11-10", Metrics(0, 1))])
+        self.assertEqual(read_top_cards(self.database_path), [("test-card", Metrics(1, 1))])
 
     def test_quick_goal_and_sample_history_reach_recommend(self):
         response = self.client.post("/", data={
@@ -568,9 +610,55 @@ class WebFlowTest(unittest.TestCase):
         preview = self.client.get("/materials/start-checklist", headers={"Accept": "application/json"}).get_json()
         self.assertIn("description_html", preview)
         self.assertIn("<p>", preview["description_html"])
+        attack = '<<x>img src="/materials/start-checklist" onerror="alert(1)">'
+        self.assertNotIn("<img", format_description_html(attack))
+        self.assertEqual(format_description_html("3 > 2\n\nЦена < 100"), "<p>3 &gt; 2</p><p>Цена &lt; 100</p>")
+        self.assertNotIn("javascript:", format_description_html('<a href="javascript:alert(1)">Ссылка</a>'))
 
     def test_format_filter_narrows_displayed_cards(self):
         response = self.client.post("/", data={"goal": "маркетинг", "format_filter": "статья"})
         page = response.get_data(as_text=True)
         self.assertIn('class="format-chip active"', page)
         self.assertIn('name="format_filter" value="статья"', page)
+
+    def test_fragment_keeps_filters_and_page_size_without_the_page_shell(self):
+        catalog = tuple(
+            Material(str(i), f"Материал {i}", f"https://example.com/calculators/{i}", format="шаблон")
+            for i in range(1, 15)
+        )
+        with patch("app.ui.web.load_catalog", return_value=catalog):
+            client = create_app(stub_recommend, database_path=self.database_path).test_client()
+        fragment = client.post("/", data={
+            "format_filter": "all", "selected_format": "калькулятор", "selected_page_size": "12",
+        }, headers={"X-Recommendation-Fragment": "1"}).get_data(as_text=True)
+        self.assertNotIn("<!doctype html>", fragment)
+        self.assertIn("Показано 12 из 14", fragment)
+        self.assertIn('name="format_filter" value="калькулятор"', fragment)
+        self.assertNotIn("Карточки показаны в порядке тестового каталога.", fragment)
+        batch = re.search(r'name="impression_batch" value="([^"]+)"', fragment).group(1)
+        batch_id = re.search(r'data-impression-batch="([^"]+)"', fragment).group(1)
+        expanded = client.post("/", data={
+            "format_filter": "калькулятор", "page_size": "12", "show_page": "2", "impression_batch": batch,
+        }, headers={"X-Recommendation-Fragment": "1"}).get_data(as_text=True)
+        self.assertIn("Показано 14 из 14", expanded)
+        self.assertIn(f'data-impression-batch="{batch_id}"', expanded)
+        empty = client.post("/", data={"selected_format": "подкаст"}).get_data(as_text=True)
+        self.assertIn("нет материалов выбранного формата", empty)
+
+    def test_account_can_change_its_own_password_to_eight_characters(self):
+        self.assertEqual(self.register().status_code, 303)
+        path = "/profile/password"
+        settings = "/profile/settings"
+        other = self.app.test_client()
+        credentials = {"username": "owner", "password": self.password}
+        self.assertEqual(self.post_form("/login", credentials, client=other).status_code, 303)
+        self.assertIn('minlength="8"', self.client.get(settings).get_data(as_text=True))
+
+        form = {"current_password": "неверный", "new_password": "demo8Key", "confirm_password": "demo8Key"}
+        self.assertEqual(self.post_form(path, form, page=settings).location, "/profile/settings#password-settings")
+        self.assertEqual(other.get("/profile").status_code, 200)
+        form["current_password"] = self.password
+        self.assertEqual(self.post_form(path, form, page=settings).location, "/login")
+        self.assertEqual(other.get("/profile").location, "/login")
+        self.assertEqual(self.post_form("/login", credentials).status_code, 401)
+        self.assertEqual(self.post_form("/login", {**credentials, "password": form["new_password"]}).status_code, 303)

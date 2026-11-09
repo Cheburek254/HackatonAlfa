@@ -2,12 +2,13 @@
 
 import re
 from pathlib import Path
+from functools import partial
 from urllib.parse import urlsplit
 
 from flask import Flask, Response, abort, redirect, render_template, request, url_for
 
 from app.catalog import DEMO_CATALOG_PATH, catalog_source, load_catalog, load_history
-from app.contracts import Profile, Recommender
+from app.contracts import Material, Profile, Recommender
 from app.ctr_report import ORDER_LABELS
 from app.database import account_database_path
 from app.ui.accounts import (
@@ -16,6 +17,7 @@ from app.ui.accounts import (
 )
 from app.ui.admin import admin
 from app.ui.avatars import AVATAR_MAX_BYTES, AVATAR_MAX_MB, prepare_avatar
+from app.ui.descriptions import format_description_html
 from app.ui.impressions import issue_impression_tickets, record_impressions
 from app.recommender import recommend
 
@@ -23,12 +25,14 @@ FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 QUICK_GOALS = ("Найти первых клиентов", "Увеличить продажи", "Разобраться в учёте")
 GOAL_MAX_LENGTH = 200
 RESULTS_PER_PAGE = 6
+PAGE_SIZES = (6, 12, 24)
 
 FORMAT_LABELS = {
     "all": "Все форматы",
     "курс": "Курсы",
     "статья": "Статьи",
     "шаблон": "Шаблоны",
+    "чек-лист": "Чек-листы",
     "вебинар": "Вебинары",
     "подкаст": "Подкасты",
     "калькулятор": "Калькуляторы",
@@ -54,41 +58,15 @@ def _material_destination(url: str) -> str:
     return url
 
 
-def format_description_html(raw: str | None) -> str:
-    """Форматирует описание материала для красивого и безопасного отображения в карточке/модалке."""
-    if not raw or not raw.strip():
-        return "<p>Краткое описание пока недоступно.</p>"
-    text = raw.strip()
-    if "<" in text and ">" in text:
-        text = re.sub(r'\s*style="[^"]*"', "", text, flags=re.IGNORECASE)
-        text = re.sub(r"</?span[^>]*>", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"<p>\s*(?:<br\s*/?>)?\s*</p>", "", text, flags=re.IGNORECASE)
-        text = re.sub(
-            r"<(?:script|style|iframe|object|embed)[^>]*>.*?</(?:script|style|iframe|object|embed)>",
-            "",
-            text,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
-        allowed_tags = {"p", "br", "strong", "b", "em", "i", "ul", "ol", "li", "h1", "h2", "h3", "h4", "a"}
-
-        def _filter_tag(match: re.Match[str]) -> str:
-            tag = match.group(1).lower()
-            if tag in allowed_tags:
-                if tag == "a":
-                    href_m = re.search(r'href="([^"]*)"', match.group(0), re.IGNORECASE)
-                    if href_m and (href_m.group(1).startswith("http://") or href_m.group(1).startswith("https://")):
-                        return f'<a href="{href_m.group(1)}" target="_blank" rel="noopener noreferrer">'
-                    return "<a>"
-                return f"</{tag}>" if match.group(0).startswith("</") else f"<{tag}>"
-            return ""
-
-        text = re.sub(r"</?([a-zA-Z0-9]+)[^>]*>", _filter_tag, text).strip()
-        return text if text else "<p>Краткое описание пока недоступно.</p>"
-
-    paragraphs = [p.strip() for p in re.split(r"\n{2,}", text) if p.strip()]
-    if not paragraphs:
-        return f"<p>{text.replace(chr(10), '<br>')}</p>"
-    return "".join(f"<p>{p.replace(chr(10), '<br>')}</p>" for p in paragraphs)
+def _format_key(material: Material) -> str | None:
+    if material.entity_type == "calculator":
+        return "калькулятор"
+    try:
+        if urlsplit(material.url).path.startswith("/calculators/"):
+            return "калькулятор"
+    except ValueError:
+        pass
+    return material.format
 
 
 def create_app(
@@ -102,6 +80,10 @@ def create_app(
     if not is_demo_catalog and not catalog:
         raise ValueError(f"Каталог пуст: {source}")
     materials_by_id = {material.id: material for material in catalog}
+    app.config["CATALOG_TITLES"] = {material.id: material.title for material in catalog}
+    app.config["EVALUATION_RECOMMENDER"] = (
+        partial(recommend, explain_with_llm=False) if recommender is recommend else recommender
+    )
     sample_history = load_history(FIXTURES / "history.demo.json") if is_demo_catalog else ()
     configure_accounts(app, database_path or account_database_path())
     app.register_blueprint(admin)
@@ -113,6 +95,7 @@ def create_app(
     if algorithm_name is None and recommender is recommend and is_demo_catalog:
         algorithm += ":demo-catalog"
     app.jinja_env.globals["signed_in"] = lambda: current_account() is not None
+    app.jinja_env.globals["material_format"] = _format_key
 
     @app.get("/health")
     def health():
@@ -279,32 +262,35 @@ def create_app(
         result_order = form.get("result_order", form.get("current_order", "recommended"))
         if result_order not in ORDER_LABELS:
             result_order = "recommended"
-        format_filter = form.get("format_filter", request.args.get("format", "all"))
+        format_filter = form.get("selected_format") or form.get("format_filter", request.args.get("format", "all"))
         if format_filter not in FORMAT_LABELS:
             format_filter = "all"
 
         all_candidate_cards = [(materials_by_id[item.material_id], item) for item in result.items]
         format_counts = {
-            fmt: sum(1 for card, _ in all_candidate_cards if card.format == fmt)
-            for fmt in ("курс", "статья", "шаблон", "вебинар", "подкаст", "калькулятор")
+            fmt: sum(1 for card, _ in all_candidate_cards if _format_key(card) == fmt)
+            for fmt in FORMAT_LABELS if fmt != "all"
         }
         format_counts["all"] = len(all_candidate_cards)
 
         cards = all_candidate_cards
         if format_filter != "all":
-            cards = [c for c in cards if c[0].format == format_filter]
+            cards = [c for c in cards if _format_key(c[0]) == format_filter]
 
         if result_order != "recommended":
             cards = [card for card in cards if getattr(card[0], result_order) is not None]
             cards.sort(key=lambda card: getattr(card[0], result_order), reverse=True)
         page = max(1, form.get("show_page", default=1, type=int))
-        visible_cards = cards[:page * RESULTS_PER_PAGE]
-        impression_batch, impression_tickets = issue_impression_tickets(
-            [material.id for material, _ in visible_cards], algorithm, result_order,
+        page_size = form.get("selected_page_size", type=int) or form.get("page_size", type=int)
+        if page_size not in PAGE_SIZES:
+            page_size = RESULTS_PER_PAGE
+        visible_cards = cards[:page * page_size]
+        impression_batch, impression_batch_id, impression_tickets = issue_impression_tickets(
+            [material.id for material, _ in visible_cards], algorithm, result_order, f"{format_filter}:{page_size}",
             form.get("impression_batch") if page > 1 else None,
         )
         return render_template(
-            "recommendations.html",
+            "recommendations_results.html" if request.headers.get("X-Recommendation-Fragment") == "1" else "recommendations.html",
             profile=profile,
             profile_values=values,
             profile_fields=PROFILE_FIELDS,
@@ -320,9 +306,12 @@ def create_app(
             format_filter=format_filter,
             format_filters=FORMAT_LABELS,
             format_counts=format_counts,
+            page_size=page_size,
+            page_sizes=PAGE_SIZES,
             result=result,
             cards=visible_cards,
             impression_batch=impression_batch,
+            impression_batch_id=impression_batch_id,
             impression_tickets=impression_tickets,
             total_cards=len(cards),
             next_page=page + 1 if len(visible_cards) < len(cards) else None,

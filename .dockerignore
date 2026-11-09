@@ -4,4 +4,6 @@
 !app/**
 !fixtures/
 !fixtures/*.json
+!evaluation/
+!evaluation/**
 **/__pycache__/

@@ -107,6 +107,22 @@
                         <a class="profile-back" href="{{ url_for('profile_page') }}">Отмена</a>
                     </div>
                 </form>
+                <section id="password-settings" class="account-card account-edit" aria-labelledby="password-settings-title">
+                    <h3 id="password-settings-title">Смена пароля</h3>
+                    {% for message in get_flashed_messages(category_filter=['error']) %}
+                    <p class="account-error" role="alert">{{ message }}</p>
+                    {% endfor %}
+                    <form method="post" action="{{ url_for('accounts.change_password') }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <div class="account-edit-fields">
+                            <label>Текущий пароль<input name="current_password" type="password" autocomplete="current-password" required maxlength="{{ password_max }}"></label>
+                            <label>Новый пароль<input name="new_password" type="password" autocomplete="new-password" required minlength="{{ password_min }}" maxlength="{{ password_max }}"></label>
+                            <label>Повторите новый пароль<input name="confirm_password" type="password" autocomplete="new-password" required minlength="{{ password_min }}" maxlength="{{ password_max }}"></label>
+                        </div>
+                        <p class="account-muted">От {{ password_min }} символов. После смены пароля нужно войти снова.</p>
+                        <button class="button button-primary" type="submit">Сменить пароль</button>
+                    </form>
+                </section>
                 {% else %}
                 <h2 class="account-section-title">Ваши параметры</h2>
                 <p class="account-muted">{{ 'Параметры тестового профиля можно поменять для отдельного запроса на странице подбора.' if is_demo else 'По этим данным мы подбираем материалы для вас.' }}</p>

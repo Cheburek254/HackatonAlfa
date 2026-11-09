@@ -59,5 +59,247 @@
     "profile": {"goal": "Как настроить экспортную сертификацию?"},
     "relevant_ids": [],
     "note": "В синтетическом каталоге нет материала по экспортной сертификации."
+  },
+  {
+    "id": "ad-clicks",
+    "profile": {"goal": "Как повысить кликабельность объявлений и CTR"},
+    "relevant_ids": ["traffic-ctr"],
+    "note": "Нужен материал по рекламным переходам и CTR."
+  },
+  {
+    "id": "sales-conversion",
+    "profile": {"goal": "Увеличить конверсию из заявки в заказ", "stage": "рост"},
+    "relevant_ids": ["sales-funnel", "marketing-service-leads"],
+    "note": "Нужен разбор воронки и конверсии."
+  },
+  {
+    "id": "marketplace-listing",
+    "profile": {"goal": "Как оформить карточку товара на Вайлдберриз", "industry": "интернет-торговля"},
+    "relevant_ids": ["marketplace-photo"],
+    "note": "Запрос про конкретный маркетплейс и карточку товара."
+  },
+  {
+    "id": "free-tax-ip",
+    "profile": {"goal": "Налоги для ИП на УСН, только бесплатно"},
+    "relevant_ids": ["tax-ip-template"],
+    "note": "Платный курс для ООО не соответствует ограничению."
+  },
+  {
+    "id": "tax-ooo",
+    "profile": {"goal": "Налоги и отчётность для ООО"},
+    "relevant_ids": ["tax-ooo-course"],
+    "note": "Подбор по юридической форме организации."
+  },
+  {
+    "id": "budget-with-price",
+    "profile": {"goal": "Курс по финансовому бюджету до 1000 ₽", "preferred_format": "курс"},
+    "relevant_ids": ["course-budget"],
+    "note": "Подходящий курс должен укладываться в бюджет."
+  },
+  {
+    "id": "first-employee",
+    "profile": {"goal": "Провести собеседование и нанять первого сотрудника", "team_size": "2–5 человек"},
+    "relevant_ids": ["hire-first"],
+    "note": "Запрос на практический найм сотрудника."
+  },
+  {
+    "id": "food-cost",
+    "profile": {"goal": "Посчитать себестоимость блюд и цены в меню", "industry": "общепит"},
+    "relevant_ids": ["cafe-cost"],
+    "note": "Нужен калькулятор для общепита."
+  },
+  {
+    "id": "explicit-ai",
+    "profile": {"goal": "Применить ИИ и ChatGPT для автоматизации"},
+    "relevant_ids": ["ai-automation"],
+    "note": "Отдельный токен «ИИ» и название инструмента обозначают тему нейросетей."
+  },
+  {
+    "id": "public-offer",
+    "profile": {"goal": "Составить публичную оферту для онлайн-услуг"},
+    "relevant_ids": ["legal-offer"],
+    "note": "Подходят условия договора и правила для клиентов."
+  },
+  {
+    "id": "inventory",
+    "profile": {"goal": "Организовать инвентаризацию и остатки на складе"},
+    "relevant_ids": ["logistics-stock"],
+    "note": "Нужен материал по складскому учёту."
+  },
+  {
+    "id": "service-profile-no-goal",
+    "profile": {"industry": "услуги", "preferred_format": "подкаст", "learning_topic": "клиентский сервис"},
+    "relevant_ids": ["customer-support"],
+    "note": "Без текстового запроса подбираем по профилю и формату."
+  },
+  {
+    "id": "history-only",
+    "profile": {},
+    "history_fixture": "history.demo.json",
+    "relevant_ids": ["marketing-service-leads", "marketing-first-sales", "marketing-repeat-sales"],
+    "note": "Последние действия были связаны с маркетингом и воронкой продаж."
+  },
+  {
+    "id": "not-ai-certification",
+    "profile": {"goal": "Порядок сертификации продукции для экспорта"},
+    "relevant_ids": [],
+    "note": "Подходящего материала нет. Окончание «ии» в слове «сертификации» не означает искусственный интеллект."
+  },
+  {
+    "id": "free-advertising",
+    "profile": {"goal":"Только бесплатные материалы по интернет-рекламе и объявлениям"},
+    "relevant_ids": ["traffic-ctr","marketing-first-sales"],
+    "note": "Бесплатные практические материалы по продвижению."
+  },
+  {
+    "id": "returning-customers",
+    "profile": {"goal":"Как вернуть покупателей в офлайн-магазин","stage":"рост","industry":"розница"},
+    "relevant_ids": ["marketing-repeat-sales","sales-funnel"],
+    "note": "Задача про повторные продажи в работающей рознице."
+  },
+  {
+    "id": "lead-tracking",
+    "profile": {"goal":"Нужен шаблон для отслеживания заявок от обращения до оплаты","industry":"услуги"},
+    "relevant_ids": ["marketing-service-leads"],
+    "note": "Нужен шаблон для учёта заявок в сфере услуг."
+  },
+  {
+    "id": "no-paid-course-in-budget",
+    "profile": {"goal":"Только курс по воронке продаж до 100 ₽"},
+    "relevant_ids": [],
+    "note": "В каталоге нет подходящего курса по продажам в пределах бюджета."
+  },
+  {
+    "id": "validate-business-idea",
+    "profile": {"goal":"Как проверить идею и начать своё дело","stage":"идея","experience":"начинающий"},
+    "relevant_ids": ["start-checklist"],
+    "note": "Для проверки идеи подходит чек-лист запуска."
+  },
+  {
+    "id": "solo-week-planning",
+    "profile": {"goal":"Работаю один, как расставить приоритеты на неделю","team_size":"работаю один"},
+    "relevant_ids": ["operations-week-plan"],
+    "note": "Запрос на планирование задач для одного человека."
+  },
+  {
+    "id": "cash-gap",
+    "profile": {"goal":"Как избежать кассового разрыва и вести ДДС"},
+    "relevant_ids": ["finance-cashflow","course-budget"],
+    "note": "Нужны материалы о денежных потоках и планировании расходов."
+  },
+  {
+    "id": "compare-product-margin",
+    "profile": {"goal":"Как сравнить маржинальность двух направлений бизнеса"},
+    "relevant_ids": ["finance-profitability"],
+    "note": "Сравнение доходности разных направлений."
+  },
+  {
+    "id": "usn-spreadsheet",
+    "profile": {"goal":"Скачать бесплатную таблицу для расчёта УСН у ИП"},
+    "relevant_ids": ["tax-ip-template"],
+    "note": "Запрос на таблицу для ИП с ограничением по доступу."
+  },
+  {
+    "id": "company-reporting",
+    "profile": {"goal":"Подобрать курс про бухгалтерскую отчётность для ООО"},
+    "relevant_ids": ["tax-ooo-course"],
+    "note": "Нужен курс об отчётности для организации."
+  },
+  {
+    "id": "wb-photo",
+    "profile": {"goal":"Какие фото разместить в карточке на WB"},
+    "relevant_ids": ["marketplace-photo"],
+    "note": "Проверка короткого названия маркетплейса."
+  },
+  {
+    "id": "warehouse-count",
+    "profile": {"goal":"Сверить фактические остатки на складе с учётом","industry":"логистика"},
+    "relevant_ids": ["logistics-stock"],
+    "note": "Подходит материал про учёт складских остатков."
+  },
+  {
+    "id": "restaurant-food-cost",
+    "profile": {"goal":"Посчитать фудкост в ресторане","industry":"общепит"},
+    "relevant_ids": ["cafe-cost"],
+    "note": "Отраслевая формулировка про себестоимость блюд."
+  },
+  {
+    "id": "cafe-profile-only",
+    "profile": {"industry":"общепит","learning_topic":"себестоимость"},
+    "relevant_ids": ["cafe-cost"],
+    "note": "Вход состоит только из профиля общепита и темы обучения."
+  },
+  {
+    "id": "first-job-post",
+    "profile": {"goal":"Составить вакансию и провести интервью с кандидатом"},
+    "relevant_ids": ["hire-first"],
+    "note": "Нужен практический материал о найме."
+  },
+  {
+    "id": "offer-refunds",
+    "profile": {"goal":"Что написать в оферте о возврате оплаты за услуги","industry":"услуги"},
+    "relevant_ids": ["legal-offer"],
+    "note": "Публичная оферта для поставщика услуг."
+  },
+  {
+    "id": "salon-complaint",
+    "profile": {"goal":"Как отвечать на жалобы клиентов салона","industry":"услуги"},
+    "relevant_ids": ["customer-support"],
+    "note": "Запрос на работу с жалобами в сфере услуг."
+  },
+  {
+    "id": "service-audio",
+    "profile": {"goal":"Подкаст о клиентском сервисе в салоне","preferred_format":"подкаст"},
+    "relevant_ids": ["customer-support"],
+    "note": "Нужен материал в аудиоформате."
+  },
+  {
+    "id": "crm-automation",
+    "profile": {"goal":"Использовать ChatGPT для автоматизации работы с клиентами"},
+    "relevant_ids": ["ai-automation"],
+    "note": "Явно запрошен материал о применении нейросетей."
+  },
+  {
+    "id": "quality-certification",
+    "profile": {"goal":"Правила сертификации продукции на зарубежном рынке"},
+    "relevant_ids": [],
+    "note": "В размеченном каталоге нет инструкции по зарубежной сертификации."
+  },
+  {
+    "id": "sales-profile-no-query",
+    "profile": {"industry":"услуги","stage":"рост","learning_topic":"продажи","preferred_format":"шаблон"},
+    "relevant_ids": ["marketing-service-leads","sales-funnel"],
+    "note": "Профиль указывает на работу с продажами в сфере услуг."
+  },
+  {
+    "id": "finance-after-marketing",
+    "profile": {"goal":"УЧЕТ денежных потоков","stage":"работающий бизнес","experience":"начинающий"},
+    "history_fixture": "history.demo.json",
+    "relevant_ids": ["finance-cashflow"],
+    "note": "Текущий финансовый запрос важнее прошлой активности в маркетинге."
+  },
+  {
+    "id": "marketing-profile-only",
+    "profile": {"learning_topic":"маркетинг","preferred_format":"статья"},
+    "relevant_ids": ["traffic-ctr","marketing-first-sales"],
+    "note": "Релевантность определяется темой обучения и предпочитаемым форматом."
+  },
+  {
+    "id": "cashflow-template-only",
+    "profile": {"goal":"Только шаблон для учета денежных потоков"},
+    "relevant_ids": ["finance-cashflow"],
+    "note": "Формат ограничен шаблоном, тема связана с денежными потоками."
+  },
+  {
+    "id": "budget-course-practice",
+    "profile": {"goal":"Практический курс о планировании финансового бюджета до 900 рублей","preferred_format":"курс"},
+    "relevant_ids": ["course-budget"],
+    "note": "Цена подходящего курса входит в указанный бюджет."
+  },
+  {
+    "id": "ozon-specific-no-match",
+    "profile": {"goal":"Как настроить комиссии именно на Ozon"},
+    "relevant_ids": [],
+    "note": "Материал про карточку Wildberries не объясняет комиссии Ozon."
   }
 ]

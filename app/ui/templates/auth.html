@@ -19,6 +19,9 @@
                 <h1 id="auth-title">{{ 'Войти в админ-панель' if admin_login else 'Создать аккаунт' if registering else 'Войти в профиль' }}</h1>
                 <p class="auth-hint">{{ 'Введите логин и пароль аккаунта с админ-ролью.' if admin_login else 'Придумайте логин и пароль для демо и заполните параметры бизнеса.' if registering else 'Используйте логин и пароль от демо АльфаХака.' }}</p>
                 {% if error %}<p class="auth-error" role="alert">{{ error }}</p>{% endif %}
+                {% for message in get_flashed_messages(category_filter=['success']) %}
+                <p class="account-notice" role="status">{{ message }}</p>
+                {% endfor %}
                 {% if password_access_allowed %}
                 <form class="auth-form" method="post" action="{{ url_for('accounts.' ~ mode) }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -29,10 +32,10 @@
                             {% if registering %}<small id="username-hint">3–32 символа. Латиница, цифры и . _ -</small>{% endif %}
                         </label>
                         <label for="password">Пароль
-                            <input id="password" name="password" type="password" maxlength="128" required
+                            <input id="password" name="password" type="password" maxlength="{{ password_max }}" required
                                    autocomplete="{{ 'new-password' if registering else 'current-password' }}"
-                                   {% if registering %}minlength="15" aria-describedby="password-hint"{% endif %}>
-                            {% if registering %}<small id="password-hint">От 15 до 128 символов</small>{% endif %}
+                                   {% if registering %}minlength="{{ password_min }}" aria-describedby="password-hint"{% endif %}>
+                            {% if registering %}<small id="password-hint">От {{ password_min }} до {{ password_max }} символов</small>{% endif %}
                         </label>
                     </div>
                     {% if registering %}{% include "profile_fields.html" %}{% endif %}

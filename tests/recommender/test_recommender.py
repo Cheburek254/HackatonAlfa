@@ -4,6 +4,7 @@ from pathlib import Path
 from app.catalog import load_catalog, load_history
 from app.contracts import InteractionEvent, Material, Profile
 from app.recommender import recommend
+from app.recommender.engine import _expand_synonyms, _normalize_text, _tokenize_stems
 
 
 class RecommenderTest(unittest.TestCase):
@@ -14,6 +15,12 @@ class RecommenderTest(unittest.TestCase):
         cls.data_dir = root / "data"
         cls.catalog = load_catalog(cls.fixtures_dir / "catalog.demo.json")
         cls.history = load_history(cls.fixtures_dir / "history.demo.json")
+
+    def test_short_synonym_requires_a_complete_word(self):
+        certification = "Порядок сертификации продукции"
+        self.assertNotIn("chatgpt", _expand_synonyms(_tokenize_stems(certification), _normalize_text(certification)))
+        ai = "Как применить ИИ"
+        self.assertIn("chatgpt", _expand_synonyms(_tokenize_stems(ai), _normalize_text(ai)))
 
     def test_empty_catalog_and_invalid_limits(self):
         self.assertEqual(recommend((), Profile(), (), 3).items, ())

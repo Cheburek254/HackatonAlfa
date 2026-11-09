@@ -1,0 +1,127 @@
+        <section class="results recommendations-results" id="recommendations" aria-labelledby="results-title" data-impression-batch="{{ impression_batch_id }}">
+            <div class="wrap">
+                <div class="results-heading">
+                    <p class="eyebrow">АЛЬФА-КУРС</p>
+                    <h2 id="results-title">Рекомендации для вас</h2>
+                    {% if profile.goal %}<p class="goal-caption">Задача · {{ profile.goal }}</p>{% endif %}
+                    {% set selected_profile = profile_values.values() | select | list %}
+                    {% if selected_profile %}<p class="order-reason">Параметры подбора · {{ selected_profile | join(', ') }}</p>{% endif %}
+                    {% if format_filter == 'all' and result_order == 'recommended' and result.ordering_reason %}
+                    <p class="order-reason">{{ result.ordering_reason }}</p>
+                    {% endif %}
+                </div>
+
+                {% if result.items %}
+                <div class="format-filters-bar" role="group" aria-label="Форматы материалов">
+                    {% for fmt_key, fmt_name in format_filters.items() %}
+                    <button type="submit" form="result-orders" formaction="{{ url_for('index', _anchor='recommendations') }}"
+                            name="selected_format" value="{{ fmt_key }}"
+                            class="format-chip {{ 'active' if format_filter == fmt_key else '' }}"
+                            aria-pressed="{{ 'true' if format_filter == fmt_key else 'false' }}">
+                        {{ fmt_name }}
+                        <span class="format-count">{{ format_counts.get(fmt_key, 0) }}</span>
+                    </button>
+                    {% endfor %}
+                </div>
+                {% endif %}
+                <form class="result-orders" id="result-orders" aria-label="Порядок и размер выдачи" method="post" action="{{ url_for('index', _anchor='recommendations') }}"{% if not result.items %} hidden{% endif %}>
+                    <input type="hidden" name="goal" value="{{ profile.goal or '' }}">
+                    <input type="hidden" name="format_filter" value="{{ format_filter }}">
+                    <input type="hidden" name="current_order" value="{{ result_order }}">
+                    <input type="hidden" name="page_size" value="{{ page_size }}">
+                    {% if impression_batch %}<input type="hidden" name="impression_batch" value="{{ impression_batch }}">{% endif %}
+                    {% if skip_profile %}<input type="hidden" name="action" value="skip_profile">{% endif %}
+                    {% if use_sample_history %}<input type="hidden" name="history" value="sample">{% endif %}
+                    {% for field, value in profile_values.items() %}
+                    <input type="hidden" name="{{ field }}" value="{{ value or '' }}">
+                    {% endfor %}
+                    {% for order, label in result_orders.items() %}
+                    <button class="result-order" type="submit" name="result_order" value="{{ order }}"
+                            aria-pressed="{{ 'true' if result_order == order else 'false' }}">{{ label }}</button>
+                    {% endfor %}
+                    <div class="result-page-sizes" role="group" aria-label="Карточек за раз">
+                        <span>Карточек</span>
+                        {% for size in page_sizes %}
+                        <button class="result-order" type="submit" name="selected_page_size" value="{{ size }}"
+                                aria-pressed="{{ 'true' if page_size == size else 'false' }}">{{ size }}</button>
+                        {% endfor %}
+                    </div>
+                </form>
+                {% if result.items %}
+                {% if result_order != 'recommended' or is_demo_catalog %}
+                <p class="result-metrics-note">
+                    {% if result_order == 'popularity' %}Показаны материалы с данными о популярности.{% endif %}
+                    {% if result_order == 'rating' %}Показаны материалы с оценкой.{% endif %}
+                    {% if is_demo_catalog %}В демо популярность и оценки приведены для примера.{% endif %}
+                </p>
+                {% endif %}
+                {% endif %}
+
+                {% if result.follow_up_question %}
+                <div class="follow-up">
+                    <p>{{ result.follow_up_question }}</p>
+                    <a href="#goal">Уточнить задачу ↑</a>
+                </div>
+                {% endif %}
+
+                {% if cards %}
+                <div class="card-grid" data-impression-url="{{ url_for('recommendation_impressions') }}" data-impression-csrf="{{ csrf_token() }}">
+                    {% for material, item in cards %}
+                    <article class="card" id="result-card-{{ loop.index }}" data-material-id="{{ material.id }}" tabindex="-1">
+                        <div class="card-cover cover-{{ loop.cycle(1, 2, 3) }}">
+                            <div class="cover-labels">
+                                <span class="tag topic">{{ material.topics[0] | capitalize if material.topics else 'Материал' }}</span>
+                                {% if material.access == 'paid' %}<span class="tag paid">{{ '{:,.0f}'.format(material.cost).replace(',', ' ') ~ ' ₽' if material.cost is not none else 'Платно' }}</span>
+                                {% elif material.access == 'free' %}<span class="tag">Бесплатно</span>{% endif %}
+                            </div>
+                            <div class="cover-art" aria-hidden="true"><span></span><span></span><span></span></div>
+                        </div>
+                        <div class="card-content">
+                            <div class="card-meta">
+                                {% set card_format = material_format(material) %}
+                                <span>{{ card_format | capitalize if card_format else 'Материал' }}</span>
+                                {% if loop.first and result_order == 'recommended' %}<span class="first-pick">Начните с этого</span>{% endif %}
+                            </div>
+                            <h3>{{ material.title }}</h3>
+                            {% if material.popularity is not none or material.rating is not none %}
+                            <div class="card-metrics">
+                                {% if material.popularity is not none %}
+                                <span>Популярность · {{ material.popularity | string | replace('.', ',') }}</span>
+                                {% endif %}
+                                {% if material.rating is not none %}
+                                <span>Оценка · {{ material.rating | string | replace('.', ',') }} из 5</span>
+                                {% endif %}
+                            </div>
+                            {% endif %}
+                            <dl class="card-explanation">
+                                <dt>Почему подходит</dt>
+                                <dd>{{ item.reason }}</dd>
+                                <dt>Следующий шаг</dt>
+                                <dd>{{ item.next_step }}</dd>
+                            </dl>
+                            <a class="material-link" href="{{ url_for('material_page', material_id=material.id, impression=impression_tickets[loop.index0]) }}" aria-label="Подробнее: {{ material.title }}">
+                                Подробнее о материале <span aria-hidden="true">→</span>
+                            </a>
+                        </div>
+                    </article>
+                    {% endfor %}
+                </div>
+                <div class="result-pagination">
+                    <p>Показано {{ cards | length }} из {{ total_cards }}</p>
+                    {% if next_page %}
+                    <button class="button button-primary" type="submit" form="result-orders"
+                            formaction="{{ url_for('index', _anchor='result-card-' ~ (cards | length + 1)) }}"
+                            name="show_page" value="{{ next_page }}">Показать больше</button>
+                    {% endif %}
+                </div>
+                {% elif result.items %}
+                {% if format_filter != 'all' and not format_counts.get(format_filter) %}
+                <p class="empty-state">В этой подборке нет материалов выбранного формата. Выберите другой формат или «Все форматы».</p>
+                {% else %}
+                <p class="empty-state">В этой подборке пока нет материалов {{ 'с оценкой' if result_order == 'rating' else 'с данными о популярности' }}. Вернитесь к порядку «По подбору», чтобы увидеть все рекомендации.</p>
+                {% endif %}
+                {% elif not result.follow_up_question %}
+                <p class="empty-state">Подборка пока пуста. <a href="#goal">Попробуйте уточнить задачу.</a></p>
+                {% endif %}
+            </div>
+        </section>

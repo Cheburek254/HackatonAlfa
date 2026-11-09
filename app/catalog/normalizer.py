@@ -605,6 +605,7 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
     norm_materials = [
         {
             "id": m["id"],
+            "entity_type": m["entity_type"],
             "title": m["title"],
             "url": m["url"],
             "description": m["description"],

@@ -21,6 +21,7 @@ class Material:
     popularity: float | None = None
     rating: float | None = None
     cost: float | None = None
+    entity_type: str | None = None
 
 
 @dataclass(frozen=True)

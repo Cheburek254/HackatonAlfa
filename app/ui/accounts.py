@@ -13,7 +13,7 @@ from time import time
 from typing import Literal
 
 from flask import (
-    Blueprint, Flask, abort, current_app, g, redirect, render_template, request, session, url_for,
+    Blueprint, Flask, abort, current_app, flash, g, redirect, render_template, request, session, url_for,
 )
 from flask.sessions import SecureCookieSessionInterface
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -36,7 +36,7 @@ PROFILE_FIELDS = {
 }
 PROFILE_COOKIE = "alfahack_profile"
 LOGIN_PATTERN = re.compile(r"[a-z0-9_.-]{3,32}")
-PASSWORD_MIN_LENGTH = 15
+PASSWORD_MIN_LENGTH = 8
 PASSWORD_MAX_LENGTH = 128
 PASSWORD_METHOD = "scrypt:32768:8:3"
 DUMMY_HASH = generate_password_hash(secrets.token_hex(16), method=PASSWORD_METHOD)
@@ -137,6 +137,7 @@ def configure_accounts(app: Flask, database_path: Path) -> None:
     app.session_interface = AccountSessionInterface()
     app.register_blueprint(auth)
     app.jinja_env.globals["csrf_token"] = csrf_token
+    app.jinja_env.globals.update(password_min=PASSWORD_MIN_LENGTH, password_max=PASSWORD_MAX_LENGTH)
     app.teardown_appcontext(_close_db)
 
     database_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -329,6 +330,12 @@ def recent_interactions(account: sqlite3.Row | None) -> tuple[InteractionEvent, 
     )
 
 
+def clear_interactions(user_id: int) -> int:
+    connection = _db()
+    with connection:
+        return connection.execute("DELETE FROM interaction_events WHERE user_id = ?", (user_id,)).rowcount
+
+
 def account_avatar(account: sqlite3.Row) -> bytes | None:
     details = _db().execute(
         "SELECT avatar FROM account_details WHERE user_id = ?", (account["id"],),
@@ -497,6 +504,47 @@ def demo_login():
     check_csrf()
     account = _db().execute("SELECT id FROM users WHERE username = ?", (DEMO_USERNAME,)).fetchone()
     return _start_session(account["id"])
+
+
+@auth.post("/profile/password")
+def change_password():
+    account = current_account()
+    if account is None:
+        return redirect(url_for("accounts.login"), code=303)
+    if account["username"] == DEMO_USERNAME:
+        abort(403)
+    check_csrf()
+    current = request.form.get("current_password", "")
+    new = request.form.get("new_password", "")
+    destination = url_for("profile_settings", _anchor="password-settings")
+    if not PASSWORD_MIN_LENGTH <= len(new) <= PASSWORD_MAX_LENGTH or new != request.form.get("confirm_password"):
+        flash(f"Введите одинаковый новый пароль длиной от {PASSWORD_MIN_LENGTH} до {PASSWORD_MAX_LENGTH} символов.", "error")
+        return redirect(destination, code=303)
+    attempt_scope = f"password:user:{account['id']}"
+    if not _consume_attempts(((attempt_scope, 8),)):
+        flash("Слишком много попыток. Повторите позже.", "error")
+        return redirect(destination, code=303)
+
+    connection = _db()
+    row = connection.execute("SELECT password_hash FROM users WHERE id = ?", (account["id"],)).fetchone()
+    if not row or not 0 < len(current) <= PASSWORD_MAX_LENGTH or not check_password_hash(row["password_hash"], current):
+        flash("Текущий пароль указан неверно.", "error")
+        return redirect(destination, code=303)
+
+    password_hash = generate_password_hash(new, method=PASSWORD_METHOD)
+    with connection:
+        updated = connection.execute(
+            "UPDATE users SET password_hash = ? WHERE id = ? AND password_hash = ?",
+            (password_hash, account["id"], row["password_hash"]),
+        ).rowcount
+        if not updated:
+            flash("Пароль уже изменился. Откройте форму заново.", "error")
+            return redirect(destination, code=303)
+        connection.execute("DELETE FROM account_sessions WHERE user_id = ?", (account["id"],))
+        connection.execute("DELETE FROM auth_attempts WHERE scope = ?", (attempt_scope,))
+    session.clear()
+    flash("Пароль изменён. Войдите снова.", "success")
+    return redirect(url_for("accounts.login"), code=303)
 
 
 @auth.post("/logout")

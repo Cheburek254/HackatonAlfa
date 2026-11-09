@@ -170,22 +170,33 @@ def _tokenize_stems(text: str) -> set[str]:
     return {_stem_ru(w) for w in tokens}
 
 
+@lru_cache(maxsize=1)
+def _stemmed_synonyms() -> tuple[tuple[tuple[str, ...], ...], ...]:
+    return tuple(tuple(tuple(_stem_ru(word) for word in term.split()) for term in group)
+                 for group in SYNONYM_GROUPS)
+
+
+def _matches_synonym(word: str, synonym: str) -> bool:
+    return word == synonym or (
+        min(len(word), len(synonym)) >= 4 and (word.startswith(synonym) or synonym.startswith(word))
+    )
+
+
 def _expand_synonyms(stems: set[str], raw_norm: str) -> set[str]:
+    query_words = tuple(_stem_ru(word) for word in raw_norm.split())
     expanded = set()
-    for group in SYNONYM_GROUPS:
-        matched = False
-        for g in group:
-            g_stems = {_stem_ru(w) for w in g.split()}
-            if any(s in g_stems or any(s.startswith(w[:4]) or w.startswith(s[:4]) for w in g_stems if len(s) >= 3 and len(w) >= 3) for s in stems):
-                matched = True
+    for group in _stemmed_synonyms():
+        for term in group:
+            if len(term) == 1:
+                matched = any(_matches_synonym(word, term[0]) for word in stems)
+            else:
+                matched = any(
+                    all(_matches_synonym(word, synonym) for word, synonym in zip(query_words[start:], term))
+                    for start in range(len(query_words) - len(term) + 1)
+                )
+            if matched:
+                expanded.update(word for phrase in group for word in phrase)
                 break
-            if g in raw_norm:
-                matched = True
-                break
-        if matched:
-            for g in group:
-                for w in g.split():
-                    expanded.add(_stem_ru(w))
     return expanded
 
 
@@ -430,6 +441,8 @@ def recommend(
     profile: Profile,
     history: Sequence[InteractionEvent],
     limit: int,
+    *,
+    explain_with_llm: bool = True,
 ) -> RecommendationResult:
     """Ранжирует материалы каталога с учётом задачи, профиля, истории и популярности."""
     if not catalog or limit <= 0:
@@ -778,4 +791,4 @@ def recommend(
         ordering_reason=ordering_reason,
         follow_up_question=follow_up,
     )
-    return refine_with_llm_if_configured(selected_materials, profile, draft)
+    return refine_with_llm_if_configured(selected_materials, profile, draft) if explain_with_llm else draft

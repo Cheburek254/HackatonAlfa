@@ -35,8 +35,10 @@ def _read_records(path: Path) -> list[dict]:
         return json.loads(path.read_text(encoding="utf-8"))
     with closing(sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)) as connection:
         connection.row_factory = sqlite3.Row
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(materials)")}
+        entity_type = "entity_type" if "entity_type" in columns else "NULL AS entity_type"
         rows = connection.execute(
-            """SELECT id, title, url, description, format, access, cost, popularity_score, avg_rating,
+            f"""SELECT id, title, url, description, format, access, cost, popularity_score, avg_rating, {entity_type},
                       topics_json, stages_json, industries_json, experience_levels_json
                FROM materials ORDER BY popularity_score DESC, rowid"""
         ).fetchall()
@@ -85,6 +87,7 @@ def load_catalog(path: Path | str | None = None) -> tuple[Material, ...]:
                 popularity=_optional_metric(record.get("popularity", record.get("popularity_score"))),
                 rating=_optional_metric(record.get("rating", record.get("avg_rating")), maximum=5),
                 cost=_optional_metric(record.get("cost")),
+                entity_type=record.get("entity_type"),
             )
         )
     return tuple(materials)

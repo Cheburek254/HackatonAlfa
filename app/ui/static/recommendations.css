@@ -318,6 +318,18 @@ h1 {
 .admin-kpis dd { margin: 6px 0 0; font-size: clamp(25px, 4vw, 43px); font-weight: 800; font-variant-numeric: tabular-nums; }
 .admin-kpis > div:last-child { border-color: #6c3a36; background: #3a2020; }
 .admin-sections { display: grid; gap: 18px; }
+.admin-inline-form { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 14px; }
+.admin-evaluation-details { margin-top: 16px; }
+.admin-evaluation-details summary { cursor: pointer; font-weight: 650; }
+.admin-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+.admin-chart { margin: 0; padding: 14px; border: 1px solid #e7e7eb; border-radius: 12px; color: #ac2920; }
+.admin-chart.chart-clicks { color: #216553; }
+.admin-chart figcaption { color: var(--ink); font-weight: 750; }
+.admin-chart svg { display: block; width: 100%; height: auto; }
+.admin-chart text { fill: #5a5a63; font-size: 13px; }
+.admin-chart-axis { stroke: #dedee3; }
+.admin-chart-line { fill: none; stroke: currentColor; stroke-width: 2.5; }
+.admin-chart-point { fill: currentColor; }
 .admin-table-wrap { margin-top: 21px; overflow-x: auto; border: 1px solid #e7e7eb; border-radius: 12px; }
 .admin-table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
 .admin-table caption { padding: 13px 15px; text-align: left; font-weight: 750; }
@@ -408,6 +420,11 @@ h2 {
     font-weight: 600;
 }
 .result-orders { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+.result-orders[hidden], .recommendation-status:empty { display: none; }
+.recommendation-status { margin-block: 10px; color: #ffb6b0; }
+.result-page-sizes { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-left: auto; font-size: 14px; }
+.result-page-sizes .result-order { min-width: 42px; padding-inline: 8px; }
+#password-settings .button { margin-top: 14px; }
 .result-orders:has(+ .result-metrics-note) { margin-bottom: 0; }
 .result-order {
     min-height: 42px;
@@ -663,7 +680,7 @@ h2 {
     h1 { font-size: clamp(36px, 9.5vw, 48px); }
     .goal-row .button { justify-self: stretch; }
     .auth-shell, .auth-shell-register { grid-template-columns: minmax(0, 1fr); }
-    .admin-forms { grid-template-columns: minmax(0, 1fr); }
+    .admin-forms, .admin-charts { grid-template-columns: minmax(0, 1fr); }
     .admin-kpis { gap: 7px; }
     .admin-kpis dt { font-size: 12px; }
     .auth-welcome { padding: 18px 20px; }
