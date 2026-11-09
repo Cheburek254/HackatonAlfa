@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% set registering = mode == 'register' %}
+{% block title %}{{ 'Регистрация' if registering else 'Вход' }} — Альфа-Курс{% endblock %}
+{% block content %}
+        <section class="hero" aria-labelledby="auth-title">
+            <div class="wrap">
+                <p class="eyebrow"><span></span> АЛЬФА-КУРС</p>
+                <h1 id="auth-title">{{ 'Создать аккаунт' if registering else 'Войти в профиль' }}</h1>
+                <p class="hero-copy">Сохраняйте параметры бизнеса и используйте их при подборе материалов.</p>
+                {% if error %}<p class="auth-error" role="alert">{{ error }}</p>{% endif %}
+                {% if password_access_allowed %}
+                <form class="profile-settings" method="post" action="{{ url_for('accounts.' ~ mode) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="auth-fields">
+                        <label for="username">Логин
+                            <input id="username" name="username" value="{{ username }}" autocomplete="username"
+                                   maxlength="32" required{% if registering %} aria-describedby="username-hint"{% endif %}>
+                            {% if registering %}<small id="username-hint">От 3 до 32 латинских букв, цифр и символов . _ -</small>{% endif %}
+                        </label>
+                        <label for="password">Пароль
+                            <input id="password" name="password" type="password" maxlength="128" required
+                                   autocomplete="{{ 'new-password' if registering else 'current-password' }}"
+                                   {% if registering %}minlength="15" aria-describedby="password-hint"{% endif %}>
+                            {% if registering %}<small id="password-hint">От 15 до 128 символов</small>{% endif %}
+                        </label>
+                    </div>
+                    {% if registering %}{% include "profile_fields.html" %}{% endif %}
+                    <button class="button button-primary" type="submit">{{ 'Зарегистрироваться' if registering else 'Войти' }}</button>
+                </form>
+                {% else %}
+                <p class="profile-status">Вход и регистрация с паролем доступны по HTTPS.</p>
+                {% endif %}
+                <div class="auth-options">
+                    <form method="post" action="{{ url_for('accounts.demo_login') }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="button button-profile" type="submit">Войти в тестовый аккаунт</button>
+                    </form>
+                    {% if password_access_allowed %}
+                    <a href="{{ url_for('accounts.login' if registering else 'accounts.register') }}">{{ 'Уже есть аккаунт' if registering else 'Создать аккаунт' }}</a>
+                    {% endif %}
+                </div>
+            </div>
+        </section>
+{% endblock %}

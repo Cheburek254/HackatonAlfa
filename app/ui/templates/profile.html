@@ -5,8 +5,17 @@
             <div class="wrap">
                 <p class="eyebrow"><span></span> АЛЬФА-КУРС</p>
                 <h1 id="profile-title">Профиль</h1>
-                <p class="hero-copy">Укажите стадию бизнеса, сферу и опыт. Сохранённые параметры будут использоваться при подборе в этом браузере.</p>
+                {% if is_demo %}
+                <p class="hero-copy">Общий тестовый профиль. Эти настройки уже используются в подборе. Параметры можно изменить для отдельного запроса.</p>
+                <dl class="demo-profile profile-settings">
+                    {% for field, (label, _) in profile_fields.items() %}
+                    <div><dt>{{ label }}</dt><dd>{{ profile_values[field] | capitalize }}</dd></div>
+                    {% endfor %}
+                </dl>
+                {% else %}
+                <p class="hero-copy">Аккаунт {{ account.username }}. Параметры из профиля подставляются при подборе материалов.</p>
                 <form class="profile-settings" method="post" action="{{ url_for('profile_page') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     {% include "profile_fields.html" %}
                     <div class="profile-actions">
                         <button class="button button-primary" type="submit">Сохранить профиль</button>
@@ -17,11 +26,16 @@
                         {% endif %}
                     </div>
                 </form>
+                {% endif %}
             </div>
         </section>
         <section class="results">
             <div class="wrap">
                 <a class="profile-back" href="{{ url_for('index') }}">← Вернуться к подборке</a>
+                <form class="logout-form" method="post" action="{{ url_for('accounts.logout') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="button" type="submit">Выйти</button>
+                </form>
             </div>
         </section>
 {% endblock %}

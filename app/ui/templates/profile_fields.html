@@ -2,8 +2,8 @@
     {% for field, (label, options) in profile_fields.items() %}
     <label for="{{ field }}">
         {{ label }}
-        <select name="{{ field }}" id="{{ field }}">
-            <option value="">Любой вариант</option>
+        <select name="{{ field }}" id="{{ field }}"{% if required_profile %} required{% endif %}>
+            <option value="">{{ 'Выберите вариант' if required_profile else 'Любой вариант' }}</option>
             {% for option in options %}
             <option value="{{ option }}"{% if profile_values[field] == option %} selected{% endif %}>{{ option | capitalize }}</option>
             {% endfor %}

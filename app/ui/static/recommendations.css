@@ -101,7 +101,7 @@ h1 {
 }
 .hero-art { display: block; width: 100%; height: auto; margin-top: -24px; }
 .goal-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
-.goal-row input, .profile-fields select {
+.goal-row input, .profile-fields select, .auth-fields input {
     width: 100%;
     min-width: 0;
     border: 1px solid #474747;
@@ -144,6 +144,21 @@ h1 {
 .profile-fields select { min-height: 42px; margin-top: 6px; padding: 6px 7px; }
 .profile-settings { max-width: 650px; }
 .profile-status { color: #dddde0; font-size: 14px; }
+.auth-fields, .demo-profile {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin-block: 14px;
+}
+.auth-fields label, .demo-profile dt { color: #dddde0; font-size: 13px; }
+.auth-fields input { min-height: 42px; margin-block: 6px; padding: 6px 9px; }
+.auth-fields small { display: block; color: #b6b6bd; }
+.auth-options { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin-top: 16px; }
+.auth-error { color: #ffa69f; }
+.demo-profile > div { padding: 12px; border: 1px solid #474747; border-radius: 8px; }
+.demo-profile dd { margin: 5px 0 0; font-weight: 650; }
+.logout-form { display: inline-block; margin-left: 12px; }
+.logout-form .button { color: var(--ink); background: #e6e6ea; }
 .profile-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; }
 .history-option { display: inline-flex; align-items: center; gap: 7px; color: #d8d8da; font-size: 13px; }
 .history-option input { accent-color: var(--brand); }
@@ -282,7 +297,7 @@ h2 {
     .hero-break { display: none; }
     h1 { font-size: clamp(36px, 9.5vw, 48px); }
     .goal-row .button { justify-self: stretch; }
-    .profile-fields, .card-grid { grid-template-columns: minmax(0, 1fr); }
+    .profile-fields, .auth-fields, .demo-profile, .card-grid { grid-template-columns: minmax(0, 1fr); }
     .results { padding-block: 34px 36px; border-radius: 24px 24px 0 0; }
     .footer-content { align-items: start; justify-content: center; flex-direction: column; gap: 5px; padding-block: 13px; }
 }

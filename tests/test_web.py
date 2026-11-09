@@ -1,13 +1,40 @@
+import json
+import sqlite3
 import unittest
+from contextlib import closing
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from app.contracts import Profile, Recommendation, RecommendationResult
 from app.ui.web import create_app
 
 
 class WebFlowTest(unittest.TestCase):
+    business = {
+        "stage": "рост", "industry": "производство", "experience": "опытный",
+        "team_size": "6–15 человек", "learning_topic": "финансы", "preferred_format": "шаблон",
+    }
+    password = "A long test passphrase!"
+
     def setUp(self):
         self.calls = []
-        self.client = create_app(self.recommend).test_client()
+        directory = self.enterContext(TemporaryDirectory())
+        self.database_path = Path(directory) / "accounts.sqlite3"
+        self.app = create_app(self.recommend, database_path=self.database_path)
+        self.client = self.app.test_client()
+
+    def post_form(self, path, data, *, client=None, page=None):
+        client = client or self.client
+        client.get(page or path)
+        with client.session_transaction() as browser_session:
+            token = browser_session["csrf"]
+        return client.post(path, data={**data, "csrf_token": token})
+
+    def register(self, username="owner", business=None):
+        return self.post_form("/register", {
+            "username": username, "password": self.password,
+            **(self.business if business is None else business),
+        })
 
     def recommend(self, catalog, profile, history, limit):
         self.calls.append((profile, history, limit))
@@ -53,31 +80,71 @@ class WebFlowTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.calls[-1], (Profile(goal="Найти клиентов"), (), 3))
 
-    def test_saved_profile_is_used_for_new_recommendations_in_this_browser(self):
-        response = self.client.post("/profile", data={
-            "stage": "рост",
-            "industry": "розница",
-            "experience": "опытный",
-        }, follow_redirects=True)
-
-        self.assertIn("Профиль сохранён.", response.get_data(as_text=True))
-        self.client.get("/")
-        self.assertEqual(self.calls[-1][0], Profile("рост", "розница", experience="опытный"))
-        self.client.post("/", data={"goal": "Продвижение"})
-        self.assertEqual(self.calls[-1][0], Profile("рост", "розница", "Продвижение", "опытный"))
-        self.client.application.test_client().get("/")
+    def test_account_profile_survives_restart_and_is_isolated(self):
+        self.assertEqual(self.register().status_code, 303)
+        updated = {**self.business, "stage": "запуск", "industry": "логистика"}
+        self.assertEqual(self.post_form("/profile", updated).status_code, 303)
+        restarted = create_app(self.recommend, database_path=self.database_path)
+        fresh = restarted.test_client()
+        fresh.get("/")
         self.assertEqual(self.calls[-1][0], Profile())
 
+        signed_in = self.post_form("/login", {
+            "username": "OWNER", "password": self.password,
+        }, client=fresh)
+        self.assertEqual(signed_in.status_code, 303)
+        fresh.post("/", data={"goal": "Продвижение"})
+        self.assertEqual(self.calls[-1][0], Profile(goal="Продвижение", **updated))
+        with closing(sqlite3.connect(self.database_path)) as connection:
+            stored_hash = connection.execute(
+                "SELECT password_hash FROM users WHERE username = ?", ("owner",)
+            ).fetchone()[0]
+        self.assertTrue(stored_hash.startswith("scrypt:"))
+        self.assertNotIn(self.password, stored_hash)
+
     def test_one_off_selection_and_skip_keep_the_saved_profile(self):
-        self.client.post("/profile", data={"stage": "рост", "industry": "услуги"})
+        self.assertEqual(self.register().status_code, 303)
 
         self.client.post("/", data={"stage": "запуск", "industry": ""})
-        self.assertEqual(self.calls[-1][0], Profile(stage="запуск"))
+        temporary = {**self.business, "stage": "запуск", "industry": None}
+        self.assertEqual(self.calls[-1][0], Profile(**temporary))
         self.client.post("/", data={"action": "skip_profile"})
         self.assertEqual(self.calls[-1][0], Profile())
         self.client.get("/")
-        self.assertEqual(self.calls[-1][0], Profile(stage="рост", industry="услуги"))
+        self.assertEqual(self.calls[-1][0], Profile(**self.business))
 
-        self.client.post("/profile", data={})
+        self.assertEqual(self.post_form("/profile", {}).status_code, 303)
         self.client.get("/")
         self.assertEqual(self.calls[-1][0], Profile())
+
+    def test_shared_demo_can_be_used_but_not_edited(self):
+        second_browser = self.app.test_client()
+        for client in (self.client, second_browser):
+            response = self.post_form("/login/demo", {}, client=client, page="/login")
+            self.assertEqual(response.status_code, 303)
+            client.get("/")
+            self.assertEqual(self.calls[-1][0], Profile(
+                stage="рост", industry="розница", experience="опытный", team_size="2–5 человек",
+                learning_topic="продажи", preferred_format="курс",
+            ))
+        self.assertEqual(self.post_form("/profile", self.business).status_code, 403)
+        with closing(sqlite3.connect(self.database_path)) as connection:
+            self.assertEqual(connection.execute("SELECT username FROM users").fetchall(), [("demo",)])
+        self.assertEqual(self.post_form("/logout", {}, page="/profile").status_code, 303)
+        self.assertEqual(self.client.get("/profile").location, "/login")
+
+    def test_registration_requires_profile_and_csrf_and_keeps_legacy_values(self):
+        self.client.set_cookie("alfahack_profile", json.dumps({"industry": "услуги"}))
+        page = self.client.get("/register").get_data(as_text=True)
+        self.assertIn('value="услуги" selected', page)
+        self.assertEqual(self.client.post("/register", data=self.business).status_code, 400)
+        self.assertEqual(self.register(business={"industry": "услуги"}).status_code, 400)
+        self.assertEqual(self.register(username="demo").status_code, 409)
+
+    def test_password_form_requires_https_for_a_public_host(self):
+        public = "http://demo.example"
+        page = self.client.get("/login", base_url=public).get_data(as_text=True)
+        self.assertIn("Войти в тестовый аккаунт", page)
+        self.assertNotIn('name="password"', page)
+        response = self.client.post("/login", base_url=public, data={"password": self.password})
+        self.assertEqual(response.status_code, 403)

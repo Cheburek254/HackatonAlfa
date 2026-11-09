@@ -26,6 +26,9 @@ class Profile:
     industry: str | None = None
     goal: str | None = None
     experience: str | None = None
+    team_size: str | None = None
+    learning_topic: str | None = None
+    preferred_format: str | None = None
 
 
 @dataclass(frozen=True)
