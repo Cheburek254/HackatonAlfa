@@ -7,6 +7,12 @@ from pathlib import Path
 from app.contracts import InteractionEvent, Material
 
 
+def _optional_metric(value: object, *, maximum: float | None = None) -> float | None:
+    if type(value) not in (int, float) or not 0 <= value < float("inf"):
+        return None
+    return value if maximum is None or value <= maximum else None
+
+
 def load_catalog(path: Path) -> tuple[Material, ...]:
     """Загрузить нормализованный JSON-каталог, включая стартовую фикстуру."""
     records = json.loads(path.read_text(encoding="utf-8"))
@@ -22,6 +28,8 @@ def load_catalog(path: Path) -> tuple[Material, ...]:
             stages=tuple(record.get("stages", [])),
             industries=tuple(record.get("industries", [])),
             experience_levels=tuple(record.get("experience_levels", [])),
+            popularity=_optional_metric(record.get("popularity")),
+            rating=_optional_metric(record.get("rating"), maximum=5),
         )
         for record in records
     )

@@ -8,6 +8,7 @@
                     <p class="hero-copy">Опишите задачу, и мы предложим материалы, с которых можно начать.</p>
 
                     <form method="post" action="{{ url_for('index', _anchor='recommendations') }}">
+                        <input type="hidden" name="result_order" value="{{ result_order }}">
                         <label class="sr-only" for="goal">Текущая задача</label>
                         <div class="goal-row">
                             <input id="goal" name="goal" type="text" maxlength="{{ goal_max_length }}"
@@ -50,8 +51,31 @@
                     {% if profile.goal %}<p class="goal-caption">Задача · {{ profile.goal }}</p>{% endif %}
                     {% set selected_profile = profile_values.values() | select | list %}
                     {% if selected_profile %}<p class="order-reason">Параметры подбора · {{ selected_profile | join(', ') }}</p>{% endif %}
-                    {% if result.ordering_reason %}<p class="order-reason">{{ result.ordering_reason }}</p>{% endif %}
+                    {% if result_order == 'recommended' and result.ordering_reason %}
+                    <p class="order-reason">{{ result.ordering_reason }}</p>
+                    {% endif %}
                 </div>
+
+                {% if result.items %}
+                <form class="result-orders" id="result-orders" aria-label="Порядок выдачи" method="post" action="{{ url_for('index', _anchor='recommendations') }}">
+                    <input type="hidden" name="goal" value="{{ profile.goal or '' }}">
+                    <input type="hidden" name="current_order" value="{{ result_order }}">
+                    {% if skip_profile %}<input type="hidden" name="action" value="skip_profile">{% endif %}
+                    {% if use_sample_history %}<input type="hidden" name="history" value="sample">{% endif %}
+                    {% for field, value in profile_values.items() %}
+                    <input type="hidden" name="{{ field }}" value="{{ value or '' }}">
+                    {% endfor %}
+                    {% for order, label in result_orders.items() %}
+                    <button class="result-order" type="submit" name="result_order" value="{{ order }}"
+                            aria-pressed="{{ 'true' if result_order == order else 'false' }}">{{ label }}</button>
+                    {% endfor %}
+                </form>
+                <p class="result-metrics-note">
+                    {% if result_order == 'popularity' %}Показаны материалы с данными о популярности.{% endif %}
+                    {% if result_order == 'rating' %}Показаны материалы с оценкой.{% endif %}
+                    В демо популярность и оценки приведены для примера.
+                </p>
+                {% endif %}
 
                 {% if result.follow_up_question %}
                 <div class="follow-up">
@@ -63,8 +87,8 @@
                 {% if cards %}
                 <div class="card-grid">
                     {% for material, item in cards %}
-                    <article class="card">
-                        <div class="card-cover cover-{{ loop.index }}">
+                    <article class="card" id="result-card-{{ loop.index }}" tabindex="-1">
+                        <div class="card-cover cover-{{ loop.cycle(1, 2, 3) }}">
                             <div class="cover-labels">
                                 <span class="tag topic">{{ material.topics[0] | capitalize if material.topics else 'Материал' }}</span>
                                 {% if material.access == 'paid' %}<span class="tag paid">Платно</span>
@@ -75,9 +99,19 @@
                         <div class="card-content">
                             <div class="card-meta">
                                 <span>{{ material.format | capitalize if material.format else 'Материал' }}</span>
-                                {% if loop.first %}<span class="first-pick">Начните с этого</span>{% endif %}
+                                {% if loop.first and result_order == 'recommended' %}<span class="first-pick">Начните с этого</span>{% endif %}
                             </div>
                             <h3>{{ material.title }}</h3>
+                            {% if material.popularity is not none or material.rating is not none %}
+                            <div class="card-metrics">
+                                {% if material.popularity is not none %}
+                                <span>Популярность · {{ material.popularity | string | replace('.', ',') }}</span>
+                                {% endif %}
+                                {% if material.rating is not none %}
+                                <span>Оценка · {{ material.rating | string | replace('.', ',') }} из 5</span>
+                                {% endif %}
+                            </div>
+                            {% endif %}
                             <dl class="card-explanation">
                                 <dt>Почему подходит</dt>
                                 <dd>{{ item.reason }}</dd>
@@ -91,6 +125,16 @@
                     </article>
                     {% endfor %}
                 </div>
+                <div class="result-pagination">
+                    <p>Показано {{ cards | length }} из {{ total_cards }}</p>
+                    {% if next_page %}
+                    <button class="button button-primary" type="submit" form="result-orders"
+                            formaction="{{ url_for('index', _anchor='result-card-' ~ (cards | length + 1)) }}"
+                            name="show_page" value="{{ next_page }}">Показать больше</button>
+                    {% endif %}
+                </div>
+                {% elif result.items %}
+                <p class="empty-state">В этой подборке пока нет материалов {{ 'с оценкой' if result_order == 'rating' else 'с данными о популярности' }}. Вернитесь к порядку «По подбору», чтобы увидеть все рекомендации.</p>
                 {% elif not result.follow_up_question %}
                 <p class="empty-state">Подборка пока пуста. <a href="#goal">Попробуйте уточнить задачу.</a></p>
                 {% endif %}

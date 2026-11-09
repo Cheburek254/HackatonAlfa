@@ -18,6 +18,12 @@ from app.ui.stub import recommend
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 QUICK_GOALS = ("Найти первых клиентов", "Увеличить продажи", "Разобраться в учёте")
 GOAL_MAX_LENGTH = 200
+RESULTS_PER_PAGE = 6
+RESULT_ORDERS = {
+    "recommended": "По подбору",
+    "popularity": "По популярности",
+    "rating": "По оценке",
+}
 IDENTITY_FIELDS = {
     "first_name": ("Имя", 60, "given-name"),
     "last_name": ("Фамилия", 60, "family-name"),
@@ -163,8 +169,16 @@ def create_app(recommender: Recommender = recommend, *, database_path: Path | No
         history = sample_history if use_sample_history else ()
         if not skip_profile and not allow_sample_history:
             history = recent_interactions(account)
-        result = recommender(catalog, profile, history, 3)
+        result = recommender(catalog, profile, history, len(catalog))
+        result_order = form.get("result_order", form.get("current_order", "recommended"))
+        if result_order not in RESULT_ORDERS:
+            result_order = "recommended"
         cards = [(materials_by_id[item.material_id], item) for item in result.items]
+        if result_order != "recommended":
+            cards = [card for card in cards if getattr(card[0], result_order) is not None]
+            cards.sort(key=lambda card: getattr(card[0], result_order), reverse=True)
+        page = max(1, form.get("show_page", default=1, type=int))
+        visible_cards = cards[:page * RESULTS_PER_PAGE]
         return render_template(
             "recommendations.html",
             profile=profile,
@@ -175,8 +189,13 @@ def create_app(recommender: Recommender = recommend, *, database_path: Path | No
             goal_max_length=GOAL_MAX_LENGTH,
             allow_sample_history=allow_sample_history,
             use_sample_history=use_sample_history,
+            skip_profile=skip_profile,
+            result_order=result_order,
+            result_orders=RESULT_ORDERS,
             result=result,
-            cards=cards,
+            cards=visible_cards,
+            total_cards=len(cards),
+            next_page=page + 1 if len(visible_cards) < len(cards) else None,
         )
 
     return app

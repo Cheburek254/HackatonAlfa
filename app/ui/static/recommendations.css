@@ -270,6 +270,22 @@ h2 {
 }
 .goal-caption, .order-reason { margin: 8px 0 0; color: var(--muted); line-height: 1.5; }
 .goal-caption { color: var(--ink); font-weight: 650; }
+.result-orders { display: flex; flex-wrap: wrap; gap: 8px; }
+.result-order {
+    min-height: 42px;
+    padding: 7px 14px;
+    border: 1px solid #d4d4db;
+    border-radius: 22px;
+    background: #fff;
+    color: var(--ink);
+    font-size: 14px;
+    font-weight: 650;
+}
+.result-order:hover { border-color: #85858d; }
+.result-order[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: #fff; }
+.result-metrics-note { margin: 8px 0 20px; color: var(--muted); font-size: 13px; }
+.result-pagination { display: grid; justify-items: center; gap: 10px; margin-top: 22px; }
+.result-pagination p { margin: 0; color: var(--muted); font-size: 14px; }
 .follow-up, .empty-state {
     margin: 0 0 18px;
     padding: 14px 18px;
@@ -335,6 +351,8 @@ h2 {
 .card-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; color: var(--muted); font-size: 12px; }
 .first-pick { color: #b22920; font-weight: 750; }
 .card h3 { margin: 8px 0 13px; font-size: 20px; line-height: 1.2; letter-spacing: -.015em; }
+.card-metrics { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 12px; }
+.card-metrics span { padding: 4px 7px; border-radius: 6px; background: #f1f1f3; color: #45454c; font-size: 12px; }
 .card-explanation { margin: 0 0 15px; }
 .card-explanation dt { margin: 0 0 3px; font-size: 12px; font-weight: 750; }
 .card-explanation dd { margin: 0 0 8px; color: var(--muted); font-size: 14px; line-height: 1.38; overflow-wrap: anywhere; }

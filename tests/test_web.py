@@ -1,14 +1,16 @@
 import json
+import re
 import sqlite3
 import unittest
 from contextlib import closing
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from PIL import Image
 
-from app.contracts import Profile, Recommendation, RecommendationResult
+from app.contracts import Material, Profile, Recommendation, RecommendationResult
 from app.ui.web import create_app
 
 
@@ -48,7 +50,7 @@ class WebFlowTest(unittest.TestCase):
         response = self.client.get("/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(self.calls, [(Profile(), (), 3)])
+        self.assertEqual(self.calls, [(Profile(), (), 7)])
         page = response.get_data(as_text=True)
         self.assertIn("Сначала вводный материал", page)
         self.assertIn("Подходит для старта", page)
@@ -70,7 +72,7 @@ class WebFlowTest(unittest.TestCase):
         profile, history, limit = self.calls[-1]
         self.assertEqual(profile, Profile("рост", "розница", "Увеличить продажи", "опытный"))
         self.assertEqual({event.kind for event in history}, {"view", "click", "complete"})
-        self.assertEqual(limit, 3)
+        self.assertEqual(limit, 7)
 
     def test_skip_profile_keeps_the_goal_and_clears_history(self):
         response = self.client.post("/", data={
@@ -81,7 +83,67 @@ class WebFlowTest(unittest.TestCase):
         })
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(self.calls[-1], (Profile(goal="Найти клиентов"), (), 3))
+        self.assertEqual(self.calls[-1], (Profile(goal="Найти клиентов"), (), 7))
+
+    def test_result_order_keeps_the_full_selection_and_sorts_only_measured_cards(self):
+        client = create_app(database_path=self.database_path).test_client()
+
+        def card_ids(html):
+            return re.findall(r'class="material-link" href="/materials/([^"/]+)"', html)
+
+        initial = client.get("/").get_data(as_text=True)
+        default = card_ids(initial)
+        self.assertEqual(len(default), 6)
+        self.assertIn("Показано 6 из 7", initial)
+        self.assertIn("Показать больше", initial)
+        expanded = client.post("/", data={"show_page": 2}).get_data(as_text=True)
+        self.assertEqual(card_ids(expanded), [*default, "operations-week-plan"])
+        self.assertNotIn("Показать больше", expanded)
+
+        popularity = client.post("/", data={"result_order": "popularity"}).get_data(as_text=True)
+        self.assertEqual(card_ids(popularity), [
+            "marketing-first-sales", "finance-cashflow", "marketing-service-leads",
+            "marketing-repeat-sales", "start-checklist", "finance-profitability",
+        ])
+        self.assertRegex(popularity, r'value="popularity"\s+aria-pressed="true"')
+        self.assertNotIn("Начните с этого", popularity)
+
+        rating = client.post("/", data={"result_order": "rating"}).get_data(as_text=True)
+        self.assertEqual(card_ids(rating), [
+            "marketing-repeat-sales", "finance-cashflow", "start-checklist",
+            "marketing-service-leads", "marketing-first-sales", "finance-profitability",
+        ])
+        self.assertIn("Оценка · 4,9 из 5", rating)
+        self.assertEqual(card_ids(client.post("/", data={
+            "result_order": "invalid",
+        }).get_data(as_text=True)), default)
+
+        selection = client.post("/", data={
+            "goal": "Учёт", "stage": "рост", "history": "sample",
+        }).get_data(as_text=True)
+        orders = re.search(r'<form class="result-orders".*?</form>', selection, re.DOTALL).group()
+        self.assertIn('name="goal" value="Учёт"', orders)
+        self.assertIn('name="stage" value="рост"', orders)
+        self.assertIn('name="history" value="sample"', orders)
+
+    def test_show_more_appends_six_sorted_cards_until_the_selection_ends(self):
+        catalog = tuple(
+            Material(f"item-{index}", f"Материал {index}", "https://example.com", popularity=index)
+            for index in range(1, 15)
+        )
+        with patch("app.ui.web.load_catalog", return_value=catalog):
+            client = create_app(database_path=self.database_path).test_client()
+
+        first_page = client.post("/", data={"result_order": "popularity"}).get_data(as_text=True)
+        self.assertIn('formaction="/#result-card-7"', first_page)
+        self.assertIn('name="current_order" value="popularity"', first_page)
+        for page, count in ((1, 6), (2, 12), (3, 14)):
+            html = first_page if page == 1 else client.post("/", data={
+                "current_order": "popularity", "show_page": page,
+            }).get_data(as_text=True)
+            ids = re.findall(r'class="material-link" href="/materials/item-(\d+)"', html)
+            self.assertEqual([int(item) for item in ids], list(range(14, 14 - count, -1)))
+            self.assertEqual("Показать больше" in html, count < 14)
 
     def test_material_history_is_persistent_and_isolated_by_account(self):
         self.assertEqual(self.register().status_code, 303)

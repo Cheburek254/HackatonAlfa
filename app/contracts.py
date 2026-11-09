@@ -18,6 +18,8 @@ class Material:
     stages: tuple[str, ...] = ()
     industries: tuple[str, ...] = ()
     experience_levels: tuple[str, ...] = ()
+    popularity: float | None = None
+    rating: float | None = None
 
 
 @dataclass(frozen=True)
