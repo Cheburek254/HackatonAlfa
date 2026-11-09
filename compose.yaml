@@ -1,0 +1,8 @@
+name: alfahack-demo
+
+services:
+  web:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:${APP_PUBLIC_PORT:-18081}:8080"

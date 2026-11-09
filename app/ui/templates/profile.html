@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Профиль — Альфа-Курс{% endblock %}
+{% block content %}
+        <section class="hero" aria-labelledby="profile-title">
+            <div class="wrap">
+                <p class="eyebrow"><span></span> АЛЬФА-КУРС</p>
+                <h1 id="profile-title">Профиль</h1>
+                <p class="hero-copy">Здесь появятся сведения о вашем бизнесе и учебные интересы.</p>
+            </div>
+        </section>
+        <section class="results">
+            <div class="wrap">
+                <a class="profile-back" href="{{ url_for('index') }}">← Вернуться к подборке</a>
+            </div>
+        </section>
+{% endblock %}

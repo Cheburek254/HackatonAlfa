@@ -1,0 +1,7 @@
+*
+!requirements.txt
+!app/
+!app/**
+!fixtures/
+!fixtures/*.json
+**/__pycache__/

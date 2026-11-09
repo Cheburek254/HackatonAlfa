@@ -1,27 +1,5 @@
-<!doctype html>
-<html lang="ru">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#111111">
-    <title>Подборка для бизнеса — Альфа-Курс</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='recommendations.css') }}">
-</head>
-<body>
-    <header class="site-header">
-        <div class="wrap masthead">
-            <a class="wordmark" href="{{ url_for('index') }}">
-                <svg viewBox="0 0 32 28" width="32" height="28" aria-hidden="true">
-                    <path fill="currentColor" d="M16 2 31 9.5 16 17 1 9.5 16 2Zm-9 13 9 4.5 9-4.5v6l-9 5-9-5v-6Z"/>
-                    <path d="M29 11v8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-                <span>Альфа-Курс</span>
-            </a>
-            <span class="demo-label">Демо подбора</span>
-        </div>
-    </header>
-
-    <main>
+{% extends "base.html" %}
+{% block content %}
         <section class="hero" aria-labelledby="hero-title">
             <div class="wrap hero-layout">
                 <div class="hero-content">
@@ -126,13 +104,4 @@
                 {% endif %}
             </div>
         </section>
-    </main>
-
-    <footer class="site-footer">
-        <div class="wrap footer-content">
-            <span>Альфа-Курс <span class="footer-dot">·</span> Демо подбора</span>
-            <span>Демонстрационные материалы и ссылки</span>
-        </div>
-    </footer>
-</body>
-</html>
+{% endblock %}

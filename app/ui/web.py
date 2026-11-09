@@ -29,6 +29,10 @@ def create_app(recommender: Recommender = recommend) -> Flask:
     def health():
         return {"status": "ok"}
 
+    @app.get("/profile")
+    def profile_page():
+        return render_template("profile.html")
+
     @app.route("/", methods=["GET", "POST"])
     def index():
         form = request.form
