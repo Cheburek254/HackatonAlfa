@@ -1,4 +1,11 @@
 server {
+    listen 127.0.0.1:8081;
+    location = /health {
+        return 204;
+    }
+}
+
+server {
     listen 80;
     return 302 https://${ALFA_HTTPS_HOST}:${ALFA_HTTPS_PORT}$request_uri;
 }

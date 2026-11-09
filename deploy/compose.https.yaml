@@ -22,6 +22,11 @@ services:
     depends_on:
       web:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
     ports:
       - "${APP_PUBLIC_PORT:-18081}:80"
       - "${ALFA_HTTPS_PORT:-18443}:443"
