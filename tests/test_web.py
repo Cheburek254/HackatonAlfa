@@ -54,7 +54,7 @@ class WebFlowTest(unittest.TestCase):
         self.assertIn("Подходит для старта", page)
         self.assertIn("Сверьте план запуска", page)
         self.assertIn("Что уже сделали?", page)
-        self.assertIn("https://example.com/alfakurs-demo/start-checklist", page)
+        self.assertIn('href="/materials/start-checklist"', page)
 
     def test_quick_goal_and_sample_history_reach_recommend(self):
         response = self.client.post("/", data={
@@ -82,6 +82,54 @@ class WebFlowTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.calls[-1], (Profile(goal="Найти клиентов"), (), 3))
+
+    def test_material_history_is_persistent_and_isolated_by_account(self):
+        self.assertEqual(self.register().status_code, 303)
+        material = "/materials/start-checklist"
+        self.client.get("/")
+        self.client.head(material)
+        self.client.get(material, headers={"Sec-Purpose": "prefetch"})
+        self.assertEqual(self.client.post(f"{material}/open").status_code, 400)
+        self.assertEqual(self.client.get("/materials/missing").status_code, 404)
+        self.client.get("/")
+        self.assertEqual(self.calls[-1][1], ())
+
+        result = self.post_form(f"{material}/open", {}, page=material)
+        self.assertEqual(result.status_code, 303)
+        self.assertEqual(result.location, "https://example.com/alfakurs-demo/start-checklist")
+        self.client.get(material)
+        with closing(sqlite3.connect(self.database_path)) as connection:
+            events = connection.execute("SELECT kind FROM interaction_events ORDER BY id").fetchall()
+        self.assertEqual(events, [("view",), ("click",), ("view",)])
+
+        other = create_app(self.recommend, database_path=self.database_path).test_client()
+        self.assertEqual(self.post_form("/register", {
+            **self.business, "username": "other", "password": self.password,
+        }, client=other).status_code, 303)
+        other.get("/")
+        self.assertEqual(self.calls[-1][1], ())
+        self.assertEqual(self.post_form("/login", {
+            "username": "owner", "password": self.password,
+        }, client=other).status_code, 303)
+        response = other.post("/", data={"history": "sample"})
+        history = self.calls[-1][1]
+        self.assertEqual({(event.material_id, event.kind) for event in history}, {
+            ("start-checklist", "view"), ("start-checklist", "click"),
+        })
+        self.assertTrue(all(event.occurred_at.tzinfo for event in history))
+        self.assertNotIn('name="history"', response.get_data(as_text=True))
+        other.post("/", data={"action": "skip_profile"})
+        self.assertEqual(self.calls[-1][1], ())
+        other.get("/")
+        self.assertEqual(self.calls[-1][1], history)
+
+        demo = self.app.test_client()
+        self.post_form("/login/demo", {}, page="/login", client=demo)
+        self.assertEqual(self.post_form(f"{material}/open", {}, page=material, client=demo).status_code, 303)
+        demo.get("/")
+        self.assertEqual(self.calls[-1][1], ())
+        with closing(sqlite3.connect(self.database_path)) as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM interaction_events").fetchone()[0], 3)
 
     def test_account_profile_survives_restart_and_is_isolated(self):
         self.assertEqual(self.register().status_code, 303)

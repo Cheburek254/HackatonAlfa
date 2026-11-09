@@ -24,10 +24,12 @@
                             <summary>Уточнить подборку <span>· необязательно</span></summary>
                             {% include "profile_fields.html" %}
                             <div class="profile-actions">
+                                {% if allow_sample_history %}
                                 <label class="history-option">
-                                    <input type="checkbox" name="history" value="sample"{% if use_history %} checked{% endif %}>
+                                    <input type="checkbox" name="history" value="sample"{% if use_sample_history %} checked{% endif %}>
                                     Учесть пример истории просмотров
                                 </label>
+                                {% endif %}
                                 <div class="profile-buttons">
                                     <button class="skip-button" type="submit" name="action" value="skip_profile">Пропустить</button>
                                     <button class="button button-profile" type="submit">Обновить подборку</button>
@@ -82,8 +84,8 @@
                                 <dt>Следующий шаг</dt>
                                 <dd>{{ item.next_step }}</dd>
                             </dl>
-                            <a class="material-link" href="{{ material.url }}" aria-label="Открыть материал: {{ material.title }}">
-                                Открыть материал <span aria-hidden="true">↗</span>
+                            <a class="material-link" href="{{ url_for('material_page', material_id=material.id) }}" aria-label="Подробнее: {{ material.title }}">
+                                Подробнее о материале <span aria-hidden="true">→</span>
                             </a>
                         </div>
                     </article>

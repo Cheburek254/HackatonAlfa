@@ -6,16 +6,19 @@ import re
 import secrets
 import sqlite3
 from collections.abc import Mapping
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
 from time import time
+from typing import Literal
 
 from flask import (
     Blueprint, Flask, abort, current_app, g, redirect, render_template, request, session, url_for,
 )
 from flask.sessions import SecureCookieSessionInterface
 from werkzeug.security import check_password_hash, generate_password_hash
+
+from app.contracts import InteractionEvent
 
 PROFILE_FIELDS = {
     "stage": ("Стадия бизнеса", ("идея", "запуск", "работающий бизнес", "рост")),
@@ -37,6 +40,8 @@ PASSWORD_METHOD = "scrypt:32768:8:3"
 DUMMY_HASH = generate_password_hash(secrets.token_hex(16), method=PASSWORD_METHOD)
 ATTEMPT_WINDOW = 600
 SESSION_LIFETIME = timedelta(days=7)
+HISTORY_WINDOW = timedelta(days=90)
+HISTORY_LIMIT = 100
 DEMO_USERNAME = "demo"
 auth = Blueprint("accounts", __name__)
 
@@ -71,6 +76,14 @@ CREATE TABLE IF NOT EXISTS account_sessions (
     expires INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS account_sessions_expires ON account_sessions (expires);
+CREATE TABLE IF NOT EXISTS interaction_events (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    material_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('view', 'click')),
+    occurred_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS interaction_events_user_time ON interaction_events (user_id, occurred_at DESC);
 """
 
 INSERT_USER = """
@@ -185,6 +198,36 @@ def saved_profile(account: sqlite3.Row | None) -> dict[str, str | None]:
     if account is not None:
         return profile_values(dict(account))
     return legacy_profile()
+
+
+def record_interaction(
+    account: sqlite3.Row | None, material_id: str, kind: Literal["view", "click"],
+) -> None:
+    if account is None or account["username"] == DEMO_USERNAME:
+        return
+    connection = _db()
+    with connection:
+        connection.execute(
+            "INSERT INTO interaction_events (user_id, material_id, kind, occurred_at) VALUES (?, ?, ?, ?)",
+            (account["id"], material_id, kind, int(time())),
+        )
+
+
+def recent_interactions(account: sqlite3.Row | None) -> tuple[InteractionEvent, ...]:
+    if account is None or account["username"] == DEMO_USERNAME:
+        return ()
+    cutoff = int(time() - HISTORY_WINDOW.total_seconds())
+    rows = _db().execute(
+        """SELECT material_id, kind, MAX(occurred_at) AS latest_at
+           FROM interaction_events WHERE user_id = ? AND occurred_at >= ?
+           GROUP BY material_id, kind
+           ORDER BY latest_at DESC, MAX(id) DESC LIMIT ?""",
+        (account["id"], cutoff, HISTORY_LIMIT),
+    )
+    return tuple(
+        InteractionEvent(row["material_id"], row["kind"], datetime.fromtimestamp(row["latest_at"], UTC))
+        for row in rows
+    )
 
 
 def account_avatar(account: sqlite3.Row) -> bytes | None:

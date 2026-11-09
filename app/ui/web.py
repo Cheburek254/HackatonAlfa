@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from flask import Flask, Response, abort, redirect, render_template, request, url_for
 
@@ -9,7 +10,7 @@ from app.catalog import load_catalog, load_history
 from app.contracts import Profile, Recommender
 from app.ui.accounts import (
     DEMO_USERNAME, PROFILE_FIELDS, account_avatar, check_csrf, configure_accounts, current_account,
-    profile_values, saved_profile, update_profile,
+    profile_values, recent_interactions, record_interaction, saved_profile, update_profile,
 )
 from app.ui.avatars import AVATAR_MAX_BYTES, AVATAR_MAX_MB, prepare_avatar
 from app.ui.stub import recommend
@@ -124,27 +125,56 @@ def create_app(recommender: Recommender = recommend, *, database_path: Path | No
             abort(404)
         return Response(avatar, mimetype="image/jpeg")
 
+    @app.get("/materials/<material_id>")
+    def material_page(material_id):
+        material = materials_by_id.get(material_id)
+        if material is None:
+            abort(404)
+        if request.method == "GET" and not any(
+            "prefetch" in request.headers.get(header, "").lower() for header in ("Sec-Purpose", "Purpose")
+        ):
+            record_interaction(current_account(), material_id, "view")
+        return render_template("material.html", material=material)
+
+    @app.post("/materials/<material_id>/open")
+    def open_material(material_id):
+        material = materials_by_id.get(material_id)
+        if material is None:
+            abort(404)
+        target = urlsplit(material.url)
+        if target.scheme not in {"http", "https"} or not target.hostname:
+            abort(404)
+        check_csrf()
+        record_interaction(current_account(), material_id, "click")
+        return redirect(material.url, code=303)
+
     @app.route("/", methods=["GET", "POST"])
     def index():
         form = request.form
         quick_goal = form.get("quick_goal")
         goal = quick_goal if quick_goal in QUICK_GOALS else form.get("goal", "")
         skip_profile = form.get("action") == "skip_profile"
-        stored_profile = saved_profile(current_account())
+        account = current_account()
+        stored_profile = saved_profile(account)
         values = profile_values({} if skip_profile else {**stored_profile, **form})
         profile = Profile(goal=goal.strip()[:GOAL_MAX_LENGTH] or None, **values)
-        use_history = form.get("history") == "sample" and not skip_profile
-        result = recommender(catalog, profile, sample_history if use_history else (), 3)
+        allow_sample_history = account is None or account["username"] == DEMO_USERNAME
+        use_sample_history = allow_sample_history and form.get("history") == "sample" and not skip_profile
+        history = sample_history if use_sample_history else ()
+        if not skip_profile and not allow_sample_history:
+            history = recent_interactions(account)
+        result = recommender(catalog, profile, history, 3)
         cards = [(materials_by_id[item.material_id], item) for item in result.items]
         return render_template(
             "recommendations.html",
             profile=profile,
             profile_values=values,
             profile_fields=PROFILE_FIELDS,
-            show_profile_details=use_history or (not skip_profile and values != stored_profile),
+            show_profile_details=use_sample_history or (not skip_profile and values != stored_profile),
             quick_goals=QUICK_GOALS,
             goal_max_length=GOAL_MAX_LENGTH,
-            use_history=use_history,
+            allow_sample_history=allow_sample_history,
+            use_sample_history=use_sample_history,
             result=result,
             cards=cards,
         )
