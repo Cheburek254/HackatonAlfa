@@ -1,0 +1,32 @@
+from argparse import ArgumentParser
+from pathlib import Path
+
+from app.catalog import load_catalog, load_history
+from app.contracts import Profile, Recommender
+from app.ui.stub import recommend
+
+
+def main(recommender: Recommender) -> None:
+    parser = ArgumentParser(description="Показать стартовую выдачу на синтетическом каталоге.")
+    parser.add_argument("--goal", help="Текущая задача пользователя")
+    parser.add_argument("--history", type=Path, help="Путь к JSON-журналу одного пользователя")
+    args = parser.parse_args()
+
+    catalog_path = Path(__file__).resolve().parents[1] / "fixtures" / "catalog.demo.json"
+    catalog = load_catalog(catalog_path)
+    materials_by_id = {material.id: material for material in catalog}
+    history = load_history(args.history) if args.history else ()
+    result = recommender(catalog, Profile(goal=args.goal), history, 3)
+
+    print("Стартовый пример на синтетическом каталоге")
+    if result.ordering_reason:
+        print(result.ordering_reason)
+    for item in result.items:
+        material = materials_by_id[item.material_id]
+        print(f"\n{material.title}\n{item.reason}\n{item.next_step}\n{material.url}")
+    if result.follow_up_question:
+        print(f"\n{result.follow_up_question}")
+
+
+if __name__ == "__main__":
+    main(recommend)

@@ -1,0 +1,77 @@
+[
+  {
+    "id": "start-checklist",
+    "title": "Чек-лист запуска малого бизнеса",
+    "url": "https://example.com/alfakurs-demo/start-checklist",
+    "description": "Помогает проверить идею, описать клиента и выбрать первую задачу на неделю.",
+    "topics": ["запуск бизнеса", "планирование"],
+    "format": "чек-лист",
+    "access": "free",
+    "stages": ["запуск"],
+    "experience_levels": ["начинающий"]
+  },
+  {
+    "id": "marketing-first-sales",
+    "title": "Первые продажи для небольшого магазина",
+    "url": "https://example.com/alfakurs-demo/marketing-first-sales",
+    "description": "Короткое руководство по поиску первых покупателей и выбору канала продвижения.",
+    "topics": ["маркетинг", "продажи"],
+    "format": "статья",
+    "access": "free",
+    "stages": ["запуск"],
+    "industries": ["розница"],
+    "experience_levels": ["начинающий"]
+  },
+  {
+    "id": "marketing-repeat-sales",
+    "title": "Повторные продажи в рознице",
+    "url": "https://example.com/alfakurs-demo/marketing-repeat-sales",
+    "description": "Курс для владельцев магазинов, которые хотят системно работать с возвращаемостью покупателей.",
+    "topics": ["маркетинг", "продажи"],
+    "format": "курс",
+    "access": "paid",
+    "stages": ["рост"],
+    "industries": ["розница"],
+    "experience_levels": ["опытный"]
+  },
+  {
+    "id": "marketing-service-leads",
+    "title": "Шаблон воронки для бизнеса услуг",
+    "url": "https://example.com/alfakurs-demo/marketing-service-leads",
+    "description": "Помогает отследить путь от первого обращения до оплаченного заказа.",
+    "topics": ["маркетинг", "продажи"],
+    "format": "шаблон",
+    "access": "free",
+    "stages": ["работающий бизнес", "рост"],
+    "industries": ["услуги"]
+  },
+  {
+    "id": "finance-cashflow",
+    "title": "Таблица для учёта денежных потоков",
+    "url": "https://example.com/alfakurs-demo/finance-cashflow",
+    "description": "Позволяет собрать поступления и платежи и оценить остаток денег на ближайшие недели.",
+    "topics": ["финансы", "учёт"],
+    "format": "шаблон",
+    "access": "free",
+    "stages": ["работающий бизнес"],
+    "experience_levels": ["начинающий"]
+  },
+  {
+    "id": "finance-profitability",
+    "title": "Рентабельность продуктов и услуг",
+    "url": "https://example.com/alfakurs-demo/finance-profitability",
+    "description": "Курс о том, как сравнивать прибыльность разных направлений бизнеса.",
+    "topics": ["финансы", "учёт"],
+    "format": "курс",
+    "access": "paid",
+    "stages": ["рост"],
+    "experience_levels": ["опытный"]
+  },
+  {
+    "id": "operations-week-plan",
+    "title": "Как выбрать приоритеты на рабочую неделю",
+    "url": "https://example.com/alfakurs-demo/operations-week-plan",
+    "description": "Практический материал по планированию для владельца малого бизнеса.",
+    "topics": ["операционная работа", "планирование"]
+  }
+]

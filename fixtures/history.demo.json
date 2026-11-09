@@ -1,0 +1,16 @@
+[
+  {
+    "material_id": "start-checklist",
+    "kind": "complete",
+    "occurred_at": "2026-01-12T09:00:00Z"
+  },
+  {
+    "material_id": "marketing-first-sales",
+    "kind": "view",
+    "occurred_at": "2026-01-13T09:30:00Z"
+  },
+  {
+    "material_id": "marketing-service-leads",
+    "kind": "click"
+  }
+]
