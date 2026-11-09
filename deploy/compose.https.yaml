@@ -1,0 +1,46 @@
+services:
+  web:
+    ports: !reset []
+    command:
+      - python
+      - -m
+      - waitress
+      - --listen=0.0.0.0:8080
+      - --max-request-body-size=8192
+      - --trusted-proxy=172.31.249.2
+      - --trusted-proxy-headers=x-forwarded-for x-forwarded-proto
+      - --call
+      - app.ui.web:create_app
+    networks:
+      tls_backend:
+        ipv4_address: 172.31.249.3
+
+  https:
+    image: nginx:stable-alpine
+    restart: unless-stopped
+    command: ["/bin/sh", "/etc/alfahack/reload-tls.sh"]
+    depends_on:
+      web:
+        condition: service_healthy
+    ports:
+      - "${APP_PUBLIC_PORT:-18081}:80"
+      - "${ALFA_HTTPS_PORT:-18443}:443"
+    environment:
+      ALFA_HTTPS_HOST: ${ALFA_HTTPS_HOST:?Set the hostname or IP on the certificate}
+      ALFA_HTTPS_PORT: ${ALFA_HTTPS_PORT:-18443}
+    volumes:
+      - ./deploy/https.conf.template:/etc/alfahack/https.conf.template:ro
+      - ./deploy/reload-tls.sh:/etc/alfahack/reload-tls.sh:ro
+      - "${ALFA_CERT_ROOT:?Set the certificate directory}/live/${ALFA_HTTPS_HOST}:/etc/letsencrypt/live/${ALFA_HTTPS_HOST}:ro"
+      - "${ALFA_CERT_ROOT:?Set the certificate directory}/archive/${ALFA_HTTPS_HOST}:/etc/letsencrypt/archive/${ALFA_HTTPS_HOST}:ro"
+    networks:
+      default:
+      tls_backend:
+        ipv4_address: 172.31.249.2
+
+networks:
+  tls_backend:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.249.0/28
