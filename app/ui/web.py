@@ -39,6 +39,11 @@ def create_app(recommender: Recommender = recommend, *, database_path: Path | No
             response.headers["Cache-Control"] = "no-store"
             response.headers["X-Frame-Options"] = "DENY"
             response.headers["X-Content-Type-Options"] = "nosniff"
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'none'; img-src 'self'; style-src 'self'; "
+                "base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+            )
+            response.headers["Referrer-Policy"] = "no-referrer"
         return response
 
     @app.route("/profile", methods=["GET", "POST"])

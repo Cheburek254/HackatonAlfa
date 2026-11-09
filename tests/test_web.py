@@ -148,3 +148,37 @@ class WebFlowTest(unittest.TestCase):
         self.assertNotIn('name="password"', page)
         response = self.client.post("/login", base_url=public, data={"password": self.password})
         self.assertEqual(response.status_code, 403)
+
+    def test_sql_like_login_input_cannot_bypass_authentication(self):
+        self.assertEqual(self.register().status_code, 303)
+        visitor = self.app.test_client()
+        for data in (
+            {"username": "owner' OR '1'='1", "password": self.password},
+            {"username": "owner", "password": "' OR 1=1 --"},
+        ):
+            with self.subTest(data=data):
+                self.assertEqual(self.post_form("/login", data, client=visitor).status_code, 401)
+                self.assertEqual(visitor.get("/profile").location, "/login")
+        self.assertEqual(self.post_form("/login", {
+            "username": "owner", "password": self.password,
+        }, client=visitor).status_code, 303)
+
+    def test_logged_out_cookie_cannot_be_replayed(self):
+        self.assertEqual(self.register().status_code, 303)
+        self.client.get("/profile")
+        cookie_name = self.app.config["SESSION_COOKIE_NAME"]
+        previous_cookie = self.client.get_cookie(cookie_name).value
+        self.assertEqual(self.post_form("/logout", {}, page="/profile").status_code, 303)
+
+        replay = self.app.test_client()
+        replay.set_cookie(cookie_name, previous_cookie)
+        self.assertEqual(replay.get("/profile").location, "/login")
+        replay.get("/")
+        self.assertEqual(self.calls[-1][0], Profile())
+
+    def test_query_is_escaped_and_scripts_are_blocked(self):
+        response = self.client.post("/", data={"goal": "<script>alert(1)</script>"})
+        self.assertIn("default-src 'none'", response.headers["Content-Security-Policy"])
+        page = response.get_data(as_text=True)
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", page)
+        self.assertNotIn("<script>alert(1)</script>", page)

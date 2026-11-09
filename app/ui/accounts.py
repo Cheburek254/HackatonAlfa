@@ -7,6 +7,7 @@ import secrets
 import sqlite3
 from collections.abc import Mapping
 from datetime import timedelta
+from hashlib import sha256
 from pathlib import Path
 from time import time
 
@@ -30,13 +31,12 @@ PROFILE_FIELDS = {
     )),
     "preferred_format": ("Формат материалов", ("статья", "чек-лист", "шаблон", "курс", "любой формат")),
 }
-PROFILE_COLUMNS = ", ".join(PROFILE_FIELDS)
-PROFILE_PARAMETERS = ", ".join(f":{field}" for field in PROFILE_FIELDS)
 PROFILE_COOKIE = "alfahack_profile"
 LOGIN_PATTERN = re.compile(r"[a-z0-9_.-]{3,32}")
 PASSWORD_METHOD = "scrypt:32768:8:3"
 DUMMY_HASH = generate_password_hash(secrets.token_hex(16), method=PASSWORD_METHOD)
 ATTEMPT_WINDOW = 600
+SESSION_LIFETIME = timedelta(days=7)
 DEMO_USERNAME = "demo"
 auth = Blueprint("accounts", __name__)
 
@@ -58,6 +58,22 @@ CREATE TABLE IF NOT EXISTS auth_attempts (
     attempts INTEGER NOT NULL,
     expires INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS account_sessions (
+    token_hash TEXT PRIMARY KEY NOT NULL,
+    user_id INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    expires INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS account_sessions_expires ON account_sessions (expires);
+"""
+
+INSERT_USER = """
+INSERT INTO users (
+    username, password_hash, stage, industry, experience, team_size, learning_topic, preferred_format
+) VALUES (
+    :username, :password_hash, :stage, :industry, :experience, :team_size, :learning_topic, :preferred_format
+)
+ON CONFLICT (username) DO NOTHING
+RETURNING id
 """
 
 
@@ -77,7 +93,7 @@ def configure_accounts(app: Flask, database_path: Path) -> None:
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
         SESSION_REFRESH_EACH_REQUEST=False,
-        PERMANENT_SESSION_LIFETIME=timedelta(days=7),
+        PERMANENT_SESSION_LIFETIME=SESSION_LIFETIME,
     )
     app.session_interface = AccountSessionInterface()
     app.register_blueprint(auth)
@@ -92,20 +108,24 @@ def configure_accounts(app: Flask, database_path: Path) -> None:
         connection.executescript(SCHEMA)
         with connection:
             connection.execute(
-                f"""INSERT INTO users (username, {PROFILE_COLUMNS})
-                    VALUES (:username, {PROFILE_PARAMETERS}) ON CONFLICT(username) DO NOTHING""",
+                INSERT_USER,
                 {
-                    "username": DEMO_USERNAME, "stage": "рост", "industry": "розница",
+                    "username": DEMO_USERNAME, "password_hash": None,
+                    "stage": "рост", "industry": "розница",
                     "experience": "опытный", "team_size": "2–5 человек",
                     "learning_topic": "продажи", "preferred_format": "курс",
                 },
-            )
+            ).fetchone()
 
 
 def _db() -> sqlite3.Connection:
     if "accounts_db" not in g:
-        g.accounts_db = sqlite3.connect(current_app.config["ACCOUNT_DATABASE"])
-        g.accounts_db.row_factory = sqlite3.Row
+        connection = sqlite3.connect(current_app.config["ACCOUNT_DATABASE"])
+        connection.setconfig(sqlite3.SQLITE_DBCONFIG_DEFENSIVE, True)
+        connection.setconfig(sqlite3.SQLITE_DBCONFIG_TRUSTED_SCHEMA, False)
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.row_factory = sqlite3.Row
+        g.accounts_db = connection
     return g.accounts_db
 
 
@@ -131,13 +151,24 @@ def legacy_profile() -> dict[str, str | None]:
     return profile_values(values if isinstance(values, dict) else {})
 
 
+def _session_hash() -> str | None:
+    token = session.get("account_token")
+    return sha256(token.encode()).hexdigest() if isinstance(token, str) else None
+
+
 def current_account() -> sqlite3.Row | None:
-    user_id = session.get("user_id")
-    if user_id is None:
+    token_hash = _session_hash()
+    if token_hash is None:
         return None
-    return _db().execute(
-        f"SELECT id, username, {PROFILE_COLUMNS} FROM users WHERE id = ?", (user_id,),
+    account = _db().execute(
+        """SELECT users.id, username, stage, industry, experience, team_size, learning_topic, preferred_format
+           FROM account_sessions JOIN users ON users.id = account_sessions.user_id
+           WHERE token_hash = ? AND expires > ? AND (username = ? OR ?)""",
+        (token_hash, int(time()), DEMO_USERNAME, _password_access_allowed()),
     ).fetchone()
+    if account is None:
+        session.clear()
+    return account
 
 
 def saved_profile(account: sqlite3.Row | None) -> dict[str, str | None]:
@@ -147,12 +178,15 @@ def saved_profile(account: sqlite3.Row | None) -> dict[str, str | None]:
 
 
 def update_profile(account: sqlite3.Row, values: dict[str, str | None]) -> None:
-    assignments = ", ".join(f"{field} = :{field}" for field in PROFILE_FIELDS)
     connection = _db()
     with connection:
         connection.execute(
-            f"UPDATE users SET {assignments} WHERE id = :user_id",
-            {**values, "user_id": account["id"]},
+            """UPDATE users
+               SET stage = :stage, industry = :industry, experience = :experience,
+                   team_size = :team_size, learning_topic = :learning_topic,
+                   preferred_format = :preferred_format
+               WHERE id = :user_id AND username <> :demo""",
+            {**values, "user_id": account["id"], "demo": DEMO_USERNAME},
         )
 
 
@@ -178,7 +212,6 @@ def _password_access_allowed() -> bool:
 def _consume_attempts(scopes: tuple[tuple[str, int], ...]) -> bool:
     now = int(time())
     connection = _db()
-    allowed = True
     with connection:
         connection.execute("DELETE FROM auth_attempts WHERE expires <= ?", (now,))
         for scope, limit in scopes:
@@ -188,8 +221,9 @@ def _consume_attempts(scopes: tuple[tuple[str, int], ...]) -> bool:
                    RETURNING attempts""",
                 (scope, now + ATTEMPT_WINDOW),
             ).fetchone()[0]
-            allowed = allowed and attempts <= limit
-    return allowed
+            if attempts > limit:
+                return False
+    return True
 
 
 def _auth_form(mode: str, error: str = "", username: str = "", status: int = 200):
@@ -202,9 +236,22 @@ def _auth_form(mode: str, error: str = "", username: str = "", status: int = 200
 
 
 def _start_session(user_id: int):
+    token = secrets.token_urlsafe(32)
+    now = int(time())
+    expires = now + int(SESSION_LIFETIME.total_seconds())
+    connection = _db()
+    with connection:
+        connection.execute(
+            "DELETE FROM account_sessions WHERE token_hash = ? OR expires <= ?",
+            (_session_hash(), now),
+        )
+        connection.execute(
+            "INSERT INTO account_sessions (token_hash, user_id, expires) VALUES (?, ?, ?)",
+            (sha256(token.encode()).hexdigest(), user_id, expires),
+        )
     session.clear()
     session.permanent = True
-    session["user_id"] = user_id
+    session["account_token"] = token
     return redirect(url_for("profile_page"), code=303)
 
 
@@ -234,18 +281,18 @@ def credentials():
         values = profile_values(request.form)
         if not all(values.values()):
             return _auth_form(mode, "Заполните все поля профиля.", username, 400)
-        connection = _db()
-        try:
-            with connection:
-                user_id = connection.execute(
-                    f"""INSERT INTO users (username, password_hash, {PROFILE_COLUMNS})
-                        VALUES (:username, :password_hash, {PROFILE_PARAMETERS})""",
-                    {**values, "username": username,
-                     "password_hash": generate_password_hash(password, method=PASSWORD_METHOD)},
-                ).lastrowid
-        except sqlite3.IntegrityError:
+        if username == DEMO_USERNAME:
             return _auth_form(mode, "Выберите другой логин.", username, 409)
-        return _start_session(user_id)
+        connection = _db()
+        with connection:
+            account = connection.execute(
+                INSERT_USER,
+                {**values, "username": username,
+                 "password_hash": generate_password_hash(password, method=PASSWORD_METHOD)},
+            ).fetchone()
+        if account is None:
+            return _auth_form(mode, "Выберите другой логин.", username, 409)
+        return _start_session(account["id"])
 
     account = _db().execute(
         "SELECT id, password_hash FROM users WHERE username = ? AND password_hash IS NOT NULL",
@@ -267,5 +314,10 @@ def demo_login():
 @auth.post("/logout")
 def logout():
     check_csrf()
+    token_hash = _session_hash()
+    if token_hash is not None:
+        connection = _db()
+        with connection:
+            connection.execute("DELETE FROM account_sessions WHERE token_hash = ?", (token_hash,))
     session.clear()
     return redirect(url_for("index"), code=303)
