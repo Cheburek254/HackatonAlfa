@@ -71,11 +71,13 @@
                             aria-pressed="{{ 'true' if result_order == order else 'false' }}">{{ label }}</button>
                     {% endfor %}
                 </form>
+                {% if result_order != 'recommended' or is_demo_catalog %}
                 <p class="result-metrics-note">
                     {% if result_order == 'popularity' %}Показаны материалы с данными о популярности.{% endif %}
                     {% if result_order == 'rating' %}Показаны материалы с оценкой.{% endif %}
-                    В демо популярность и оценки приведены для примера.
+                    {% if is_demo_catalog %}В демо популярность и оценки приведены для примера.{% endif %}
                 </p>
+                {% endif %}
                 {% endif %}
 
                 {% if result.follow_up_question %}
@@ -93,7 +95,7 @@
                         <div class="card-cover cover-{{ loop.cycle(1, 2, 3) }}">
                             <div class="cover-labels">
                                 <span class="tag topic">{{ material.topics[0] | capitalize if material.topics else 'Материал' }}</span>
-                                {% if material.access == 'paid' %}<span class="tag paid">Платно</span>
+                                {% if material.access == 'paid' %}<span class="tag paid">{{ '{:,.0f}'.format(material.cost).replace(',', ' ') ~ ' ₽' if material.cost is not none else 'Платно' }}</span>
                                 {% elif material.access == 'free' %}<span class="tag">Бесплатно</span>{% endif %}
                             </div>
                             <div class="cover-art" aria-hidden="true"><span></span><span></span><span></span></div>

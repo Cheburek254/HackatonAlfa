@@ -614,6 +614,9 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
             "stages": m["stages"],
             "industries": m["industries"],
             "experience_levels": m["experience_levels"],
+            "popularity": m["popularity_score"],
+            "rating": m["avg_rating"],
+            "cost": m["cost"],
         }
         for m in materials
     ]

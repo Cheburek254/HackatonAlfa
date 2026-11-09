@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 
 from flask import Flask, Response, abort, redirect, render_template, request, url_for
 
-from app.catalog import load_catalog, load_history
+from app.catalog import DEMO_CATALOG_PATH, catalog_source, load_catalog, load_history
 from app.contracts import Profile, Recommender
 from app.ctr_report import ORDER_LABELS
 from app.database import account_database_path
@@ -49,21 +49,27 @@ def create_app(
 ) -> Flask:
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = 8 * 1024
+    source = catalog_source()
+    is_demo_catalog = source == DEMO_CATALOG_PATH
+    catalog = load_catalog(source)
+    if not is_demo_catalog and not catalog:
+        raise ValueError(f"Каталог пуст: {source}")
+    materials_by_id = {material.id: material for material in catalog}
+    sample_history = load_history(FIXTURES / "history.demo.json") if is_demo_catalog else ()
     configure_accounts(app, database_path or account_database_path())
     app.register_blueprint(admin)
-    catalog = load_catalog(FIXTURES / "catalog.demo.json")
-    materials_by_id = {material.id: material for material in catalog}
-    sample_history = load_history(FIXTURES / "history.demo.json")
     recommender_type = type(recommender)
     algorithm = algorithm_name or (
         f"{getattr(recommender, '__module__', recommender_type.__module__)}."
         f"{getattr(recommender, '__qualname__', recommender_type.__qualname__)}"
     )
+    if algorithm_name is None and recommender is recommend and is_demo_catalog:
+        algorithm += ":demo-catalog"
     app.jinja_env.globals["signed_in"] = lambda: current_account() is not None
 
     @app.get("/health")
     def health():
-        return {"status": "ok"}
+        return {"status": "ok", "catalog": "demo" if is_demo_catalog else "real", "materials": len(catalog)}
 
     @app.after_request
     def protect_pages(response):
@@ -212,11 +218,12 @@ def create_app(
         stored_profile = saved_profile(account)
         values = profile_values({} if skip_profile else {**stored_profile, **form})
         profile = Profile(goal=goal.strip()[:GOAL_MAX_LENGTH] or None, **values)
-        allow_sample_history = account is None or account["username"] == DEMO_USERNAME
+        allow_sample_history = is_demo_catalog and (account is None or account["username"] == DEMO_USERNAME)
         use_sample_history = allow_sample_history and form.get("history") == "sample" and not skip_profile
         history = sample_history if use_sample_history else ()
         if not skip_profile and not allow_sample_history:
-            history = recent_interactions(account)
+            # В движке события в конце последовательности имеют больший вес.
+            history = recent_interactions(account)[::-1]
         result = recommender(catalog, profile, history, len(catalog))
         result_order = form.get("result_order", form.get("current_order", "recommended"))
         if result_order not in ORDER_LABELS:
@@ -241,6 +248,7 @@ def create_app(
             goal_max_length=GOAL_MAX_LENGTH,
             allow_sample_history=allow_sample_history,
             use_sample_history=use_sample_history,
+            is_demo_catalog=is_demo_catalog,
             skip_profile=skip_profile,
             result_order=result_order,
             result_orders=ORDER_LABELS,

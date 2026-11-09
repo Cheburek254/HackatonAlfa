@@ -20,6 +20,7 @@ class Material:
     experience_levels: tuple[str, ...] = ()
     popularity: float | None = None
     rating: float | None = None
+    cost: float | None = None
 
 
 @dataclass(frozen=True)

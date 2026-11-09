@@ -358,7 +358,8 @@ h2 {
 }
 .goal-caption, .order-reason { margin: 8px 0 0; color: var(--muted); line-height: 1.5; }
 .goal-caption { color: var(--ink); font-weight: 650; }
-.result-orders { display: flex; flex-wrap: wrap; gap: 8px; }
+.result-orders { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+.result-orders:has(+ .result-metrics-note) { margin-bottom: 0; }
 .result-order {
     min-height: 42px;
     padding: 7px 14px;

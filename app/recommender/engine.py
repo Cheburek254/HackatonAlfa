@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from functools import lru_cache
 from pathlib import Path
 
+from app.catalog import catalog_data_dir
 from app.contracts import (
     InteractionEvent,
     Material,
@@ -15,8 +16,6 @@ from app.contracts import (
     RecommendationResult,
 )
 from app.recommender.llm import refine_with_llm_if_configured
-
-DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 
 STOPWORDS = {
     "и", "в", "во", "на", "по", "с", "со", "к", "ко", "от", "до", "из", "за", "для", "про",
@@ -56,25 +55,14 @@ EXPERIENCE_ALIASES = {
 }
 
 
-@lru_cache(maxsize=1)
-def _load_extra_metadata() -> tuple[dict[str, dict], dict[str, list[str]]]:
-    """Подгружает дополнительные метаданные (популярность, цены) и граф связей из data/ при наличии."""
-    meta_by_id: dict[str, dict] = {}
-    links_by_id: dict[str, list[str]] = {}
-    slim_path = DATA_DIR / "catalog_slim.json"
-    if slim_path.exists():
-        try:
-            for item in json.loads(slim_path.read_text(encoding="utf-8")):
-                meta_by_id[item["id"]] = item
-        except Exception:
-            pass
-    links_path = DATA_DIR / "recommended_links.json"
-    if links_path.exists():
-        try:
-            links_by_id = json.loads(links_path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    return meta_by_id, links_by_id
+@lru_cache(maxsize=4)
+def _load_recommended_links(directory: Path) -> dict[str, list[str]]:
+    links_path = directory / "recommended_links.json"
+    try:
+        links = json.loads(links_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return links if isinstance(links, dict) else {}
 
 
 def _normalize_text(text: str) -> str:
@@ -159,7 +147,7 @@ def _parse_hard_constraints(goal: str | None) -> dict:
     }
 
 
-def _passes_hard_filters(material: Material, constraints: dict, extra_meta: dict[str, dict]) -> bool:
+def _passes_hard_filters(material: Material, constraints: dict) -> bool:
     if not material.id or not material.title.strip() or not material.url.strip():
         return False
 
@@ -168,8 +156,7 @@ def _passes_hard_filters(material: Material, constraints: dict, extra_meta: dict
 
     max_budget = constraints["max_budget"]
     if max_budget is not None and material.access != "free":
-        meta = extra_meta.get(material.id, {})
-        cost = meta.get("cost")
+        cost = material.cost
         if cost is None or cost > max_budget:
             return False
 
@@ -360,7 +347,7 @@ def recommend(
     if not catalog or limit <= 0:
         return RecommendationResult((), "")
 
-    extra_meta, rec_links = _load_extra_metadata()
+    rec_links = _load_recommended_links(catalog_data_dir())
     constraints = _parse_hard_constraints(profile.goal)
 
     # 1. Фильтрация и дедупликация
@@ -370,7 +357,7 @@ def recommend(
     for idx, mat in enumerate(catalog):
         if mat.id in seen_ids or mat.url in seen_urls:
             continue
-        if not _passes_hard_filters(mat, constraints, extra_meta):
+        if not _passes_hard_filters(mat, constraints):
             continue
         seen_ids.add(mat.id)
         seen_urls.add(mat.url)
@@ -602,8 +589,7 @@ def recommend(
                 actionable_bonus += 1.2
 
         # Популярность как тай-брейкер при близкой полезности
-        meta = extra_meta.get(mat.id, {})
-        pop_raw = float(meta.get("popularity_score") or 0.0)
+        pop_raw = mat.popularity or 0.0
         pop_bonus = min(pop_raw / 2500.0, 1.5) + max(0.0, (1200 - idx) / 12000.0)
 
         max_task_score = max(max_task_score, task_score)

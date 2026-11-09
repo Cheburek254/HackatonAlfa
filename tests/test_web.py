@@ -13,6 +13,7 @@ from PIL import Image
 
 from app.contracts import Material, Profile, Recommendation, RecommendationResult
 from app.ctr_report import Metrics, read_report
+from app.ui.stub import recommend as stub_recommend
 from app.ui.web import create_app
 
 
@@ -27,6 +28,8 @@ class WebFlowTest(unittest.TestCase):
         self.calls = []
         directory = self.enterContext(TemporaryDirectory())
         self.database_path = Path(directory) / "accounts.sqlite3"
+        self.enterContext(patch("app.catalog.DATA_DIR", Path(directory)))
+        self.enterContext(patch.dict("os.environ", {"ALFA_CATALOG_DIR": "", "ALFA_LLM_API_KEY": ""}))
         self.app = create_app(self.recommend, database_path=self.database_path)
         self.client = self.app.test_client()
 
@@ -154,7 +157,7 @@ class WebFlowTest(unittest.TestCase):
         self.assertEqual(self.calls[-1], (Profile(goal="Найти клиентов"), (), 7))
 
     def test_result_order_keeps_the_full_selection_and_sorts_only_measured_cards(self):
-        client = create_app(database_path=self.database_path).test_client()
+        client = create_app(stub_recommend, database_path=self.database_path).test_client()
 
         def card_ids(html):
             return re.findall(r'class="material-link" href="/materials/([^"/?]+)\?', html)
@@ -194,9 +197,41 @@ class WebFlowTest(unittest.TestCase):
         self.assertIn('name="stage" value="рост"', orders)
         self.assertIn('name="history" value="sample"', orders)
 
+    def test_real_catalog_export_drives_web_rank_filters_and_previews(self):
+        catalog_dir = self.database_path.parent / "catalog"
+        catalog_dir.mkdir()
+        catalog_path = catalog_dir / "catalog_slim.sqlite"
+        with closing(sqlite3.connect(catalog_path)) as connection, connection:
+            connection.execute("""CREATE TABLE materials (
+                id TEXT PRIMARY KEY, title TEXT, url TEXT, description TEXT, format TEXT, access TEXT,
+                cost INTEGER, popularity_score REAL, avg_rating REAL, topics_json TEXT,
+                stages_json TEXT, industries_json TEXT, experience_levels_json TEXT
+            )""")
+            connection.executemany(
+                "INSERT INTO materials VALUES (?, ?, ?, 'Описание материала', 'курс', ?, ?, ?, ?, ?, '[]', '[]', '[]')",
+                [
+                    ("paid-low", "Налоги для ИП", "https://example.com/low", "paid", 800, 42, 4.7, '["налоги"]'),
+                    ("paid-high", "Налоги для ИП: практика", "https://example.com/high", "paid", 4000, 100, 4.9, '["налоги"]'),
+                    ("free-tax", "Памятка по налогам для ИП", "https://example.com/free", "free", None, 15, 4.6, '["налоги"]'),
+                ],
+            )
+        with patch.dict("os.environ", {"ALFA_CATALOG_DIR": str(catalog_dir)}):
+            client = create_app(database_path=self.database_path).test_client()
+            self.assertEqual(client.get("/health").json, {"status": "ok", "catalog": "real", "materials": 3})
+            response = client.post("/", data={"goal": "налоги для ИП до 1000 ₽", "result_order": "rating"})
+            page = response.get_data(as_text=True)
+            self.assertEqual(re.findall(r'href="/materials/([^"/?]+)\?', page), ["paid-low", "free-tax"])
+            self.assertIn("800 ₽", page)
+            self.assertIn("Оценка · 4,7 из 5", page)
+            self.assertIn("Популярность · 42", page)
+            self.assertNotIn('name="history"', page)
+            self.assertNotIn("приведены для примера", page)
+            preview = client.get("/materials/paid-low", headers={"Accept": "application/json"}).json
+            self.assertEqual(preview["url"], "https://example.com/low")
+
     def test_show_more_appends_six_sorted_cards_until_the_selection_ends(self):
         catalog = tuple(
-            Material(f"item-{index}", f"Материал {index}", "https://example.com", popularity=index)
+            Material(f"item-{index}", f"Материал {index}", f"https://example.com/{index}", popularity=index)
             for index in range(1, 15)
         )
         with patch("app.ui.web.load_catalog", return_value=catalog):
@@ -214,7 +249,7 @@ class WebFlowTest(unittest.TestCase):
             self.assertEqual("Показать больше" in html, count < 14)
 
     def test_impressions_preserve_positions_deduplicate_pages_and_attribute_clicks(self):
-        app = create_app(database_path=self.database_path, algorithm_name="demo:v1")
+        app = create_app(stub_recommend, database_path=self.database_path, algorithm_name="demo:v1")
         client = app.test_client()
         endpoint = "/recommendations/impressions"
 
