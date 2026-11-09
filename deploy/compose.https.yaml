@@ -6,7 +6,7 @@ services:
       - -m
       - waitress
       - --listen=0.0.0.0:8080
-      - --max-request-body-size=8192
+      - --max-request-body-size=4194304
       - --trusted-proxy=172.31.249.2
       - --trusted-proxy-headers=x-forwarded-for x-forwarded-proto
       - --call

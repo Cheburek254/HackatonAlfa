@@ -2,8 +2,11 @@ import json
 import sqlite3
 import unittest
 from contextlib import closing
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+
+from PIL import Image
 
 from app.contracts import Profile, Recommendation, RecommendationResult
 from app.ui.web import create_app
@@ -116,6 +119,58 @@ class WebFlowTest(unittest.TestCase):
         self.assertEqual(self.post_form("/profile", {}).status_code, 303)
         self.client.get("/")
         self.assertEqual(self.calls[-1][0], Profile())
+
+    def test_profile_settings_add_private_photo_to_an_existing_account(self):
+        self.assertEqual(self.register().status_code, 303)
+        with closing(sqlite3.connect(self.database_path)) as connection:
+            connection.execute("DROP TABLE account_details")
+        self.client = create_app(self.recommend, database_path=self.database_path).test_client()
+        self.assertEqual(self.post_form("/login", {
+            "username": "owner", "password": self.password,
+        }).status_code, 303)
+        overview = self.client.get("/profile").get_data(as_text=True)
+        self.assertIn("@owner", overview)
+        self.assertNotIn('name="first_name"', overview)
+
+        image = BytesIO()
+        exif = Image.Exif()
+        exif[315] = "Private metadata"
+        Image.new("RGB", (800, 400), "red").save(image, "PNG", exif=exif)
+        image.seek(0)
+        details = {"first_name": " Анна ", "last_name": "Иванова", "company": "Альфа & партнёры"}
+        updated = {**self.business, "industry": "услуги"}
+        settings = "/profile/settings"
+        response = self.post_form(settings, {**updated, **details, "avatar": (image, "avatar.png")})
+        self.assertEqual(response.location, "/profile?saved=1")
+        overview = self.client.get(response.location).get_data(as_text=True)
+        self.assertIn("Анна Иванова", overview)
+        self.assertIn("Альфа &amp; партнёры", overview)
+        self.assertIn('src="/profile/avatar"', overview)
+        self.client.get("/")
+        self.assertEqual(self.calls[-1][0], Profile(**updated))
+
+        avatar = self.client.get("/profile/avatar")
+        self.assertEqual(avatar.mimetype, "image/jpeg")
+        self.assertEqual(avatar.headers["Cache-Control"], "no-store")
+        with Image.open(BytesIO(avatar.data)) as saved_photo:
+            self.assertEqual(saved_photo.size, (384, 192))
+            self.assertFalse(saved_photo.getexif())
+        visitor = self.app.test_client()
+        self.assertEqual(visitor.get("/profile/avatar").status_code, 404)
+        self.assertEqual(self.post_form("/login/demo", {}, client=visitor, page="/login").status_code, 303)
+        self.assertEqual(visitor.get("/profile/avatar").status_code, 404)
+        self.assertEqual(self.post_form(settings, details, client=visitor, page="/profile").status_code, 403)
+
+        self.assertEqual(self.post_form(settings, {**updated, **details}).status_code, 303)
+        self.assertEqual(self.client.get("/profile/avatar").data, avatar.data)
+        invalid = self.post_form(settings, {
+            **updated, "company": "Другая компания", "avatar": (BytesIO(b"<svg/>"), "fake.png"),
+        })
+        self.assertEqual(invalid.status_code, 400)
+        self.assertIn("Альфа &amp; партнёры", self.client.get("/profile").get_data(as_text=True))
+        self.assertEqual(self.client.get("/profile/avatar").data, avatar.data)
+        self.assertEqual(self.post_form(settings, {**updated, **details, "remove_avatar": "1"}).status_code, 303)
+        self.assertEqual(self.client.get("/profile/avatar").status_code, 404)
 
     def test_shared_demo_can_be_used_but_not_edited(self):
         second_browser = self.app.test_client()

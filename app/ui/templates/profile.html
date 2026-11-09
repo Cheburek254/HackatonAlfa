@@ -1,40 +1,108 @@
 {% extends "base.html" %}
-{% block title %}Профиль — Альфа-Курс{% endblock %}
+{% block title %}{{ 'Настройки профиля' if settings else 'Профиль' }} — Альфа-Курс{% endblock %}
+{% macro avatar() %}
+    {% if account.has_avatar %}
+    <img class="account-avatar" src="{{ url_for('profile_avatar') }}" alt="Фото профиля" width="104" height="104">
+    {% else %}
+    <span class="account-avatar account-initials" aria-hidden="true">{{ initials }}</span>
+    {% endif %}
+{% endmacro %}
+{% macro profile_card(title, fields, icon) %}
+    <section class="account-card">
+        <div class="account-card-heading">
+            <span class="account-card-icon {{ icon }}" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                    {% if icon == 'business' %}
+                    <rect x="3" y="7" width="18" height="14" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 13h18m-9 0v2"/>
+                    {% else %}
+                    <path d="m2 9 10-5 10 5-10 5L2 9Zm4 2v5c3 3 9 3 12 0v-5m4-2v7"/>
+                    {% endif %}
+                </svg>
+            </span>
+            <h2>{{ title }}</h2>
+        </div>
+        <dl class="account-values">
+            {% for field in fields %}
+            <div><dt>{{ profile_fields[field][0] }}</dt><dd>{{ profile_values[field] | capitalize if profile_values[field] else 'Не указано' }}</dd></div>
+            {% endfor %}
+        </dl>
+    </section>
+{% endmacro %}
 {% block content %}
-        <section class="hero" aria-labelledby="profile-title">
+        <section class="account-hero" aria-labelledby="profile-title">
             <div class="wrap">
-                <p class="eyebrow"><span></span> АЛЬФА-КУРС</p>
+                <p class="eyebrow"><span></span> ЛИЧНЫЙ КАБИНЕТ</p>
                 <h1 id="profile-title">Профиль</h1>
-                {% if is_demo %}
-                <p class="hero-copy">Общий тестовый профиль. Эти настройки уже используются в подборе. Параметры можно изменить для отдельного запроса.</p>
-                <dl class="demo-profile profile-settings">
-                    {% for field, (label, _) in profile_fields.items() %}
-                    <div><dt>{{ label }}</dt><dd>{{ profile_values[field] | capitalize }}</dd></div>
-                    {% endfor %}
-                </dl>
-                {% else %}
-                <p class="hero-copy">Аккаунт {{ account.username }}. Параметры из профиля подставляются при подборе материалов.</p>
-                <form class="profile-settings" method="post" action="{{ url_for('profile_page') }}">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    {% include "profile_fields.html" %}
-                    <div class="profile-actions">
-                        <button class="button button-primary" type="submit">Сохранить профиль</button>
-                        {% if saved %}
-                        <span class="profile-status" role="status">
-                            {{ 'Профиль сохранён.' if profile_values.values() | select | list else 'Профиль очищен.' }}
-                        </span>
-                        {% endif %}
+                <div class="account-banner">
+                    {{ avatar() }}
+                    <div class="account-identity">
+                        <p class="account-handle">{{ 'Общий тестовый профиль' if is_demo else '@' ~ account.username }}</p>
+                        <p class="account-name">{{ display_name }}</p>
+                        {% if account.company %}<p class="account-company">{{ account.company }}</p>{% endif %}
                     </div>
-                </form>
-                {% endif %}
+                    {% if not settings %}
+                    <a class="button account-pick" href="{{ url_for('index') }}">Подобрать материалы <span aria-hidden="true">→</span></a>
+                    {% endif %}
+                </div>
+                <nav class="account-tabs" aria-label="Разделы профиля">
+                    <a href="{{ url_for('profile_page') }}"{% if not settings %} aria-current="page"{% endif %}>Обзор</a>
+                    {% if not is_demo %}
+                    <a href="{{ url_for('profile_settings') }}"{% if settings %} aria-current="page"{% endif %}>Настройки профиля</a>
+                    {% endif %}
+                </nav>
             </div>
         </section>
-        <section class="results">
+        <section class="results account-body">
             <div class="wrap">
-                <a class="profile-back" href="{{ url_for('index') }}">← Вернуться к подборке</a>
+                {% if saved %}<p class="account-notice" role="status">Профиль сохранён.</p>{% endif %}
+                {% if settings %}
+                <h2 class="account-section-title">Настройки профиля</h2>
+                <form class="account-edit" method="post" action="{{ url_for('profile_settings') }}" enctype="multipart/form-data">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    {% if error %}<p class="account-error" role="alert">{{ error }}</p>{% endif %}
+                    <section class="account-card" aria-labelledby="identity-title">
+                        <h3 id="identity-title">Личные данные</h3>
+                        <div class="account-photo-field">
+                            {{ avatar() }}
+                            <div>
+                                <label for="avatar">Фото профиля</label>
+                                <input id="avatar" name="avatar" type="file" accept="image/jpeg,image/png,image/webp" aria-describedby="avatar-hint">
+                                <p id="avatar-hint">JPG, PNG или WebP. До {{ avatar_max_mb }} МБ и 20 мегапикселей.</p>
+                                {% if account.has_avatar %}
+                                <label class="account-remove-photo"><input type="checkbox" name="remove_avatar" value="1"> Удалить текущее фото</label>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="account-edit-fields">
+                            {% for field, (label, maximum, autocomplete) in identity_fields.items() %}
+                            <label for="{{ field }}">{{ label }}
+                                <input type="text" id="{{ field }}" name="{{ field }}" value="{{ identity_values[field] or '' }}"
+                                       maxlength="{{ maximum }}" autocomplete="{{ autocomplete }}">
+                            </label>
+                            {% endfor %}
+                        </div>
+                    </section>
+                    <section class="account-card" aria-labelledby="preferences-title">
+                        <h3 id="preferences-title">Бизнес и обучение</h3>
+                        <p class="account-muted">По этим данным мы подбираем материалы для вас.</p>
+                        {% include "profile_fields.html" %}
+                    </section>
+                    <div class="account-actions">
+                        <button class="button button-primary" type="submit">Сохранить изменения</button>
+                        <a class="profile-back" href="{{ url_for('profile_page') }}">Отмена</a>
+                    </div>
+                </form>
+                {% else %}
+                <h2 class="account-section-title">Ваши параметры</h2>
+                <p class="account-muted">{{ 'Параметры тестового профиля можно поменять для отдельного запроса на странице подбора.' if is_demo else 'По этим данным мы подбираем материалы для вас.' }}</p>
+                <div class="account-grid">
+                    {{ profile_card('О бизнесе', ['stage', 'industry', 'team_size'], 'business') }}
+                    {{ profile_card('Об обучении', ['experience', 'learning_topic', 'preferred_format'], 'learning') }}
+                </div>
+                {% endif %}
                 <form class="logout-form" method="post" action="{{ url_for('accounts.logout') }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button class="button" type="submit">Выйти</button>
+                    <button class="button" type="submit">Выйти из аккаунта</button>
                 </form>
             </div>
         </section>

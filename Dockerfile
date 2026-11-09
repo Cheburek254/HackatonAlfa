@@ -14,4 +14,4 @@ USER 10001:10001
 EXPOSE 8080
 HEALTHCHECK --interval=10s --timeout=4s --start-period=5s CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).close()"]
 
-CMD ["python", "-m", "waitress", "--listen=0.0.0.0:8080", "--max-request-body-size=8192", "--call", "app.ui.web:create_app"]
+CMD ["python", "-m", "waitress", "--listen=0.0.0.0:8080", "--max-request-body-size=4194304", "--call", "app.ui.web:create_app"]

@@ -58,6 +58,13 @@ CREATE TABLE IF NOT EXISTS auth_attempts (
     attempts INTEGER NOT NULL,
     expires INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS account_details (
+    user_id INTEGER PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE,
+    first_name TEXT NOT NULL,
+    last_name TEXT NOT NULL,
+    company TEXT NOT NULL,
+    avatar BLOB
+);
 CREATE TABLE IF NOT EXISTS account_sessions (
     token_hash TEXT PRIMARY KEY NOT NULL,
     user_id INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
@@ -161,8 +168,11 @@ def current_account() -> sqlite3.Row | None:
     if token_hash is None:
         return None
     account = _db().execute(
-        """SELECT users.id, username, stage, industry, experience, team_size, learning_topic, preferred_format
-           FROM account_sessions JOIN users ON users.id = account_sessions.user_id
+        """SELECT users.id, username, stage, industry, experience, team_size, learning_topic, preferred_format,
+                  first_name, last_name, company, avatar IS NOT NULL AS has_avatar
+           FROM account_sessions
+           JOIN users ON users.id = account_sessions.user_id
+           LEFT JOIN account_details ON account_details.user_id = users.id
            WHERE token_hash = ? AND expires > ? AND (username = ? OR ?)""",
         (token_hash, int(time()), DEMO_USERNAME, _password_access_allowed()),
     ).fetchone()
@@ -177,7 +187,23 @@ def saved_profile(account: sqlite3.Row | None) -> dict[str, str | None]:
     return legacy_profile()
 
 
-def update_profile(account: sqlite3.Row, values: dict[str, str | None]) -> None:
+def account_avatar(account: sqlite3.Row) -> bytes | None:
+    details = _db().execute(
+        "SELECT avatar FROM account_details WHERE user_id = ?", (account["id"],),
+    ).fetchone()
+    return details["avatar"] if details is not None else None
+
+
+def update_profile(
+    account: sqlite3.Row,
+    values: dict[str, str | None],
+    *,
+    details: dict[str, str] | None = None,
+    avatar: bytes | None = None,
+    remove_avatar: bool = False,
+) -> None:
+    if account["username"] == DEMO_USERNAME:
+        abort(403)
     connection = _db()
     with connection:
         connection.execute(
@@ -185,9 +211,19 @@ def update_profile(account: sqlite3.Row, values: dict[str, str | None]) -> None:
                SET stage = :stage, industry = :industry, experience = :experience,
                    team_size = :team_size, learning_topic = :learning_topic,
                    preferred_format = :preferred_format
-               WHERE id = :user_id AND username <> :demo""",
-            {**values, "user_id": account["id"], "demo": DEMO_USERNAME},
+               WHERE id = :user_id""",
+            {**values, "user_id": account["id"]},
         )
+        if details is not None:
+            connection.execute(
+                """INSERT INTO account_details (user_id, first_name, last_name, company, avatar)
+                   VALUES (:user_id, :first_name, :last_name, :company, :avatar)
+                   ON CONFLICT(user_id) DO UPDATE SET first_name = excluded.first_name,
+                       last_name = excluded.last_name, company = excluded.company,
+                       avatar = CASE WHEN :replace_avatar THEN excluded.avatar ELSE account_details.avatar END""",
+                {**details, "user_id": account["id"], "avatar": avatar,
+                 "replace_avatar": remove_avatar or avatar is not None},
+            )
 
 
 def csrf_token() -> str:
