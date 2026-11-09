@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#111111">
+    <title>Подборка для бизнеса — Альфа-Курс</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='recommendations.css') }}">
+</head>
+<body>
+    <header class="site-header">
+        <div class="wrap masthead">
+            <a class="wordmark" href="{{ url_for('index') }}">
+                <svg viewBox="0 0 32 28" width="32" height="28" aria-hidden="true">
+                    <path fill="currentColor" d="M16 2 31 9.5 16 17 1 9.5 16 2Zm-9 13 9 4.5 9-4.5v6l-9 5-9-5v-6Z"/>
+                    <path d="M29 11v8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <span>Альфа-Курс</span>
+            </a>
+            <span class="demo-label">Демо подбора</span>
+        </div>
+    </header>
+
+    <main>
+        <section class="hero" aria-labelledby="hero-title">
+            <div class="wrap hero-layout">
+                <div class="hero-content">
+                    <p class="eyebrow"><span></span> ОБУЧЕНИЕ ДЛЯ ПРЕДПРИНИМАТЕЛЕЙ</p>
+                    <h1 id="hero-title">Что хотите решить<br class="hero-break"> в&nbsp;бизнесе?</h1>
+                    <p class="hero-copy">Опишите задачу, и мы предложим материалы, с которых можно начать.</p>
+
+                    <form method="post" action="{{ url_for('index', _anchor='recommendations') }}">
+                        <label class="sr-only" for="goal">Текущая задача</label>
+                        <div class="goal-row">
+                            <input id="goal" name="goal" type="text" maxlength="{{ goal_max_length }}"
+                                   placeholder="Например, найти первых клиентов" value="{{ profile.goal or '' }}">
+                            <button class="button button-primary" type="submit">Подобрать материалы</button>
+                        </div>
+                        <div class="quick-goals" aria-label="Примеры задач">
+                            {% for goal in quick_goals %}
+                            <button class="chip{% if goal == profile.goal %} chip-selected{% endif %}"
+                                    type="submit" name="quick_goal" value="{{ goal }}">{{ goal }}</button>
+                            {% endfor %}
+                        </div>
+                        <details class="profile"{% if profile_values.values() | select | list or use_history %} open{% endif %}>
+                            <summary>Уточнить подборку <span>· необязательно</span></summary>
+                            <div class="profile-fields">
+                                {% for field, (label, options) in profile_fields.items() %}
+                                <label for="{{ field }}">
+                                    {{ label }}
+                                    <select name="{{ field }}" id="{{ field }}">
+                                        <option value="">Любой вариант</option>
+                                        {% for option in options %}
+                                        <option value="{{ option }}"{% if profile_values[field] == option %} selected{% endif %}>{{ option | capitalize }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </label>
+                                {% endfor %}
+                            </div>
+                            <div class="profile-actions">
+                                <label class="history-option">
+                                    <input type="checkbox" name="history" value="sample"{% if use_history %} checked{% endif %}>
+                                    Учесть пример истории просмотров
+                                </label>
+                                <div class="profile-buttons">
+                                    <button class="skip-button" type="submit" name="action" value="skip_profile">Пропустить</button>
+                                    <button class="button button-profile" type="submit">Обновить подборку</button>
+                                </div>
+                            </div>
+                        </details>
+                    </form>
+                </div>
+                <img class="hero-art" src="{{ url_for('static', filename='learning.svg') }}" alt="" width="520" height="410">
+            </div>
+        </section>
+
+        <section class="results" id="recommendations" aria-labelledby="results-title">
+            <div class="wrap">
+                <div class="results-heading">
+                    <p class="eyebrow"><span></span> АЛЬФА-КУРС</p>
+                    <h2 id="results-title">Рекомендации для вас</h2>
+                    {% if profile.goal %}<p class="goal-caption">Задача · {{ profile.goal }}</p>{% endif %}
+                    {% if result.ordering_reason %}<p class="order-reason">{{ result.ordering_reason }}</p>{% endif %}
+                </div>
+
+                {% if result.follow_up_question %}
+                <div class="follow-up">
+                    <p>{{ result.follow_up_question }}</p>
+                    <a href="#goal">Уточнить задачу ↑</a>
+                </div>
+                {% endif %}
+
+                {% if cards %}
+                <div class="card-grid">
+                    {% for material, item in cards %}
+                    <article class="card">
+                        <div class="card-cover cover-{{ loop.index }}">
+                            <div class="cover-labels">
+                                <span class="tag topic">{{ material.topics[0] | capitalize if material.topics else 'Материал' }}</span>
+                                {% if material.access == 'paid' %}<span class="tag paid">Платно</span>
+                                {% elif material.access == 'free' %}<span class="tag">Бесплатно</span>{% endif %}
+                            </div>
+                            <div class="cover-art" aria-hidden="true"><span></span><span></span><span></span></div>
+                        </div>
+                        <div class="card-content">
+                            <div class="card-meta">
+                                <span>{{ material.format | capitalize if material.format else 'Материал' }}</span>
+                                {% if loop.first %}<span class="first-pick">Начните с этого</span>{% endif %}
+                            </div>
+                            <h3>{{ material.title }}</h3>
+                            <dl class="card-explanation">
+                                <dt>Почему подходит</dt>
+                                <dd>{{ item.reason }}</dd>
+                                <dt>Следующий шаг</dt>
+                                <dd>{{ item.next_step }}</dd>
+                            </dl>
+                            <a class="material-link" href="{{ material.url }}" aria-label="Открыть материал: {{ material.title }}">
+                                Открыть материал <span aria-hidden="true">↗</span>
+                            </a>
+                        </div>
+                    </article>
+                    {% endfor %}
+                </div>
+                {% elif not result.follow_up_question %}
+                <p class="empty-state">Подборка пока пуста. <a href="#goal">Попробуйте уточнить задачу.</a></p>
+                {% endif %}
+            </div>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <div class="wrap footer-content">
+            <span>Альфа-Курс <span class="footer-dot">·</span> Демо подбора</span>
+            <span>Демонстрационные материалы и ссылки</span>
+        </div>
+    </footer>
+</body>
+</html>
