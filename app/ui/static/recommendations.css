@@ -286,6 +286,26 @@ h2 {
 .result-metrics-note { margin: 8px 0 20px; color: var(--muted); font-size: 13px; }
 .result-pagination { display: grid; justify-items: center; gap: 10px; margin-top: 22px; }
 .result-pagination p { margin: 0; color: var(--muted); font-size: 14px; }
+.has-material-preview .card { cursor: pointer; }
+.has-material-preview .card:hover { box-shadow: 0 0 0 1px #d4d4db; }
+.material-preview {
+    width: min(540px, 100% - 36px);
+    padding: 0;
+    border: 0;
+    border-radius: 20px;
+    color: var(--ink);
+    background: #fff;
+    box-shadow: 0 16px 65px #14141940;
+}
+.material-preview::backdrop { background: #111111a8; }
+.material-preview-content { position: relative; padding: clamp(20px, 5vw, 34px); }
+.material-preview-content .eyebrow { padding-right: 42px; color: var(--muted); }
+.material-preview-content h2 { font-size: clamp(24px, 5vw, 36px); }
+#preview-description { margin: 12px 0 22px; color: var(--muted); line-height: 1.5; }
+.material-preview-link { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; }
+.material-preview-close { position: absolute; top: 10px; right: 10px; }
+.material-preview-close .button { min-width: 42px; padding: 0; color: var(--ink); background: #f1f1f3; font-size: 22px; }
+.material-preview-close .button:hover { background: #e6e6ea; }
 .follow-up, .empty-state {
     margin: 0 0 18px;
     padding: 14px 18px;

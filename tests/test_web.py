@@ -156,9 +156,13 @@ class WebFlowTest(unittest.TestCase):
         self.client.get("/")
         self.assertEqual(self.calls[-1][1], ())
 
-        result = self.post_form(f"{material}/open", {}, page=material)
-        self.assertEqual(result.status_code, 303)
-        self.assertEqual(result.location, "https://example.com/alfakurs-demo/start-checklist")
+        json_headers = {"Accept": "application/json"}
+        preview = self.client.get(material, headers=json_headers).get_json()
+        self.assertIn("Чек-лист запуска", preview["title"])
+        self.assertTrue(preview["description"])
+        self.assertEqual(preview["url"], "https://example.com/alfakurs-demo/start-checklist")
+        result = self.client.post(preview["open_url"], headers=json_headers, data={"csrf_token": preview["csrf_token"]})
+        self.assertEqual(result.status_code, 204)
         self.client.get(material)
         with closing(sqlite3.connect(self.database_path)) as connection:
             events = connection.execute("SELECT kind FROM interaction_events ORDER BY id").fetchall()

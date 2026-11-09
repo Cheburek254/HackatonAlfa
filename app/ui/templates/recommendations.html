@@ -85,6 +85,7 @@
                 {% endif %}
 
                 {% if cards %}
+                <script src="{{ url_for('static', filename='material-preview.js') }}" defer></script>
                 <div class="card-grid">
                     {% for material, item in cards %}
                     <article class="card" id="result-card-{{ loop.index }}" tabindex="-1">
@@ -133,6 +134,17 @@
                             name="show_page" value="{{ next_page }}">Показать больше</button>
                     {% endif %}
                 </div>
+                <dialog id="material-preview" class="material-preview" aria-labelledby="preview-title" aria-describedby="preview-description">
+                    <div class="material-preview-content">
+                        <form method="dialog" class="material-preview-close">
+                            <button class="button" type="submit" aria-label="Закрыть" autofocus>×</button>
+                        </form>
+                        <p class="eyebrow"><span></span> О МАТЕРИАЛЕ</p>
+                        <h2 id="preview-title"></h2>
+                        <p id="preview-description"></p>
+                        <a class="button button-primary material-preview-link" target="_blank" rel="noopener noreferrer">Открыть материал <span aria-hidden="true">↗</span></a>
+                    </div>
+                </dialog>
                 {% elif result.items %}
                 <p class="empty-state">В этой подборке пока нет материалов {{ 'с оценкой' if result_order == 'rating' else 'с данными о популярности' }}. Вернитесь к порядку «По подбору», чтобы увидеть все рекомендации.</p>
                 {% elif not result.follow_up_question %}

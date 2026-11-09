@@ -9,7 +9,7 @@ from flask import Flask, Response, abort, redirect, render_template, request, ur
 from app.catalog import load_catalog, load_history
 from app.contracts import Profile, Recommender
 from app.ui.accounts import (
-    DEMO_USERNAME, PROFILE_FIELDS, account_avatar, check_csrf, configure_accounts, current_account,
+    DEMO_USERNAME, PROFILE_FIELDS, account_avatar, check_csrf, configure_accounts, csrf_token, current_account,
     profile_values, recent_interactions, record_interaction, saved_profile, update_profile,
 )
 from app.ui.avatars import AVATAR_MAX_BYTES, AVATAR_MAX_MB, prepare_avatar
@@ -29,6 +29,16 @@ IDENTITY_FIELDS = {
     "last_name": ("Фамилия", 60, "family-name"),
     "company": ("Название компании", 120, "organization"),
 }
+
+
+def _material_destination(url: str) -> str:
+    try:
+        target = urlsplit(url)
+    except ValueError:
+        abort(404)
+    if target.scheme not in {"http", "https"} or not target.hostname:
+        abort(404)
+    return url
 
 
 def create_app(recommender: Recommender = recommend, *, database_path: Path | None = None) -> Flask:
@@ -56,6 +66,8 @@ def create_app(recommender: Recommender = recommend, *, database_path: Path | No
                 "default-src 'none'; img-src 'self'; style-src 'self'; "
                 "base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
             )
+            if request.endpoint == "index":
+                response.headers["Content-Security-Policy"] += "; script-src 'self'; connect-src 'self'"
             response.headers["Referrer-Policy"] = "no-referrer"
         return response
 
@@ -140,6 +152,14 @@ def create_app(recommender: Recommender = recommend, *, database_path: Path | No
             "prefetch" in request.headers.get(header, "").lower() for header in ("Sec-Purpose", "Purpose")
         ):
             record_interaction(current_account(), material_id, "view")
+        if request.accept_mimetypes.best == "application/json":
+            return {
+                "title": material.title,
+                "description": material.description,
+                "url": _material_destination(material.url),
+                "open_url": url_for("open_material", material_id=material_id),
+                "csrf_token": csrf_token(),
+            }
         return render_template("material.html", material=material)
 
     @app.post("/materials/<material_id>/open")
@@ -147,12 +167,12 @@ def create_app(recommender: Recommender = recommend, *, database_path: Path | No
         material = materials_by_id.get(material_id)
         if material is None:
             abort(404)
-        target = urlsplit(material.url)
-        if target.scheme not in {"http", "https"} or not target.hostname:
-            abort(404)
+        target = _material_destination(material.url)
         check_csrf()
         record_interaction(current_account(), material_id, "click")
-        return redirect(material.url, code=303)
+        if request.accept_mimetypes.best == "application/json":
+            return "", 204
+        return redirect(target, code=303)
 
     @app.route("/", methods=["GET", "POST"])
     def index():
