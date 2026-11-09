@@ -144,8 +144,10 @@
                         </form>
                         <p class="eyebrow">О МАТЕРИАЛЕ</p>
                         <h2 id="preview-title"></h2>
-                        <p id="preview-description"></p>
-                        <a class="button button-primary material-preview-link" target="_blank" rel="noopener noreferrer">Открыть материал <span aria-hidden="true">↗</span></a>
+                        <div id="preview-description" class="preview-description"></div>
+                        <div class="material-preview-actions">
+                            <a class="button button-primary material-preview-link" target="_blank" rel="noopener noreferrer">Открыть материал <span aria-hidden="true">↗</span></a>
+                        </div>
                     </div>
                 </dialog>
                 {% elif result.items %}

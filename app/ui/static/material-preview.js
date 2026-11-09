@@ -40,6 +40,44 @@ if (materialGrid && typeof materialPreview?.showModal === "function") {
     materialGrid.classList.add("has-material-preview");
     const previewTitle = materialPreview.querySelector("#preview-title");
     const previewDescription = materialPreview.querySelector("#preview-description");
+
+    function escapeHtml(str) {
+        return str.replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+    }
+
+    function renderFormattedDescription(container, rawHtml, rawText) {
+        const content = (rawHtml || rawText || "").trim();
+        if (!content) {
+            container.innerHTML = "<p>Краткое описание пока недоступно.</p>";
+            return;
+        }
+        if (content.includes("<") && content.includes(">")) {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(content, "text/html");
+            doc.querySelectorAll("script, style, iframe, object, embed").forEach((el) => el.remove());
+            doc.querySelectorAll("span").forEach((span) => {
+                span.removeAttribute("style");
+                if (!span.attributes.length) {
+                    span.replaceWith(...span.childNodes);
+                }
+            });
+            doc.querySelectorAll("*").forEach((el) => el.removeAttribute("style"));
+            doc.querySelectorAll("p").forEach((p) => {
+                if (!p.textContent.trim() && !p.querySelector("img, svg")) {
+                    p.remove();
+                }
+            });
+            container.innerHTML = doc.body.innerHTML || "<p>Краткое описание пока недоступно.</p>";
+        } else {
+            const paragraphs = content.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+            if (!paragraphs.length) {
+                container.innerHTML = `<p>${escapeHtml(content)}</p>`;
+            } else {
+                container.innerHTML = paragraphs.map((p) => `<p>${escapeHtml(p).replace(/\n/g, "<br>")}</p>`).join("");
+            }
+        }
+    }
+
     const materialLink = materialPreview.querySelector(".material-preview-link");
     let currentPreview;
     let openingLink;
@@ -67,7 +105,7 @@ if (materialGrid && typeof materialPreview?.showModal === "function") {
             }
             currentPreview = await response.json();
             previewTitle.textContent = currentPreview.title;
-            previewDescription.textContent = currentPreview.description || "Краткое описание пока недоступно.";
+            renderFormattedDescription(previewDescription, currentPreview.description_html, currentPreview.description);
             materialLink.href = currentPreview.url;
             openingLink = link;
             materialPreview.showModal();

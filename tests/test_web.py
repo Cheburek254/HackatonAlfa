@@ -551,3 +551,20 @@ class WebFlowTest(unittest.TestCase):
         page = response.get_data(as_text=True)
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", page)
         self.assertNotIn("<script>alert(1)</script>", page)
+
+    def test_material_description_formats_rich_html_and_plain_text(self):
+        from app.ui.web import format_description_html
+
+        raw_html = '<p><span style="background-color: transparent;">Форма утверждена.</span></p><p><br></p>'
+        formatted = format_description_html(raw_html)
+        self.assertEqual(formatted, "<p>Форма утверждена.</p>")
+        self.assertNotIn("style=", formatted)
+        self.assertNotIn("span", formatted)
+
+        raw_plain = "Первый абзац.\n\nВторой абзац."
+        formatted_plain = format_description_html(raw_plain)
+        self.assertEqual(formatted_plain, "<p>Первый абзац.</p><p>Второй абзац.</p>")
+
+        preview = self.client.get("/materials/start-checklist", headers={"Accept": "application/json"}).get_json()
+        self.assertIn("description_html", preview)
+        self.assertIn("<p>", preview["description_html"])

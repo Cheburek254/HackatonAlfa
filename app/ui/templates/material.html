@@ -5,7 +5,11 @@
         <div class="wrap">
             <p class="eyebrow">{{ material.format | upper if material.format else 'МАТЕРИАЛ' }}</p>
             <h1 id="material-title">{{ material.title }}</h1>
-            {% if material.description %}<p class="hero-copy">{{ material.description }}</p>{% endif %}
+            {% if description_html %}
+            <div class="hero-copy preview-description">{{ description_html | safe }}</div>
+            {% elif material.description %}
+            <p class="hero-copy">{{ material.description }}</p>
+            {% endif %}
             <div class="auth-options">
                 <form method="post" action="{{ open_url }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

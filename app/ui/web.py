@@ -44,6 +44,43 @@ def _material_destination(url: str) -> str:
     return url
 
 
+def format_description_html(raw: str | None) -> str:
+    """Форматирует описание материала для красивого и безопасного отображения в карточке/модалке."""
+    if not raw or not raw.strip():
+        return "<p>Краткое описание пока недоступно.</p>"
+    text = raw.strip()
+    if "<" in text and ">" in text:
+        text = re.sub(r'\s*style="[^"]*"', "", text, flags=re.IGNORECASE)
+        text = re.sub(r"</?span[^>]*>", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"<p>\s*(?:<br\s*/?>)?\s*</p>", "", text, flags=re.IGNORECASE)
+        text = re.sub(
+            r"<(?:script|style|iframe|object|embed)[^>]*>.*?</(?:script|style|iframe|object|embed)>",
+            "",
+            text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        allowed_tags = {"p", "br", "strong", "b", "em", "i", "ul", "ol", "li", "h1", "h2", "h3", "h4", "a"}
+
+        def _filter_tag(match: re.Match[str]) -> str:
+            tag = match.group(1).lower()
+            if tag in allowed_tags:
+                if tag == "a":
+                    href_m = re.search(r'href="([^"]*)"', match.group(0), re.IGNORECASE)
+                    if href_m and (href_m.group(1).startswith("http://") or href_m.group(1).startswith("https://")):
+                        return f'<a href="{href_m.group(1)}" target="_blank" rel="noopener noreferrer">'
+                    return "<a>"
+                return f"</{tag}>" if match.group(0).startswith("</") else f"<{tag}>"
+            return ""
+
+        text = re.sub(r"</?([a-zA-Z0-9]+)[^>]*>", _filter_tag, text).strip()
+        return text if text else "<p>Краткое описание пока недоступно.</p>"
+
+    paragraphs = [p.strip() for p in re.split(r"\n{2,}", text) if p.strip()]
+    if not paragraphs:
+        return f"<p>{text.replace(chr(10), '<br>')}</p>"
+    return "".join(f"<p>{p.replace(chr(10), '<br>')}</p>" for p in paragraphs)
+
+
 def create_app(
     recommender: Recommender = recommend, *, database_path: Path | None = None, algorithm_name: str | None = None,
 ) -> Flask:
@@ -178,15 +215,19 @@ def create_app(
             record_interaction(current_account(), material_id, "view")
         impression = request.args.get("impression")
         open_url = url_for("open_material", material_id=material_id, impression=impression)
+        description_html = format_description_html(material.description)
         if request.accept_mimetypes.best == "application/json":
             return {
                 "title": material.title,
                 "description": material.description,
+                "description_html": description_html,
                 "url": _material_destination(material.url),
                 "open_url": open_url,
                 "csrf_token": csrf_token(),
             }
-        return render_template("material.html", material=material, open_url=open_url)
+        return render_template(
+            "material.html", material=material, description_html=description_html, open_url=open_url
+        )
 
     @app.post("/materials/<material_id>/open")
     def open_material(material_id):
