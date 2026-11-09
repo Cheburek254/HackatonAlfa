@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% set registering = mode == 'register' %}
+{% set admin_login = mode == 'admin_login' %}
+{% block title %}{{ 'Вход в админ-панель' if admin_login else 'Регистрация' if registering else 'Вход' }} — АльфаХак{% endblock %}
+{% block theme_color %}#d3d3d5{% endblock %}
+{% block body_attributes %} class="auth-screen"{% endblock %}
+{% block header %}{% endblock %}
+{% block footer %}{% endblock %}
+{% block content %}
+    <section class="auth-shell{% if registering %} auth-shell-register{% endif %}" aria-labelledby="auth-title">
+        <div class="auth-welcome">
+            <a class="auth-brand" href="{{ url_for('index') }}">АльфаХак <span>Демо</span></a>
+            <p class="auth-welcome-title">{{ 'Аналитика АльфаХака' if admin_login else 'Добро пожаловать' }}</p>
+            <p class="auth-welcome-copy">{{ 'Показы, переходы и управление доступом.' if admin_login else 'Подбирайте материалы под задачи бизнеса и сохраняйте историю обучения.' }}</p>
+        </div>
+        <div class="auth-panel">
+            <a class="auth-close" href="{{ url_for('index') }}" aria-label="Закрыть и вернуться к подбору">×</a>
+            <div class="auth-content">
+                <h1 id="auth-title">{{ 'Войти в админ-панель' if admin_login else 'Создать аккаунт' if registering else 'Войти в профиль' }}</h1>
+                <p class="auth-hint">{{ 'Введите логин и пароль аккаунта с админ-ролью.' if admin_login else 'Придумайте логин и пароль для демо и заполните параметры бизнеса.' if registering else 'Используйте логин и пароль от демо АльфаХака.' }}</p>
+                {% if error %}<p class="auth-error" role="alert">{{ error }}</p>{% endif %}
+                {% if password_access_allowed %}
+                <form class="auth-form" method="post" action="{{ url_for('accounts.' ~ mode) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="auth-fields">
+                        <label for="username">Логин
+                            <input id="username" name="username" value="{{ username }}" autocomplete="username"
+                                   autocapitalize="none" maxlength="32" required{% if registering %} aria-describedby="username-hint"{% endif %}>
+                            {% if registering %}<small id="username-hint">3–32 символа. Латиница, цифры и . _ -</small>{% endif %}
+                        </label>
+                        <label for="password">Пароль
+                            <input id="password" name="password" type="password" maxlength="128" required
+                                   autocomplete="{{ 'new-password' if registering else 'current-password' }}"
+                                   {% if registering %}minlength="15" aria-describedby="password-hint"{% endif %}>
+                            {% if registering %}<small id="password-hint">От 15 до 128 символов</small>{% endif %}
+                        </label>
+                    </div>
+                    {% if registering %}{% include "profile_fields.html" %}{% endif %}
+                    <button class="button button-primary auth-action" type="submit">{{ 'Зарегистрироваться' if registering else 'Войти' }}</button>
+                </form>
+                {% else %}
+                <p class="auth-hint">Вход и регистрация с паролем доступны по HTTPS.</p>
+                {% endif %}
+                {% if not admin_login %}
+                <div class="auth-divider">или</div>
+                <div class="auth-alternatives">
+                    <form method="post" action="{{ url_for('accounts.demo_login') }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="button auth-secondary auth-action" type="submit">Войти в тестовый аккаунт</button>
+                    </form>
+                    <button class="button auth-secondary auth-action auth-provider" type="button" data-demo-alfa>Alfa ID <span>Демо</span></button>
+                    <button class="button auth-secondary auth-action auth-provider" type="button" data-demo-alfa>Alfa ID для бизнеса <span>Демо</span></button>
+                </div>
+                {% if password_access_allowed %}
+                <p class="auth-switch"><a href="{{ url_for('accounts.login' if registering else 'accounts.register') }}">{{ 'Уже есть аккаунт? Войти' if registering else 'Создать аккаунт' }}</a></p>
+                {% endif %}
+                {% endif %}
+            </div>
+        </div>
+    </section>
+    {% if not admin_login %}
+    <dialog id="auth-demo-notice" class="auth-demo-notice" aria-labelledby="auth-demo-title" aria-describedby="auth-demo-description">
+        <h2 id="auth-demo-title">Alfa ID в демо</h2>
+        <p id="auth-demo-description">Интеграция с Alfa ID не подключена. Войдите по логину и паролю АльфаХака или откройте тестовый аккаунт.</p>
+        <form method="dialog"><button class="button button-primary" type="submit" autofocus>Понятно</button></form>
+    </dialog>
+    <script src="{{ url_for('static', filename='auth-demo.js') }}" defer></script>
+    {% endif %}
+{% endblock %}

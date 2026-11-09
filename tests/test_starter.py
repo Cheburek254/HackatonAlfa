@@ -2,7 +2,7 @@ import unittest
 from pathlib import Path
 
 from app.catalog import load_catalog, load_history
-from app.contracts import Profile, Recommender
+from app.contracts import InteractionEvent, Profile, Recommender
 from app.ui.stub import recommend
 
 
@@ -46,3 +46,11 @@ class StarterContractTest(unittest.TestCase):
         for limit in (0, -1):
             with self.subTest(limit=limit):
                 self.assertEqual(recommend(self.catalog, Profile(), (), limit).items, ())
+
+    def test_history_promotes_related_materials_without_overriding_the_goal(self):
+        history = (InteractionEvent("start-checklist", "view"), InteractionEvent("marketing-first-sales", "click"))
+        result = recommend(self.catalog, Profile(), history, 3)
+        self.assertEqual(result.items[0].material_id, "marketing-repeat-sales")
+        self.assertIn("просмотров", result.ordering_reason)
+        result = recommend(self.catalog, Profile(goal="финансы"), history, 3)
+        self.assertEqual(result.items[0].material_id, "finance-cashflow")

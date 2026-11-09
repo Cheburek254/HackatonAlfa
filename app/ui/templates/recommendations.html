@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block content %}
+        <section class="hero" aria-labelledby="hero-title">
+            <div class="wrap hero-layout">
+                <div class="hero-content">
+                    <p class="eyebrow">ОБУЧЕНИЕ ДЛЯ ПРЕДПРИНИМАТЕЛЕЙ</p>
+                    <h1 id="hero-title">Что хотите решить<br class="hero-break"> в&nbsp;бизнесе?</h1>
+                    <p class="hero-copy">Опишите задачу, и мы предложим материалы, с которых можно начать.</p>
+
+                    <form method="post" action="{{ url_for('index', _anchor='recommendations') }}">
+                        <input type="hidden" name="result_order" value="{{ result_order }}">
+                        <label class="sr-only" for="goal">Текущая задача</label>
+                        <div class="goal-row">
+                            <input id="goal" name="goal" type="text" maxlength="{{ goal_max_length }}"
+                                   placeholder="Например, найти первых клиентов" value="{{ profile.goal or '' }}">
+                            <button class="button button-primary" type="submit">Подобрать материалы</button>
+                        </div>
+                        <div class="quick-goals" aria-label="Примеры задач">
+                            {% for goal in quick_goals %}
+                            <button class="chip{% if goal == profile.goal %} chip-selected{% endif %}"
+                                    type="submit" name="quick_goal" value="{{ goal }}">{{ goal }}</button>
+                            {% endfor %}
+                        </div>
+                        <details class="profile"{% if show_profile_details %} open{% endif %}>
+                            <summary>Уточнить подборку <span>· необязательно</span></summary>
+                            {% include "profile_fields.html" %}
+                            <div class="profile-actions">
+                                {% if allow_sample_history %}
+                                <label class="history-option">
+                                    <input type="checkbox" name="history" value="sample"{% if use_sample_history %} checked{% endif %}>
+                                    Учесть пример истории просмотров
+                                </label>
+                                {% endif %}
+                                <div class="profile-buttons">
+                                    <button class="skip-button" type="submit" name="action" value="skip_profile">Пропустить</button>
+                                    <button class="button button-profile" type="submit">Обновить подборку</button>
+                                </div>
+                            </div>
+                        </details>
+                    </form>
+                </div>
+                <img class="hero-art" src="{{ url_for('static', filename='learning.svg') }}" alt="" width="520" height="410">
+            </div>
+        </section>
+
+        <section class="results recommendations-results" id="recommendations" aria-labelledby="results-title">
+            <div class="wrap">
+                <div class="results-heading">
+                    <p class="eyebrow">АЛЬФА-КУРС</p>
+                    <h2 id="results-title">Рекомендации для вас</h2>
+                    {% if profile.goal %}<p class="goal-caption">Задача · {{ profile.goal }}</p>{% endif %}
+                    {% set selected_profile = profile_values.values() | select | list %}
+                    {% if selected_profile %}<p class="order-reason">Параметры подбора · {{ selected_profile | join(', ') }}</p>{% endif %}
+                    {% if result_order == 'recommended' and result.ordering_reason %}
+                    <p class="order-reason">{{ result.ordering_reason }}</p>
+                    {% endif %}
+                </div>
+
+                {% if result.items %}
+                <form class="result-orders" id="result-orders" aria-label="Порядок выдачи" method="post" action="{{ url_for('index', _anchor='recommendations') }}">
+                    <input type="hidden" name="goal" value="{{ profile.goal or '' }}">
+                    <input type="hidden" name="current_order" value="{{ result_order }}">
+                    {% if impression_batch %}<input type="hidden" name="impression_batch" value="{{ impression_batch }}">{% endif %}
+                    {% if skip_profile %}<input type="hidden" name="action" value="skip_profile">{% endif %}
+                    {% if use_sample_history %}<input type="hidden" name="history" value="sample">{% endif %}
+                    {% for field, value in profile_values.items() %}
+                    <input type="hidden" name="{{ field }}" value="{{ value or '' }}">
+                    {% endfor %}
+                    {% for order, label in result_orders.items() %}
+                    <button class="result-order" type="submit" name="result_order" value="{{ order }}"
+                            aria-pressed="{{ 'true' if result_order == order else 'false' }}">{{ label }}</button>
+                    {% endfor %}
+                </form>
+                <p class="result-metrics-note">
+                    {% if result_order == 'popularity' %}Показаны материалы с данными о популярности.{% endif %}
+                    {% if result_order == 'rating' %}Показаны материалы с оценкой.{% endif %}
+                    В демо популярность и оценки приведены для примера.
+                </p>
+                {% endif %}
+
+                {% if result.follow_up_question %}
+                <div class="follow-up">
+                    <p>{{ result.follow_up_question }}</p>
+                    <a href="#goal">Уточнить задачу ↑</a>
+                </div>
+                {% endif %}
+
+                {% if cards %}
+                <script src="{{ url_for('static', filename='material-preview.js') }}" defer></script>
+                <div class="card-grid" data-impression-url="{{ url_for('recommendation_impressions') }}" data-impression-csrf="{{ csrf_token() }}">
+                    {% for material, item in cards %}
+                    <article class="card" id="result-card-{{ loop.index }}" tabindex="-1">
+                        <div class="card-cover cover-{{ loop.cycle(1, 2, 3) }}">
+                            <div class="cover-labels">
+                                <span class="tag topic">{{ material.topics[0] | capitalize if material.topics else 'Материал' }}</span>
+                                {% if material.access == 'paid' %}<span class="tag paid">Платно</span>
+                                {% elif material.access == 'free' %}<span class="tag">Бесплатно</span>{% endif %}
+                            </div>
+                            <div class="cover-art" aria-hidden="true"><span></span><span></span><span></span></div>
+                        </div>
+                        <div class="card-content">
+                            <div class="card-meta">
+                                <span>{{ material.format | capitalize if material.format else 'Материал' }}</span>
+                                {% if loop.first and result_order == 'recommended' %}<span class="first-pick">Начните с этого</span>{% endif %}
+                            </div>
+                            <h3>{{ material.title }}</h3>
+                            {% if material.popularity is not none or material.rating is not none %}
+                            <div class="card-metrics">
+                                {% if material.popularity is not none %}
+                                <span>Популярность · {{ material.popularity | string | replace('.', ',') }}</span>
+                                {% endif %}
+                                {% if material.rating is not none %}
+                                <span>Оценка · {{ material.rating | string | replace('.', ',') }} из 5</span>
+                                {% endif %}
+                            </div>
+                            {% endif %}
+                            <dl class="card-explanation">
+                                <dt>Почему подходит</dt>
+                                <dd>{{ item.reason }}</dd>
+                                <dt>Следующий шаг</dt>
+                                <dd>{{ item.next_step }}</dd>
+                            </dl>
+                            <a class="material-link" href="{{ url_for('material_page', material_id=material.id, impression=impression_tickets[loop.index0]) }}" aria-label="Подробнее: {{ material.title }}">
+                                Подробнее о материале <span aria-hidden="true">→</span>
+                            </a>
+                        </div>
+                    </article>
+                    {% endfor %}
+                </div>
+                <div class="result-pagination">
+                    <p>Показано {{ cards | length }} из {{ total_cards }}</p>
+                    {% if next_page %}
+                    <button class="button button-primary" type="submit" form="result-orders"
+                            formaction="{{ url_for('index', _anchor='result-card-' ~ (cards | length + 1)) }}"
+                            name="show_page" value="{{ next_page }}">Показать больше</button>
+                    {% endif %}
+                </div>
+                <dialog id="material-preview" class="material-preview" aria-labelledby="preview-title" aria-describedby="preview-description">
+                    <div class="material-preview-content">
+                        <form method="dialog" class="material-preview-close">
+                            <button class="button" type="submit" aria-label="Закрыть" autofocus>×</button>
+                        </form>
+                        <p class="eyebrow">О МАТЕРИАЛЕ</p>
+                        <h2 id="preview-title"></h2>
+                        <p id="preview-description"></p>
+                        <a class="button button-primary material-preview-link" target="_blank" rel="noopener noreferrer">Открыть материал <span aria-hidden="true">↗</span></a>
+                    </div>
+                </dialog>
+                {% elif result.items %}
+                <p class="empty-state">В этой подборке пока нет материалов {{ 'с оценкой' if result_order == 'rating' else 'с данными о популярности' }}. Вернитесь к порядку «По подбору», чтобы увидеть все рекомендации.</p>
+                {% elif not result.follow_up_question %}
+                <p class="empty-state">Подборка пока пуста. <a href="#goal">Попробуйте уточнить задачу.</a></p>
+                {% endif %}
+            </div>
+        </section>
+{% endblock %}

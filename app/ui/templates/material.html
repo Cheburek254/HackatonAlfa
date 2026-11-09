@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}{{ material.title }} — Альфа-Курс{% endblock %}
+{% block content %}
+    <section class="hero" aria-labelledby="material-title">
+        <div class="wrap">
+            <p class="eyebrow">{{ material.format | upper if material.format else 'МАТЕРИАЛ' }}</p>
+            <h1 id="material-title">{{ material.title }}</h1>
+            {% if material.description %}<p class="hero-copy">{{ material.description }}</p>{% endif %}
+            <div class="auth-options">
+                <form method="post" action="{{ open_url }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="button button-primary" type="submit">Открыть на сайте <span aria-hidden="true">↗</span></button>
+                </form>
+                <a class="profile-back" href="{{ url_for('index', _anchor='recommendations') }}">← К рекомендациям</a>
+            </div>
+        </div>
+    </section>
+{% endblock %}

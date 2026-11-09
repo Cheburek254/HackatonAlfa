@@ -8,7 +8,9 @@
     "format": "чек-лист",
     "access": "free",
     "stages": ["запуск"],
-    "experience_levels": ["начинающий"]
+    "experience_levels": ["начинающий"],
+    "popularity": 410,
+    "rating": 4.7
   },
   {
     "id": "marketing-first-sales",
@@ -20,7 +22,9 @@
     "access": "free",
     "stages": ["запуск"],
     "industries": ["розница"],
-    "experience_levels": ["начинающий"]
+    "experience_levels": ["начинающий"],
+    "popularity": 1280,
+    "rating": 4.6
   },
   {
     "id": "marketing-repeat-sales",
@@ -32,7 +36,9 @@
     "access": "paid",
     "stages": ["рост"],
     "industries": ["розница"],
-    "experience_levels": ["опытный"]
+    "experience_levels": ["опытный"],
+    "popularity": 570,
+    "rating": 4.9
   },
   {
     "id": "marketing-service-leads",
@@ -43,7 +49,9 @@
     "format": "шаблон",
     "access": "free",
     "stages": ["работающий бизнес", "рост"],
-    "industries": ["услуги"]
+    "industries": ["услуги"],
+    "popularity": 640,
+    "rating": 4.7
   },
   {
     "id": "finance-cashflow",
@@ -54,7 +62,9 @@
     "format": "шаблон",
     "access": "free",
     "stages": ["работающий бизнес"],
-    "experience_levels": ["начинающий"]
+    "experience_levels": ["начинающий"],
+    "popularity": 910,
+    "rating": 4.9
   },
   {
     "id": "finance-profitability",
@@ -65,7 +75,9 @@
     "format": "курс",
     "access": "paid",
     "stages": ["рост"],
-    "experience_levels": ["опытный"]
+    "experience_levels": ["опытный"],
+    "popularity": 300,
+    "rating": 4.5
   },
   {
     "id": "operations-week-plan",

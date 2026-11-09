@@ -1,0 +1,63 @@
+[
+  {
+    "id": "empty-profile",
+    "profile": {},
+    "relevant_ids": ["start-checklist", "operations-week-plan"],
+    "note": "Для стартовой подборки подходят общие материалы с конкретным первым действием."
+  },
+  {
+    "id": "new-user-promotion",
+    "profile": {"goal": "Продвижение бизнеса"},
+    "relevant_ids": ["marketing-first-sales"],
+    "note": "Короткое руководство объясняет, где искать первых покупателей и как выбрать канал продвижения."
+  },
+  {
+    "id": "retail-launch",
+    "profile": {"goal": "Продажи в рознице", "industry": "розница", "stage": "запуск"},
+    "relevant_ids": ["marketing-first-sales"],
+    "note": "Магазин на запуске ищет первых покупателей."
+  },
+  {
+    "id": "retail-growth",
+    "profile": {"goal": "Продажи в рознице", "industry": "розница", "stage": "рост"},
+    "relevant_ids": ["marketing-repeat-sales"],
+    "note": "Для магазина на стадии роста уместен курс о возвращаемости покупателей."
+  },
+  {
+    "id": "marketing-without-history",
+    "profile": {"goal": "Маркетинг", "stage": "работающий бизнес"},
+    "relevant_ids": ["marketing-first-sales", "marketing-service-leads"],
+    "note": "При широкой задаче подходят вводный материал о продвижении и практический шаблон по работе с заявками."
+  },
+  {
+    "id": "marketing-with-history",
+    "profile": {"goal": "Маркетинг", "stage": "работающий бизнес"},
+    "history_fixture": "history.demo.json",
+    "relevant_ids": ["marketing-service-leads"],
+    "note": "Переход к шаблону в журнале даёт сигнал интереса к работе с заявками в сфере услуг."
+  },
+  {
+    "id": "cashflow",
+    "profile": {"goal": "УЧЕТ денежных потоков", "stage": "работающий бизнес", "experience": "начинающий"},
+    "relevant_ids": ["finance-cashflow"],
+    "note": "Таблица помогает собрать поступления и платежи и оценить остаток денег."
+  },
+  {
+    "id": "profitability",
+    "profile": {"goal": "Финансы и учёт. Хочу сравнить прибыльность направлений", "stage": "рост", "experience": "опытный"},
+    "relevant_ids": ["finance-profitability"],
+    "note": "Курс соответствует задаче сравнить прибыльность разных направлений."
+  },
+  {
+    "id": "weekly-plan",
+    "profile": {"goal": "Планирование на рабочую неделю"},
+    "relevant_ids": ["operations-week-plan"],
+    "note": "Пользователю нужен материал о выборе приоритетов на неделю."
+  },
+  {
+    "id": "outside-catalog",
+    "profile": {"goal": "Как настроить экспортную сертификацию?"},
+    "relevant_ids": [],
+    "note": "В синтетическом каталоге нет материала по экспортной сертификации."
+  }
+]

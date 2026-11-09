@@ -11,6 +11,12 @@ DEFAULT_CATALOG_PATH = Path(__file__).resolve().parents[2] / "data" / "catalog.n
 DEMO_CATALOG_PATH = Path(__file__).resolve().parents[2] / "fixtures" / "catalog.demo.json"
 
 
+def _optional_metric(value: object, *, maximum: float | None = None) -> float | None:
+    if type(value) not in (int, float) or not 0 <= value < float("inf"):
+        return None
+    return value if maximum is None or value <= maximum else None
+
+
 def load_catalog(path: Path | str | None = None) -> tuple[Material, ...]:
     """Загрузить нормализованный JSON-каталог, включая стартовую фикстуру."""
     if path is None:
@@ -44,6 +50,8 @@ def load_catalog(path: Path | str | None = None) -> tuple[Material, ...]:
                 experience_levels=tuple(
                     str(e).strip() for e in record.get("experience_levels", []) if str(e).strip()
                 ),
+                popularity=_optional_metric(record.get("popularity")),
+                rating=_optional_metric(record.get("rating"), maximum=5),
             )
         )
     return tuple(materials)
