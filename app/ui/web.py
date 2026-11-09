@@ -1,6 +1,5 @@
 """Веб-демо подбора материалов."""
 
-import os
 import re
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -9,10 +8,13 @@ from flask import Flask, Response, abort, redirect, render_template, request, ur
 
 from app.catalog import load_catalog, load_history
 from app.contracts import Profile, Recommender
+from app.ctr_report import ORDER_LABELS
+from app.database import account_database_path
 from app.ui.accounts import (
     DEMO_USERNAME, PROFILE_FIELDS, account_avatar, check_csrf, configure_accounts, csrf_token, current_account,
     profile_values, recent_interactions, record_interaction, saved_profile, update_profile,
 )
+from app.ui.admin import admin
 from app.ui.avatars import AVATAR_MAX_BYTES, AVATAR_MAX_MB, prepare_avatar
 from app.ui.impressions import issue_impression_tickets, record_impressions
 from app.ui.stub import recommend
@@ -21,11 +23,6 @@ FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 QUICK_GOALS = ("Найти первых клиентов", "Увеличить продажи", "Разобраться в учёте")
 GOAL_MAX_LENGTH = 200
 RESULTS_PER_PAGE = 6
-RESULT_ORDERS = {
-    "recommended": "По подбору",
-    "popularity": "По популярности",
-    "rating": "По оценке",
-}
 IDENTITY_FIELDS = {
     "first_name": ("Имя", 60, "given-name"),
     "last_name": ("Фамилия", 60, "family-name"),
@@ -52,10 +49,8 @@ def create_app(
 ) -> Flask:
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = 8 * 1024
-    database_path = database_path or Path(
-        os.environ.get("ALFA_DATABASE_PATH", FIXTURES.parent / "data" / "accounts" / "users.sqlite3")
-    )
-    configure_accounts(app, database_path)
+    configure_accounts(app, database_path or account_database_path())
+    app.register_blueprint(admin)
     catalog = load_catalog(FIXTURES / "catalog.demo.json")
     materials_by_id = {material.id: material for material in catalog}
     sample_history = load_history(FIXTURES / "history.demo.json")
@@ -224,7 +219,7 @@ def create_app(
             history = recent_interactions(account)
         result = recommender(catalog, profile, history, len(catalog))
         result_order = form.get("result_order", form.get("current_order", "recommended"))
-        if result_order not in RESULT_ORDERS:
+        if result_order not in ORDER_LABELS:
             result_order = "recommended"
         cards = [(materials_by_id[item.material_id], item) for item in result.items]
         if result_order != "recommended":
@@ -248,7 +243,7 @@ def create_app(
             use_sample_history=use_sample_history,
             skip_profile=skip_profile,
             result_order=result_order,
-            result_orders=RESULT_ORDERS,
+            result_orders=ORDER_LABELS,
             result=result,
             cards=visible_cards,
             impression_batch=impression_batch,

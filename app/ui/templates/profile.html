@@ -49,6 +49,9 @@
                     {% if not is_demo %}
                     <a href="{{ url_for('profile_settings') }}"{% if settings %} aria-current="page"{% endif %}>Настройки профиля</a>
                     {% endif %}
+                    {% if account.is_admin %}
+                    <a href="{{ url_for('admin.dashboard') }}">Админ-панель</a>
+                    {% endif %}
                 </nav>
             </div>
         </section>

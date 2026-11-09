@@ -36,6 +36,8 @@ PROFILE_FIELDS = {
 }
 PROFILE_COOKIE = "alfahack_profile"
 LOGIN_PATTERN = re.compile(r"[a-z0-9_.-]{3,32}")
+PASSWORD_MIN_LENGTH = 15
+PASSWORD_MAX_LENGTH = 128
 PASSWORD_METHOD = "scrypt:32768:8:3"
 DUMMY_HASH = generate_password_hash(secrets.token_hex(16), method=PASSWORD_METHOD)
 ATTEMPT_WINDOW = 600
@@ -76,6 +78,9 @@ CREATE TABLE IF NOT EXISTS account_sessions (
     token_hash TEXT PRIMARY KEY NOT NULL,
     user_id INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     expires INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS admin_accounts (
+    user_id INTEGER PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS account_sessions_expires ON account_sessions (expires);
 CREATE TABLE IF NOT EXISTS interaction_events (
@@ -202,7 +207,8 @@ def current_account() -> sqlite3.Row | None:
         return None
     account = _db().execute(
         """SELECT users.id, username, stage, industry, experience, team_size, learning_topic, preferred_format,
-                  first_name, last_name, company, email, phone, avatar IS NOT NULL AS has_avatar
+                  first_name, last_name, company, email, phone, avatar IS NOT NULL AS has_avatar,
+                  EXISTS (SELECT 1 FROM admin_accounts WHERE user_id = users.id) AS is_admin
            FROM account_sessions
            JOIN users ON users.id = account_sessions.user_id
            LEFT JOIN account_details ON account_details.user_id = users.id
@@ -212,6 +218,54 @@ def current_account() -> sqlite3.Row | None:
     if account is None:
         session.clear()
     return account
+
+
+def admin_usernames() -> tuple[str, ...]:
+    rows = _db().execute(
+        "SELECT username FROM admin_accounts JOIN users ON users.id = user_id ORDER BY username"
+    )
+    return tuple(row["username"] for row in rows)
+
+
+def grant_admin(username: str) -> bool:
+    connection = _db()
+    with connection:
+        row = connection.execute(
+            """INSERT INTO admin_accounts (user_id)
+               SELECT id FROM users WHERE username = ? AND password_hash IS NOT NULL
+               ON CONFLICT(user_id) DO UPDATE SET user_id = excluded.user_id
+               RETURNING user_id""",
+            (username,),
+        ).fetchone()
+    return row is not None
+
+
+def create_admin_account(username: str, password: str) -> bool:
+    password_hash = generate_password_hash(password, method=PASSWORD_METHOD)
+    connection = _db()
+    with connection:
+        row = connection.execute(
+            INSERT_USER, {**profile_values({}), "username": username, "password_hash": password_hash},
+        ).fetchone()
+        if row is None:
+            return False
+        connection.execute("INSERT INTO admin_accounts (user_id) VALUES (?)", (row["id"],))
+    return True
+
+
+def reset_admin_password(username: str, password: str) -> bool:
+    password_hash = generate_password_hash(password, method=PASSWORD_METHOD)
+    connection = _db()
+    with connection:
+        row = connection.execute(
+            """UPDATE users SET password_hash = ? WHERE username = ?
+               AND id IN (SELECT user_id FROM admin_accounts) RETURNING id""",
+            (password_hash, username),
+        ).fetchone()
+        if row is None:
+            return False
+        connection.execute("DELETE FROM account_sessions WHERE user_id = ?", (row["id"],))
+    return True
 
 
 def saved_profile(account: sqlite3.Row | None) -> dict[str, str | None]:
@@ -360,7 +414,7 @@ def _auth_form(mode: str, error: str = "", username: str = "", status: int = 200
     ), status
 
 
-def _start_session(user_id: int):
+def _start_session(user_id: int, *, admin_login: bool = False):
     token = secrets.token_urlsafe(32)
     now = int(time())
     expires = now + int(SESSION_LIFETIME.total_seconds())
@@ -377,13 +431,18 @@ def _start_session(user_id: int):
     session.clear()
     session.permanent = True
     session["account_token"] = token
+    if admin_login:
+        session["admin_authenticated"] = True
+        return redirect(url_for("admin.dashboard"), code=303)
     return redirect(url_for("profile_page"), code=303)
 
 
 @auth.route("/login", methods=["GET", "POST"], endpoint="login")
 @auth.route("/register", methods=["GET", "POST"], endpoint="register")
+@auth.route("/admin/login", methods=["GET", "POST"], endpoint="admin_login")
 def credentials():
-    mode = "register" if request.endpoint == "accounts.register" else "login"
+    mode = request.endpoint.split(".")[-1]
+    admin_login = mode == "admin_login"
     if request.method == "GET":
         return _auth_form(mode)
     if not _password_access_allowed():
@@ -394,14 +453,15 @@ def credentials():
     password = request.form.get("password", "")
     address = request.remote_addr or "unknown"
     valid_login = bool(LOGIN_PATTERN.fullmatch(username))
-    scopes = ((f"{mode}:ip:{address}", 25),)
-    if mode == "login" and valid_login:
+    rate_mode = "register" if mode == "register" else "login"
+    scopes = ((f"{rate_mode}:ip:{address}", 25),)
+    if rate_mode == "login" and valid_login:
         scopes += ((f"login:user:{username}", 8),)
     if not _consume_attempts(scopes):
         return _auth_form(mode, "Слишком много попыток. Повторите позже.", status=429)
 
     if mode == "register":
-        if not valid_login or not 15 <= len(password) <= 128:
+        if not valid_login or not PASSWORD_MIN_LENGTH <= len(password) <= PASSWORD_MAX_LENGTH:
             return _auth_form(mode, "Проверьте формат логина и длину пароля.", username[:32], 400)
         values = profile_values(request.form)
         if not all(values.values()):
@@ -420,13 +480,16 @@ def credentials():
         return _start_session(account["id"])
 
     account = _db().execute(
-        "SELECT id, password_hash FROM users WHERE username = ? AND password_hash IS NOT NULL",
+        """SELECT id, password_hash, EXISTS (SELECT 1 FROM admin_accounts WHERE user_id = users.id) AS is_admin
+           FROM users WHERE username = ? AND password_hash IS NOT NULL""",
         (username,),
     ).fetchone() if valid_login else None
     password_hash = account["password_hash"] if account is not None else DUMMY_HASH
-    if 0 < len(password) <= 128 and check_password_hash(password_hash, password) and account is not None:
-        return _start_session(account["id"])
-    return _auth_form(mode, "Проверьте логин и пароль.", username[:32], 401)
+    if 0 < len(password) <= PASSWORD_MAX_LENGTH and check_password_hash(password_hash, password) and account is not None:
+        if not admin_login or account["is_admin"]:
+            return _start_session(account["id"], admin_login=admin_login)
+    error = "Проверьте данные админ-аккаунта." if admin_login else "Проверьте логин и пароль."
+    return _auth_form(mode, error, username[:32], 401)
 
 
 @auth.post("/login/demo")

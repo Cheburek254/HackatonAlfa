@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, urlsplit
 from PIL import Image
 
 from app.contracts import Material, Profile, Recommendation, RecommendationResult
+from app.ctr_report import Metrics, read_report
 from app.ui.web import create_app
 
 
@@ -58,6 +59,72 @@ class WebFlowTest(unittest.TestCase):
         self.assertIn("Сверьте план запуска", page)
         self.assertIn("Что уже сделали?", page)
         self.assertIn('href="/materials/start-checklist?impression=', page)
+
+    def test_admin_login_report_and_role_management(self):
+        self.assertEqual(self.client.get("/admin").location, "/admin/login")
+        self.assertEqual(self.register().status_code, 303)
+        self.assertEqual(self.client.get("/admin").status_code, 403)
+        credentials = {"username": "owner", "password": self.password}
+        self.assertEqual(self.post_form("/admin/login", credentials).status_code, 401)
+        runner = self.app.test_cli_runner()
+        self.assertEqual(runner.invoke(args=["admin", "grant", "demo"]).exit_code, 1)
+        self.assertEqual(runner.invoke(args=["admin", "grant", "owner"]).exit_code, 0)
+        self.assertEqual(self.client.get("/admin").location, "/admin/login")
+        self.assertEqual(self.post_form("/admin/login", credentials).location, "/admin")
+        self.assertEqual(self.client.post("/admin/accounts", data={"action": "grant", "username": "demo"}).status_code, 400)
+
+        guest = self.app.test_client()
+        self.assertEqual(self.post_form("/register", {
+            **self.business, "username": "nextadmin", "password": self.password,
+        }, client=guest).status_code, 303)
+        self.assertEqual(self.post_form("/admin/accounts", {
+            "action": "grant", "username": "nextadmin",
+        }, page="/profile", client=guest).status_code, 403)
+        self.assertEqual(self.post_form("/admin/accounts", {
+            "action": "grant", "username": "nextadmin",
+        }, page="/admin").status_code, 303)
+        self.assertEqual(guest.get("/admin").location, "/admin/login")
+        self.assertEqual(self.post_form("/admin/login", {
+            "username": "nextadmin", "password": self.password,
+        }, client=guest).location, "/admin")
+
+        new_account = {"action": "create", "username": "newadmin", "password": self.password}
+        self.assertEqual(self.post_form("/admin/accounts", new_account, page="/admin").status_code, 303)
+        new_admin = self.app.test_client()
+        self.assertEqual(self.post_form("/admin/login", new_account, client=new_admin).location, "/admin")
+
+        with closing(sqlite3.connect(self.database_path)) as connection, connection:
+            connection.executemany(
+                """INSERT INTO recommendation_impressions
+                   (batch_id, material_id, position, algorithm, result_order, audience, shown_at, clicked_at)
+                   VALUES (?, 'test-card', ?, ?, ?, ?, 100, ?)""",
+                [("1", 1, "algorithm-a", "recommended", "guest", 101),
+                 ("2", 1, "algorithm-a", "recommended", "account", None),
+                 ("3", 2, "algorithm-a", "popularity", "account", None),
+                 ("4", 1, "algorithm-a", "recommended", "demo", 101),
+                 ("5", 1, "algorithm-b", "recommended", "guest", None),
+                 ("6", 1, "demo-only", "recommended", "demo", 101)],
+            )
+        totals, detail = read_report(self.database_path)
+        self.assertEqual(totals, {"algorithm-a": Metrics(3, 1), "algorithm-b": Metrics(1, 0)})
+        self.assertEqual(detail[0], ("algorithm-a", "recommended", 1, Metrics(2, 1)))
+        self.assertAlmostEqual(totals["algorithm-a"].ctr, 100 / 3)
+        page = new_admin.get("/admin").get_data(as_text=True)
+        self.assertIn("Сводка по алгоритмам", page)
+        self.assertIn("50,00%", page)
+        self.assertNotIn("demo-only", page)
+
+        weak = runner.invoke(args=["admin", "reset-password", "owner"], input="12345\n12345\n")
+        self.assertEqual(weak.exit_code, 1)
+        self.assertEqual(self.client.get("/admin").status_code, 200)
+        replacement = "A replacement test passphrase!"
+        reset = runner.invoke(args=["admin", "reset-password", "owner"], input=f"{replacement}\n{replacement}\n")
+        self.assertEqual(reset.exit_code, 0)
+        self.assertEqual(self.client.get("/admin").location, "/admin/login")
+        self.assertEqual(self.post_form("/admin/login", credentials).status_code, 401)
+        self.assertEqual(self.post_form("/admin/login", {
+            **credentials, "password": replacement,
+        }).location, "/admin")
 
     def test_quick_goal_and_sample_history_reach_recommend(self):
         response = self.client.post("/", data={
