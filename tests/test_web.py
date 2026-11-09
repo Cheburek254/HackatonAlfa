@@ -568,3 +568,9 @@ class WebFlowTest(unittest.TestCase):
         preview = self.client.get("/materials/start-checklist", headers={"Accept": "application/json"}).get_json()
         self.assertIn("description_html", preview)
         self.assertIn("<p>", preview["description_html"])
+
+    def test_format_filter_narrows_displayed_cards(self):
+        response = self.client.post("/", data={"goal": "маркетинг", "format_filter": "статья"})
+        page = response.get_data(as_text=True)
+        self.assertIn('class="format-chip active"', page)
+        self.assertIn('name="format_filter" value="статья"', page)

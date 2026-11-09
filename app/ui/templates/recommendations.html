@@ -57,8 +57,20 @@
                 </div>
 
                 {% if result.items %}
+                <div class="format-filters-bar" role="tablist" aria-label="Форматы материалов">
+                    {% for fmt_key, fmt_name in format_filters.items() %}
+                    <button type="submit" form="result-orders" formaction="{{ url_for('index', _anchor='recommendations') }}"
+                            name="format_filter" value="{{ fmt_key }}"
+                            class="format-chip {{ 'active' if format_filter == fmt_key else '' }}"
+                            aria-pressed="{{ 'true' if format_filter == fmt_key else 'false' }}">
+                        {{ fmt_name }}
+                        <span class="format-count">{{ format_counts.get(fmt_key, 0) }}</span>
+                    </button>
+                    {% endfor %}
+                </div>
                 <form class="result-orders" id="result-orders" aria-label="Порядок выдачи" method="post" action="{{ url_for('index', _anchor='recommendations') }}">
                     <input type="hidden" name="goal" value="{{ profile.goal or '' }}">
+                    <input type="hidden" name="format_filter" value="{{ format_filter }}">
                     <input type="hidden" name="current_order" value="{{ result_order }}">
                     {% if impression_batch %}<input type="hidden" name="impression_batch" value="{{ impression_batch }}">{% endif %}
                     {% if skip_profile %}<input type="hidden" name="action" value="skip_profile">{% endif %}
@@ -91,7 +103,7 @@
                 <script src="{{ url_for('static', filename='material-preview.js') }}" defer></script>
                 <div class="card-grid" data-impression-url="{{ url_for('recommendation_impressions') }}" data-impression-csrf="{{ csrf_token() }}">
                     {% for material, item in cards %}
-                    <article class="card" id="result-card-{{ loop.index }}" tabindex="-1">
+                    <article class="card" id="result-card-{{ loop.index }}" data-format="{{ material.format }}" tabindex="-1">
                         <div class="card-cover cover-{{ loop.cycle(1, 2, 3) }}">
                             <div class="cover-labels">
                                 <span class="tag topic">{{ material.topics[0] | capitalize if material.topics else 'Материал' }}</span>

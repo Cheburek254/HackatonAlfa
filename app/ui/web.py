@@ -23,6 +23,16 @@ FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 QUICK_GOALS = ("Найти первых клиентов", "Увеличить продажи", "Разобраться в учёте")
 GOAL_MAX_LENGTH = 200
 RESULTS_PER_PAGE = 6
+
+FORMAT_LABELS = {
+    "all": "Все форматы",
+    "курс": "Курсы",
+    "статья": "Статьи",
+    "шаблон": "Шаблоны",
+    "вебинар": "Вебинары",
+    "подкаст": "Подкасты",
+    "калькулятор": "Калькуляторы",
+}
 IDENTITY_FIELDS = {
     "first_name": ("Имя", 60, "given-name"),
     "last_name": ("Фамилия", 60, "family-name"),
@@ -269,7 +279,21 @@ def create_app(
         result_order = form.get("result_order", form.get("current_order", "recommended"))
         if result_order not in ORDER_LABELS:
             result_order = "recommended"
-        cards = [(materials_by_id[item.material_id], item) for item in result.items]
+        format_filter = form.get("format_filter", request.args.get("format", "all"))
+        if format_filter not in FORMAT_LABELS:
+            format_filter = "all"
+
+        all_candidate_cards = [(materials_by_id[item.material_id], item) for item in result.items]
+        format_counts = {
+            fmt: sum(1 for card, _ in all_candidate_cards if card.format == fmt)
+            for fmt in ("курс", "статья", "шаблон", "вебинар", "подкаст", "калькулятор")
+        }
+        format_counts["all"] = len(all_candidate_cards)
+
+        cards = all_candidate_cards
+        if format_filter != "all":
+            cards = [c for c in cards if c[0].format == format_filter]
+
         if result_order != "recommended":
             cards = [card for card in cards if getattr(card[0], result_order) is not None]
             cards.sort(key=lambda card: getattr(card[0], result_order), reverse=True)
@@ -293,6 +317,9 @@ def create_app(
             skip_profile=skip_profile,
             result_order=result_order,
             result_orders=ORDER_LABELS,
+            format_filter=format_filter,
+            format_filters=FORMAT_LABELS,
+            format_counts=format_counts,
             result=result,
             cards=visible_cards,
             impression_batch=impression_batch,
