@@ -3,7 +3,7 @@ from pathlib import Path
 
 from app.catalog import load_catalog, load_history
 from app.contracts import Profile, Recommender
-from app.ui.stub import recommend
+from app.recommender import recommend
 
 
 def main(recommender: Recommender) -> None:

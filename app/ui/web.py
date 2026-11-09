@@ -17,7 +17,7 @@ from app.ui.accounts import (
 from app.ui.admin import admin
 from app.ui.avatars import AVATAR_MAX_BYTES, AVATAR_MAX_MB, prepare_avatar
 from app.ui.impressions import issue_impression_tickets, record_impressions
-from app.ui.stub import recommend
+from app.recommender import recommend
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 QUICK_GOALS = ("Найти первых клиентов", "Увеличить продажи", "Разобраться в учёте")
