@@ -52,3 +52,32 @@ class WebFlowTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.calls[-1], (Profile(goal="Найти клиентов"), (), 3))
+
+    def test_saved_profile_is_used_for_new_recommendations_in_this_browser(self):
+        response = self.client.post("/profile", data={
+            "stage": "рост",
+            "industry": "розница",
+            "experience": "опытный",
+        }, follow_redirects=True)
+
+        self.assertIn("Профиль сохранён.", response.get_data(as_text=True))
+        self.client.get("/")
+        self.assertEqual(self.calls[-1][0], Profile("рост", "розница", experience="опытный"))
+        self.client.post("/", data={"goal": "Продвижение"})
+        self.assertEqual(self.calls[-1][0], Profile("рост", "розница", "Продвижение", "опытный"))
+        self.client.application.test_client().get("/")
+        self.assertEqual(self.calls[-1][0], Profile())
+
+    def test_one_off_selection_and_skip_keep_the_saved_profile(self):
+        self.client.post("/profile", data={"stage": "рост", "industry": "услуги"})
+
+        self.client.post("/", data={"stage": "запуск", "industry": ""})
+        self.assertEqual(self.calls[-1][0], Profile(stage="запуск"))
+        self.client.post("/", data={"action": "skip_profile"})
+        self.assertEqual(self.calls[-1][0], Profile())
+        self.client.get("/")
+        self.assertEqual(self.calls[-1][0], Profile(stage="рост", industry="услуги"))
+
+        self.client.post("/profile", data={})
+        self.client.get("/")
+        self.assertEqual(self.calls[-1][0], Profile())

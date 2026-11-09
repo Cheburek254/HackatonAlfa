@@ -5,7 +5,18 @@
             <div class="wrap">
                 <p class="eyebrow"><span></span> АЛЬФА-КУРС</p>
                 <h1 id="profile-title">Профиль</h1>
-                <p class="hero-copy">Здесь появятся сведения о вашем бизнесе и учебные интересы.</p>
+                <p class="hero-copy">Укажите стадию бизнеса, сферу и опыт. Сохранённые параметры будут использоваться при подборе в этом браузере.</p>
+                <form class="profile-settings" method="post" action="{{ url_for('profile_page') }}">
+                    {% include "profile_fields.html" %}
+                    <div class="profile-actions">
+                        <button class="button button-primary" type="submit">Сохранить профиль</button>
+                        {% if saved %}
+                        <span class="profile-status" role="status">
+                            {{ 'Профиль сохранён.' if profile_values.values() | select | list else 'Профиль очищен.' }}
+                        </span>
+                        {% endif %}
+                    </div>
+                </form>
             </div>
         </section>
         <section class="results">

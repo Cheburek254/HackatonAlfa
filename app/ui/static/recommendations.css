@@ -101,7 +101,7 @@ h1 {
 }
 .hero-art { display: block; width: 100%; height: auto; margin-top: -24px; }
 .goal-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
-.goal-row input, .profile select {
+.goal-row input, .profile-fields select {
     width: 100%;
     min-width: 0;
     border: 1px solid #474747;
@@ -141,7 +141,9 @@ h1 {
     margin-block: 14px;
 }
 .profile-fields label { color: #dddde0; font-size: 13px; }
-.profile select { min-height: 42px; margin-top: 6px; padding: 6px 7px; }
+.profile-fields select { min-height: 42px; margin-top: 6px; padding: 6px 7px; }
+.profile-settings { max-width: 650px; }
+.profile-status { color: #dddde0; font-size: 14px; }
 .profile-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; }
 .history-option { display: inline-flex; align-items: center; gap: 7px; color: #d8d8da; font-size: 13px; }
 .history-option input { accent-color: var(--brand); }

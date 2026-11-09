@@ -1,8 +1,10 @@
 """Веб-демо подбора материалов."""
 
+import json
+from collections.abc import Mapping
 from pathlib import Path
 
-from flask import Flask, render_template, request
+from flask import Flask, redirect, render_template, request, url_for
 
 from app.catalog import load_catalog, load_history
 from app.contracts import Profile, Recommender
@@ -16,6 +18,24 @@ PROFILE_FIELDS = {
     "experience": ("Опыт", ("начинающий", "опытный")),
 }
 GOAL_MAX_LENGTH = 200
+PROFILE_COOKIE = "alfahack_profile"
+PROFILE_MAX_AGE = 180 * 24 * 60 * 60
+
+
+def _profile_values(values: Mapping[str, object]) -> dict[str, str | None]:
+    profile = {}
+    for field, (_, options) in PROFILE_FIELDS.items():
+        value = values.get(field)
+        profile[field] = value if isinstance(value, str) and value in options else None
+    return profile
+
+
+def _saved_profile() -> dict[str, str | None]:
+    try:
+        values = json.loads(request.cookies.get(PROFILE_COOKIE, "{}"))
+    except ValueError:
+        values = {}
+    return _profile_values(values if isinstance(values, dict) else {})
 
 
 def create_app(recommender: Recommender = recommend) -> Flask:
@@ -29,9 +49,29 @@ def create_app(recommender: Recommender = recommend) -> Flask:
     def health():
         return {"status": "ok"}
 
-    @app.get("/profile")
+    @app.route("/profile", methods=["GET", "POST"])
     def profile_page():
-        return render_template("profile.html")
+        if request.method == "POST":
+            profile = _profile_values(request.form)
+            response = redirect(url_for("profile_page", saved=1), code=303)
+            if any(profile.values()):
+                response.set_cookie(
+                    PROFILE_COOKIE,
+                    json.dumps(profile),
+                    max_age=PROFILE_MAX_AGE,
+                    httponly=True,
+                    secure=request.is_secure,
+                    samesite="Lax",
+                )
+            else:
+                response.delete_cookie(PROFILE_COOKIE)
+            return response
+        return render_template(
+            "profile.html",
+            profile_fields=PROFILE_FIELDS,
+            profile_values=_saved_profile(),
+            saved=request.args.get("saved") == "1",
+        )
 
     @app.route("/", methods=["GET", "POST"])
     def index():
@@ -39,10 +79,8 @@ def create_app(recommender: Recommender = recommend) -> Flask:
         quick_goal = form.get("quick_goal")
         goal = quick_goal if quick_goal in QUICK_GOALS else form.get("goal", "")
         skip_profile = form.get("action") == "skip_profile"
-        values = {}
-        for field, (_, options) in PROFILE_FIELDS.items():
-            value = form.get(field)
-            values[field] = value if value in options and not skip_profile else None
+        saved_profile = _saved_profile()
+        values = _profile_values({} if skip_profile else {**saved_profile, **form})
         profile = Profile(goal=goal.strip()[:GOAL_MAX_LENGTH] or None, **values)
         use_history = form.get("history") == "sample" and not skip_profile
         result = recommender(catalog, profile, sample_history if use_history else (), 3)
@@ -52,6 +90,7 @@ def create_app(recommender: Recommender = recommend) -> Flask:
             profile=profile,
             profile_values=values,
             profile_fields=PROFILE_FIELDS,
+            show_profile_details=use_history or (not skip_profile and values != saved_profile),
             quick_goals=QUICK_GOALS,
             goal_max_length=GOAL_MAX_LENGTH,
             use_history=use_history,
