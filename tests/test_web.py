@@ -13,9 +13,10 @@ from urllib.parse import parse_qs, urlsplit
 from PIL import Image
 
 from app.contracts import Material, Profile, Recommendation, RecommendationResult
-from app.ctr_report import Metrics, read_daily_activity, read_report, read_top_cards
+from app.ctr_report import DailyActivity, Metrics, read_daily_activity, read_report, read_top_cards
 from app.ui.stub import recommend as stub_recommend
 from app.ui.web import create_app
+from evaluation.runner import EVALUATION_DIR
 
 
 class WebFlowTest(unittest.TestCase):
@@ -122,11 +123,36 @@ class WebFlowTest(unittest.TestCase):
         self.assertIn("app.ai.stub.recomend", page)
         self.assertIn("Эффективность карточек", page)
         self.assertIn("Динамика за 30 дней", page)
-        comparison = self.post_form("/admin", {}, page="/admin", client=new_admin).get_data(as_text=True)
+        comparison = self.post_form("/admin", {"evaluation_suite": "demo"}, client=new_admin).get_data(as_text=True)
         self.assertIn("Проверено сценариев: 50", comparison)
+        self.assertIn("Синтетический каталог · результаты", comparison)
         self.assertIn("Hit@3", comparison)
         self.assertIn("MRR@3", comparison)
         self.assertIn("outside-catalog", comparison)
+        self.assertIn("CTR по дате показа", page)
+
+        unavailable = self.post_form("/admin", {"evaluation_suite": "real"}, client=new_admin).get_data(as_text=True)
+        self.assertIn("подключите экспорт каталога", unavailable)
+        self.assertNotIn("Проверено сценариев", unavailable)
+
+        real_cases = json.loads((EVALUATION_DIR / "profiles.real.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(real_cases), 100)
+        self.assertEqual(len({case["id"] for case in real_cases}), 100)
+        self.assertTrue(all(case["relevant_ids"] for case in real_cases))
+        referenced_ids = {mid for case in real_cases for mid in case["relevant_ids"]}
+        referenced_ids.update(event["material_id"] for case in real_cases for event in case.get("history", ()))
+        material = Material("test-card", "Курс из реального каталога", "https://example.com/real", format="курс")
+        self.app.config["EVALUATION_REAL_CATALOG"] = (material,) + tuple(
+            Material(mid, f"Материал {mid}", f"https://example.com/{mid}") for mid in sorted(referenced_ids)
+        )
+        self.app.config["CATALOG_FORMATS"] = {material.id: material.format}
+        self.app.config["CATALOG_TITLES"] = {material.id: material.title}
+        real_report = self.post_form("/admin", {"evaluation_suite": "real"}, client=new_admin).get_data(as_text=True)
+        self.assertIn("Реальный каталог · результаты", real_report)
+        self.assertIn("Проверено сценариев: 100", real_report)
+        self.assertNotIn("outside-catalog", real_report)
+        self.assertIn(material.title, new_admin.get("/admin?category=курс").get_data(as_text=True))
+        self.assertNotIn(material.title, new_admin.get("/admin?category=статья").get_data(as_text=True))
 
         with closing(sqlite3.connect(self.database_path)) as connection, connection:
             connection.execute(
@@ -168,8 +194,20 @@ class WebFlowTest(unittest.TestCase):
             )
         activity = read_daily_activity(self.database_path, datetime(2026, 11, 10, tzinfo=UTC).date())
         self.assertEqual(len(activity), 30)
-        self.assertEqual(activity[-2:], [("2026-11-09", Metrics(1, 0)), ("2026-11-10", Metrics(0, 1))])
-        self.assertEqual(read_top_cards(self.database_path), [("test-card", Metrics(1, 1))])
+        self.assertEqual(activity[-2:], [("2026-11-09", DailyActivity(1, 0, 1)), ("2026-11-10", DailyActivity(0, 1, 0))])
+        self.assertEqual(activity[-2][1].ctr, 100.0)
+        self.assertIsNone(activity[-1][1].ctr)
+
+        with closing(sqlite3.connect(self.database_path)) as connection, connection:
+            connection.executemany(
+                """INSERT INTO recommendation_impressions
+                   (batch_id, material_id, position, algorithm, result_order, audience, shown_at, clicked_at)
+                   VALUES (?, ?, 1, ?, 'recommended', 'guest', ?, ?)""",
+                [("synthetic-row", "test-card", "app.recommender.engine.recommend:demo-catalog", shown_at, clicked_at),
+                 ("not-in-catalog", "synthetic-card", "algorithm", shown_at, clicked_at)],
+            )
+        self.assertEqual(read_top_cards(self.database_path, {"test-card"}), [("test-card", Metrics(1, 1))])
+        self.assertEqual(read_top_cards(self.database_path, {"different"}), [])
 
     def test_quick_goal_and_sample_history_reach_recommend(self):
         response = self.client.post("/", data={

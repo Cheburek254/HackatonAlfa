@@ -4,19 +4,34 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.catalog import load_catalog, load_history
-from app.contracts import Profile, Recommender
+from app.catalog import DEMO_CATALOG_PATH, load_catalog, load_history
+from app.contracts import InteractionEvent, Material, Profile, Recommender
 from evaluation.topic_baseline import recommend_by_topic
 
 EVALUATION_DIR = Path(__file__).resolve().parent
 FIXTURES_DIR = EVALUATION_DIR.parent / "fixtures"
 TOP_K = 3
+SUITE_LABELS = {"demo": "Синтетический каталог", "real": "Реальный каталог"}
+
+
+class EvaluationDataError(ValueError):
+    """Разметку нельзя оценить на текущем каталоге."""
+
+
+def load_real_catalog(source: Path) -> tuple[Material, ...]:
+    if source.resolve() == DEMO_CATALOG_PATH.resolve():
+        raise EvaluationDataError("Для запуска реальных сценариев подключите экспорт каталога.")
+    if not source.is_file():
+        raise EvaluationDataError(f"Файл каталога не найден: {source}")
+    return load_catalog(source)
 
 
 @dataclass(frozen=True)
 class EvaluationRow:
     case_id: str
     note: str
+    goal: str | None
+    relevant_ids: tuple[str, ...]
     method: str
     material_ids: tuple[str, ...]
     reciprocal_rank: float | None
@@ -41,21 +56,36 @@ class EvaluationReport:
     scenario_count: int
 
 
-def run_evaluation(recommender: Recommender) -> EvaluationReport:
-    catalog = load_catalog(FIXTURES_DIR / "catalog.demo.json") + load_catalog(EVALUATION_DIR / "catalog.extra.json")
+def run_evaluation(
+    recommender: Recommender, *, suite: str = "demo", real_catalog: tuple[Material, ...] | None = None,
+) -> EvaluationReport:
+    if suite == "demo":
+        catalog = load_catalog(DEMO_CATALOG_PATH) + load_catalog(EVALUATION_DIR / "catalog.extra.json")
+    elif suite == "real":
+        if not real_catalog:
+            raise EvaluationDataError("Для запуска реальных сценариев подключите экспорт каталога.")
+        catalog = real_catalog
+    else:
+        raise EvaluationDataError("Неизвестный набор сценариев.")
     catalog_ids = {material.id for material in catalog}
-    cases = json.loads((EVALUATION_DIR / "profiles.demo.json").read_text(encoding="utf-8"))
+    cases = json.loads((EVALUATION_DIR / f"profiles.{suite}.json").read_text(encoding="utf-8"))
+    for case in cases:
+        referenced = set(case["relevant_ids"]) | {event["material_id"] for event in case.get("history", ())}
+        if unknown_ids := referenced - catalog_ids:
+            raise EvaluationDataError(
+                f"Каталог не совпадает с разметкой. В сценарии {case['id']} отсутствуют материалы: "
+                f"{', '.join(sorted(unknown_ids))}."
+            )
     methods = (("Тематический бейзлайн", recommend_by_topic), ("recommend", recommender))
     ranks: dict[str, list[float]] = {name: [] for name, _ in methods}
     rows = []
 
     for case in cases:
-        case_id = case["id"]
         relevant = set(case["relevant_ids"])
-        if unknown_ids := relevant - catalog_ids:
-            raise ValueError(f"{case_id} ссылается на отсутствующие материалы {sorted(unknown_ids)}")
         fixture = case.get("history_fixture")
-        history = load_history(FIXTURES_DIR / fixture) if fixture else ()
+        history = load_history(FIXTURES_DIR / fixture) if fixture else tuple(
+            InteractionEvent(**event) for event in case.get("history", ())
+        )
         profile = Profile(**case["profile"])
         for name, recommend in methods:
             result = recommend(catalog, profile, history, limit=TOP_K)
@@ -64,7 +94,7 @@ def run_evaluation(recommender: Recommender) -> EvaluationReport:
             if relevant:
                 score = next((1 / rank for rank, mid in enumerate(ids, 1) if mid in relevant), 0.0)
                 ranks[name].append(score)
-            rows.append(EvaluationRow(case_id, case["note"], name, ids, score))
+            rows.append(EvaluationRow(case["id"], case["note"], profile.goal, tuple(case["relevant_ids"]), name, ids, score))
 
     summaries = tuple(
         EvaluationSummary(name, len(scores), sum(score > 0 for score in scores), sum(scores) / len(scores) if scores else None)

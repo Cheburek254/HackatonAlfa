@@ -2,6 +2,7 @@
 
 import re
 from collections.abc import Sequence
+from functools import lru_cache
 
 from app.contracts import (
     InteractionEvent,
@@ -12,6 +13,7 @@ from app.contracts import (
 )
 
 
+@lru_cache(maxsize=4096)
 def _normalize(text: str) -> str:
     return " ".join(re.findall(r"[^\W_]+", text.casefold().replace("ё", "е")))
 

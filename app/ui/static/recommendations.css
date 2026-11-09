@@ -319,11 +319,13 @@ h1 {
 .admin-kpis > div:last-child { border-color: #6c3a36; background: #3a2020; }
 .admin-sections { display: grid; gap: 18px; }
 .admin-inline-form { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 14px; }
+.admin-inline-form select { margin-inline-start: 6px; padding: 7px 10px; border: 1px solid #c9c9cf; border-radius: 8px; background: #fff; color: var(--ink); font: inherit; }
 .admin-evaluation-details { margin-top: 16px; }
 .admin-evaluation-details summary { cursor: pointer; font-weight: 650; }
 .admin-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
 .admin-chart { margin: 0; padding: 14px; border: 1px solid #e7e7eb; border-radius: 12px; color: #ac2920; }
 .admin-chart.chart-clicks { color: #216553; }
+.admin-chart.chart-ctr { color: #465aa1; }
 .admin-chart figcaption { color: var(--ink); font-weight: 750; }
 .admin-chart svg { display: block; width: 100%; height: auto; }
 .admin-chart text { fill: #5a5a63; font-size: 13px; }
@@ -349,6 +351,7 @@ h1 {
 .admin-form input { width: 100%; min-width: 0; min-height: 42px; padding: 8px 10px; border: 1px solid #c9c9cf; border-radius: 8px; background: #fafafb; color: var(--ink); }
 .admin-form small { color: var(--muted); }
 .admin-form button { justify-self: start; }
+.admin-form button:disabled { opacity: .55; cursor: default; }
 .admin-sections > .logout-form { margin-top: 0; }
 
 .results {
@@ -360,6 +363,7 @@ h1 {
 }
 .results-heading { margin-bottom: 24px; }
 .recommendations-results > .wrap { width: min(100% - clamp(36px, 6vw, 64px), 1240px); }
+html:has(.recommendations-results) { overflow-anchor: none; }
 .results-heading .eyebrow { margin-bottom: 9px; color: var(--muted); }
 h2 {
     margin: 0;
@@ -591,6 +595,7 @@ h2 {
 .cover-2 { background: #c9efdd; --art-light: #64a6ff; --art-dark: #235bd6; }
 .cover-3 { background: #dfd8ff; --art-light: #b293ff; --art-dark: #7645dd; }
 .cover-labels { position: relative; z-index: 1; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 5px; }
+.card-cover-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .tag { padding: 4px 8px; border-radius: 7px; background: #fffffff0; color: #45454c; font-size: 11px; font-weight: 700; }
 .tag.paid { background: var(--button); color: #fff; }
 .cover-art {
@@ -655,6 +660,12 @@ h2 {
 @media (hover: hover) and (prefers-reduced-motion: no-preference) {
     .card { position: relative; transition: transform 160ms ease, box-shadow 160ms ease; }
     .card:hover { z-index: 1; transform: scale(1.025); }
+}
+
+@media (min-width: 1000px) {
+    .recommendations-results > .wrap { width: min(100% - clamp(32px, 4vw, 104px), 1920px); }
+    .recommendations-results .card-grid { gap: clamp(18px, 1.4vw, 28px); }
+    .recommendations-results .card-cover { min-height: 0; aspect-ratio: 1.95; }
 }
 
 @media (max-width: 900px) {

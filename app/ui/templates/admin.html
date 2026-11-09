@@ -8,23 +8,29 @@
         <strong>{{ '%.2f' | format(metrics.ctr) | replace('.', ',') }}%</strong>
     </td>
 {% endmacro %}
-{% macro activity_chart(chart_id, label, series) %}
-    {% set peak = [series | map(attribute=1) | max, 1] | max %}
-    {% set points %}
-        {% for day, count in series %}{{ 45 + loop.index0 * 19 }},{{ 140 - count / peak * 110 }} {% endfor %}
+{% macro activity_chart(chart_id, label, series, percentage=false) %}
+    {% set peak = 100 if percentage else [series | map(attribute=1) | max, 1] | max %}
+    {% set path %}
+        {% set line = namespace(connected=false) %}
+        {% for day, count in series %}
+            {% if count is none %}{% set line.connected = false %}
+            {% else %}{{ 'L' if line.connected else 'M' }}{{ 45 + loop.index0 * 19 }} {{ 140 - count / peak * 110 }} {% set line.connected = true %}{% endif %}
+        {% endfor %}
     {% endset %}
     <figure class="admin-chart {{ chart_id }}">
         <figcaption id="{{ chart_id }}-label">{{ label }}</figcaption>
         <svg viewBox="0 0 630 170" role="img" aria-labelledby="{{ chart_id }}-label">
             <line class="admin-chart-axis" x1="44" y1="30" x2="596" y2="30"/>
             <line class="admin-chart-axis" x1="44" y1="140" x2="596" y2="140"/>
-            <text x="34" y="34" text-anchor="end">{{ peak }}</text>
-            <text x="34" y="144" text-anchor="end">0</text>
-            <polyline class="admin-chart-line" points="{{ points | trim }}"/>
+            <text x="40" y="34" text-anchor="end">{{ peak }}{{ '%' if percentage }}</text>
+            <text x="40" y="144" text-anchor="end">0{{ '%' if percentage }}</text>
+            <path class="admin-chart-line" d="{{ path | trim }}"/>
             {% for day, count in series %}
+            {% if count is not none %}
             <circle class="admin-chart-point" cx="{{ 45 + loop.index0 * 19 }}" cy="{{ 140 - count / peak * 110 }}" r="3">
-                <title>{{ day }} · {{ count }}</title>
+                <title>{{ day }} · {{ ('%.2f' | format(count) | replace('.', ',') ~ '%') if percentage else count }}</title>
             </circle>
+            {% endif %}
             {% endfor %}
             <text x="44" y="162">{{ series[0][0][8:10] }}.{{ series[0][0][5:7] }}</text>
             <text x="596" y="162" text-anchor="end">{{ series[-1][0][8:10] }}.{{ series[-1][0][5:7] }}</text>
@@ -110,12 +116,24 @@
                 <div class="admin-charts">
                     {{ activity_chart('chart-impressions', 'Показы', impressions_by_day) }}
                     {{ activity_chart('chart-clicks', 'Переходы', clicks_by_day) }}
+                    {{ activity_chart('chart-ctr', 'CTR по дате показа', ctr_by_day, true) }}
                 </div>
+                <p class="account-muted">В CTR переход относится к дню показа, даже если карточку открыли позже. В дни без показов на графике оставлен пропуск.</p>
             </section>
 
             <section class="account-card" id="admin-cards" aria-labelledby="admin-cards-title">
                 <h2 id="admin-cards-title" class="account-section-title">Эффективность карточек</h2>
-                <p class="account-muted">До 20 карточек по CTR. При равенстве выше карточка с большим числом переходов. Тестовый аккаунт исключён.</p>
+                <p class="account-muted">До 20 карточек реального каталога по CTR. При равенстве выше карточка с большим числом переходов.</p>
+                <form class="admin-inline-form" method="get" action="{{ url_for('admin.dashboard', _anchor='admin-cards') }}">
+                    <label>Формат материала
+                        <select name="category">
+                            {% for value, label in top_formats.items() %}
+                            <option value="{{ value }}"{% if top_category == value %} selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <button class="button button-profile" type="submit">Показать топ</button>
+                </form>
                 {% if top_cards %}
                 <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Эффективность карточек">
                     <table class="admin-table">
@@ -131,27 +149,39 @@
                     </table>
                 </div>
                 {% else %}
-                <p class="admin-empty">Показов карточек пока нет.</p>
+                <p class="admin-empty">{% if real_catalog_available %}В выбранном формате пока нет показов.{% else %}Подключите реальный каталог, чтобы посмотреть топ.{% endif %}</p>
                 {% endif %}
             </section>
 
             <section class="account-card" id="admin-evaluation" aria-labelledby="admin-evaluation-title">
                 <h2 id="admin-evaluation-title" class="account-section-title">Тесты рекомендаций</h2>
                 <p class="account-muted">Hit@3 показывает долю сценариев с подходящим материалом в тройке. MRR@3 учитывает место первого подходящего материала.</p>
-                <form class="admin-inline-form" method="post" action="{{ url_for('admin.dashboard', _anchor='admin-evaluation') }}">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button class="button button-primary" type="submit">Запустить тесты</button>
-                </form>
-                {% if comparison %}
-                <p class="account-muted" role="status">Проверено сценариев: {{ comparison.scenario_count }}. Сценарии без релевантной карточки показаны отдельно.</p>
-                <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Итоги тестов">
+                <div class="admin-forms">
+                    {% for suite, label in evaluation_suites.items() %}
+                    <form class="admin-form" method="post" action="{{ url_for('admin.dashboard', category=top_category, _anchor='admin-evaluation') }}" aria-labelledby="evaluation-{{ suite }}-title">
+                        <h3 id="evaluation-{{ suite }}-title">{{ label }}</h3>
+                        <p class="account-muted">{{ '50 сценариев на демонстрационных материалах.' if suite == 'demo' else '100 размеченных сценариев на материалах «Альфа-Курса».' }}</p>
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="button {{ 'button-primary' if suite == 'real' else 'button-profile' }}" type="submit" name="evaluation_suite" value="{{ suite }}"{% if suite == 'real' and not real_catalog_available %} disabled{% endif %}>{{ 'Запустить синтетические тесты' if suite == 'demo' else 'Запустить тесты на реальном каталоге' }}</button>
+                        {% if suite == 'real' and not real_catalog_available %}
+                        <p class="account-muted">Для запуска подключите экспорт реального каталога.</p>
+                        {% endif %}
+                    </form>
+                    {% endfor %}
+                </div>
+                {% if evaluation_error %}
+                <p class="account-error admin-message" role="alert">{{ evaluation_suites[evaluation_suite] }}. {{ evaluation_error }}</p>
+                {% elif comparison %}
+                <h3>{{ evaluation_suites[evaluation_suite] }} · результаты</h3>
+                <p class="account-muted" role="status">Проверено сценариев: {{ comparison.scenario_count }}.{% if evaluation_suite == 'demo' %} Сценарии без релевантной карточки показаны отдельно.{% endif %}</p>
+                <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Итоги тестов · {{ evaluation_suites[evaluation_suite] }}">
                     <table class="admin-table">
                         <thead><tr><th scope="col">Метод</th><th scope="col">Hit@3</th><th scope="col">MRR@3</th></tr></thead>
                         <tbody>
                             {% for row in comparison.summaries %}
                             <tr><th scope="row">{{ row.method }}</th>
-                                <td>{{ '%.1f' | format(100 * row.hit_rate) }}% ({{ row.hits }}/{{ row.eligible }})</td>
-                                <td>{{ '%.3f' | format(row.mrr) }}</td></tr>
+                                <td>{% if row.hit_rate is not none %}{{ '%.1f' | format(100 * row.hit_rate) }}% ({{ row.hits }}/{{ row.eligible }}){% else %}—{% endif %}</td>
+                                <td>{{ '%.3f' | format(row.mrr) if row.mrr is not none else '—' }}</td></tr>
                             {% endfor %}
                         </tbody>
                     </table>
@@ -160,11 +190,13 @@
                     <summary>Результаты по сценариям</summary>
                     <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Результаты по сценариям">
                         <table class="admin-table">
-                            <thead><tr><th scope="col">Сценарий</th><th scope="col">Метод</th><th scope="col">Топ-3</th><th scope="col">RR@3</th></tr></thead>
+                            <thead><tr><th scope="col">Сценарий</th><th scope="col">Разметка</th><th scope="col">Метод</th><th scope="col">Топ-3</th><th scope="col">RR@3</th></tr></thead>
                             <tbody>
                                 {% for row in comparison.rows %}
-                                <tr><th scope="row" title="{{ row.note }}">{{ row.case_id }}</th><td>{{ row.method }}</td>
-                                    <td>{{ row.material_ids | join(', ') or 'Пусто' }}</td>
+                                <tr><th scope="row" title="{{ row.note }}">{{ row.goal or row.note }}<br><small>{{ row.case_id }}</small></th>
+                                    <td>{% for mid in row.relevant_ids %}{{ titles.get(mid, mid) if evaluation_suite == 'real' else mid }}{% if not loop.last %}<br>{% endif %}{% else %}—{% endfor %}</td>
+                                    <td>{{ row.method }}</td>
+                                    <td>{% for mid in row.material_ids %}{{ loop.index }}. {{ titles.get(mid, mid) if evaluation_suite == 'real' else mid }}{% if not loop.last %}<br>{% endif %}{% else %}Пусто{% endfor %}</td>
                                     <td>{{ '%.3f' | format(row.reciprocal_rank) if row.reciprocal_rank is not none else '—' }}</td></tr>
                                 {% endfor %}
                             </tbody>

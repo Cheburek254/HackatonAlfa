@@ -75,6 +75,9 @@
                                 {% elif material.access == 'free' %}<span class="tag">Бесплатно</span>{% endif %}
                             </div>
                             <div class="cover-art" aria-hidden="true"><span></span><span></span><span></span></div>
+                            {% if covers.get(material.id) %}
+                            <img class="card-cover-image" src="{{ covers[material.id] }}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">
+                            {% endif %}
                         </div>
                         <div class="card-content">
                             <div class="card-meta">

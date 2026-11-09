@@ -1,7 +1,9 @@
 """Сводка по показам и переходам рекомендаций из SQLite."""
 
+import json
 import sqlite3
 from argparse import ArgumentParser
+from collections.abc import Collection
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
@@ -13,6 +15,7 @@ ORDER_LABELS = {"recommended": "По подбору", "popularity": "По поп
 LEGACY_ALGORITHMS = ("app.ui.stub.recommend", "app.ai.stub.recomend")
 REPORT_AUDIENCE = "audience IN ('guest', 'account')"
 CURRENT_ALGORITHMS = "algorithm NOT IN (?, ?)"
+REAL_ALGORITHMS = f"{CURRENT_ALGORITHMS} AND algorithm NOT LIKE '%:demo-catalog'"
 
 
 @dataclass(frozen=True)
@@ -23,6 +26,17 @@ class Metrics:
     @property
     def ctr(self) -> float:
         return 100 * self.clicks / self.impressions if self.impressions else 0.0
+
+
+@dataclass(frozen=True)
+class DailyActivity:
+    impressions: int
+    clicks: int
+    attributed_clicks: int
+
+    @property
+    def ctr(self) -> float | None:
+        return 100 * self.attributed_clicks / self.impressions if self.impressions else None
 
 
 def read_report(database: Path, *, include_legacy: bool = False) -> tuple[dict[str, Metrics], list[tuple[str, str, int, Metrics]]]:
@@ -48,21 +62,24 @@ def read_report(database: Path, *, include_legacy: bool = False) -> tuple[dict[s
     return totals, detail
 
 
-def read_top_cards(database: Path, limit: int = 20) -> list[tuple[str, Metrics]]:
+def read_top_cards(database: Path, material_ids: Collection[str], limit: int = 20) -> list[tuple[str, Metrics]]:
+    if not material_ids:
+        return []
     with closing(sqlite3.connect(f"{database.resolve().as_uri()}?mode=ro", uri=True)) as connection:
         rows = connection.execute(
             f"""SELECT material_id, COUNT(*) AS impressions, COUNT(clicked_at) AS clicks
                FROM recommendation_impressions
-               WHERE {REPORT_AUDIENCE} AND {CURRENT_ALGORITHMS}
+               WHERE {REPORT_AUDIENCE} AND {REAL_ALGORITHMS}
+                 AND material_id IN (SELECT value FROM json_each(?))
                GROUP BY material_id
                ORDER BY 1.0 * clicks / impressions DESC, clicks DESC, impressions DESC, material_id
                LIMIT ?""",
-            (*LEGACY_ALGORITHMS, limit),
+            (*LEGACY_ALGORITHMS, json.dumps(list(material_ids)), limit),
         ).fetchall()
     return [(material_id, Metrics(shown, clicked)) for material_id, shown, clicked in rows]
 
 
-def read_daily_activity(database: Path, today: date | None = None) -> list[tuple[str, Metrics]]:
+def read_daily_activity(database: Path, today: date | None = None) -> list[tuple[str, DailyActivity]]:
     today = today or datetime.now(UTC).date()
     first_day = today - timedelta(days=29)
     start = int(datetime.combine(first_day, time(), UTC).timestamp())
@@ -70,22 +87,23 @@ def read_daily_activity(database: Path, today: date | None = None) -> list[tuple
     with closing(sqlite3.connect(f"{database.resolve().as_uri()}?mode=ro", uri=True)) as connection:
         rows = connection.execute(
             f"""WITH daily AS (
-                   SELECT date(shown_at, 'unixepoch') AS day, COUNT(*) AS impressions, 0 AS clicks
+                   SELECT date(shown_at, 'unixepoch') AS day, COUNT(*) AS impressions, 0 AS clicks,
+                          COUNT(clicked_at) AS attributed_clicks
                    FROM recommendation_impressions
                    WHERE {REPORT_AUDIENCE} AND {CURRENT_ALGORITHMS} AND shown_at >= ? AND shown_at < ?
                    GROUP BY day
                    UNION ALL
-                   SELECT date(clicked_at, 'unixepoch'), 0, COUNT(*)
+                   SELECT date(clicked_at, 'unixepoch'), 0, COUNT(*), 0
                    FROM recommendation_impressions
                    WHERE {REPORT_AUDIENCE} AND {CURRENT_ALGORITHMS} AND clicked_at >= ? AND clicked_at < ?
                    GROUP BY date(clicked_at, 'unixepoch')
                )
-               SELECT day, SUM(impressions), SUM(clicks) FROM daily GROUP BY day""",
+               SELECT day, SUM(impressions), SUM(clicks), SUM(attributed_clicks) FROM daily GROUP BY day""",
             (*LEGACY_ALGORITHMS, start, end, *LEGACY_ALGORITHMS, start, end),
         ).fetchall()
-    metrics = {day: Metrics(shown, clicked) for day, shown, clicked in rows}
+    metrics = {day: DailyActivity(shown, clicked, attributed) for day, shown, clicked, attributed in rows}
     days = [(first_day + timedelta(days=offset)).isoformat() for offset in range(30)]
-    return [(day, metrics.get(day, Metrics(0, 0))) for day in days]
+    return [(day, metrics.get(day, DailyActivity(0, 0, 0))) for day in days]
 
 
 def main() -> None:

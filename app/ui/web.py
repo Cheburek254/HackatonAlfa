@@ -1,8 +1,9 @@
 """Веб-демо подбора материалов."""
 
+import json
 import re
-from pathlib import Path
 from functools import partial
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from flask import Flask, Response, abort, redirect, render_template, request, url_for
@@ -26,6 +27,8 @@ QUICK_GOALS = ("Найти первых клиентов", "Увеличить �
 GOAL_MAX_LENGTH = 200
 RESULTS_PER_PAGE = 6
 PAGE_SIZES = (6, 12, 24)
+COVER_ORIGIN = "https://s19060.cdn.ngenix.net"
+COVER_METADATA = Path(__file__).with_name("public-covers.json")
 
 FORMAT_LABELS = {
     "all": "Все форматы",
@@ -80,10 +83,16 @@ def create_app(
     if not is_demo_catalog and not catalog:
         raise ValueError(f"Каталог пуст: {source}")
     materials_by_id = {material.id: material for material in catalog}
+    covers = {} if is_demo_catalog else json.loads(COVER_METADATA.read_text(encoding="utf-8"))
     app.config["CATALOG_TITLES"] = {material.id: material.title for material in catalog}
-    app.config["EVALUATION_RECOMMENDER"] = (
-        partial(recommend, explain_with_llm=False) if recommender is recommend else recommender
-    )
+    app.config["EVALUATION_REAL_CATALOG"] = None if is_demo_catalog else catalog
+    app.config["CATALOG_FORMATS"] = {} if is_demo_catalog else {material.id: _format_key(material) for material in catalog}
+    app.config["CATALOG_FORMAT_LABELS"] = FORMAT_LABELS
+    app.config["EVALUATION_RECOMMENDERS"] = {
+        suite: partial(recommend, explain_with_llm=False, links_directory=directory)
+        if recommender is recommend else recommender
+        for suite, directory in (("demo", FIXTURES), ("real", source.parent))
+    }
     sample_history = load_history(FIXTURES / "history.demo.json") if is_demo_catalog else ()
     configure_accounts(app, database_path or account_database_path())
     app.register_blueprint(admin)
@@ -107,8 +116,9 @@ def create_app(
             response.headers["Cache-Control"] = "no-store"
             response.headers["X-Frame-Options"] = "DENY"
             response.headers["X-Content-Type-Options"] = "nosniff"
+            cover_source = f" {COVER_ORIGIN}" if request.endpoint == "index" and covers else ""
             response.headers["Content-Security-Policy"] = (
-                "default-src 'none'; img-src 'self'; style-src 'self'; "
+                f"default-src 'none'; img-src 'self'{cover_source}; style-src 'self'; "
                 "base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
             )
             if request.endpoint == "index":
@@ -310,6 +320,7 @@ def create_app(
             page_sizes=PAGE_SIZES,
             result=result,
             cards=visible_cards,
+            covers=covers,
             impression_batch=impression_batch,
             impression_batch_id=impression_batch_id,
             impression_tickets=impression_tickets,

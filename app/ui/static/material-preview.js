@@ -42,6 +42,11 @@ function prepareCards() {
 }
 
 document.addEventListener("visibilitychange", prepareCards);
+document.addEventListener("error", (event) => {
+    if (event.target instanceof HTMLImageElement && event.target.classList.contains("card-cover-image")) {
+        event.target.hidden = true;
+    }
+}, true);
 prepareCards();
 
 let activeUpdate;
@@ -87,10 +92,20 @@ document.addEventListener("submit", async (event) => {
 
         const previousCards = [...section.querySelectorAll(".card")];
         const nextCards = [...next.querySelectorAll(".card")];
+        const scrollTop = window.scrollY;
         if (loadMore && section.dataset.impressionBatch === next.dataset.impressionBatch &&
             previousCards.length < nextCards.length &&
             previousCards.every((card, index) => card.dataset.materialId === nextCards[index].dataset.materialId)) {
-            previousCards.forEach((card, index) => nextCards[index].replaceWith(card));
+            const appendedCards = nextCards.slice(previousCards.length);
+            section.querySelector(".card-grid").append(...appendedCards);
+            section.querySelector(".result-pagination").replaceWith(next.querySelector(".result-pagination"));
+            section.querySelector('input[name="impression_batch"]').value = next.querySelector('input[name="impression_batch"]').value;
+            prepareCards();
+            window.scrollTo({ top: scrollTop, behavior: "instant" });
+            if (document.activeElement === document.body) {
+                appendedCards[0].focus({ preventScroll: true });
+            }
+            return;
         }
         section.replaceWith(next);
         prepareCards();
@@ -115,6 +130,7 @@ document.addEventListener("submit", async (event) => {
             }
             next.scrollIntoView({ block: "start" });
         } else if (loadMore) {
+            window.scrollTo({ top: scrollTop, behavior: "instant" });
             (nextCards[previousCards.length] || next.querySelector("#results-title"))?.focus({ preventScroll: true });
         } else {
             const matching = [...next.querySelectorAll("button")].find(
@@ -125,7 +141,9 @@ document.addEventListener("submit", async (event) => {
     } catch {
         if (!update.signal.aborted) {
             status.textContent = "Не удалось обновить подборку. Попробуйте ещё раз.";
-            status.scrollIntoView({ block: "nearest" });
+            if (!loadMore) {
+                status.scrollIntoView({ block: "nearest" });
+            }
         }
     } finally {
         if (activeUpdate === update) {

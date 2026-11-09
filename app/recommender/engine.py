@@ -141,6 +141,7 @@ def _load_recommended_links(directory: Path) -> dict[str, list[str]]:
     return links if isinstance(links, dict) else {}
 
 
+@lru_cache(maxsize=8192)
 def _normalize_text(text: str) -> str:
     return " ".join(re.findall(r"[^\W_]+", (text or "").casefold().replace("ё", "е")))
 
@@ -164,10 +165,11 @@ def _stem_ru(word: str) -> str:
     return word
 
 
-def _tokenize_stems(text: str) -> set[str]:
+@lru_cache(maxsize=8192)
+def _tokenize_stems(text: str) -> frozenset[str]:
     norm = _normalize_text(text)
     tokens = [w for w in norm.split() if w not in STOPWORDS and len(w) >= 2]
-    return {_stem_ru(w) for w in tokens}
+    return frozenset(_stem_ru(w) for w in tokens)
 
 
 @lru_cache(maxsize=1)
@@ -182,7 +184,7 @@ def _matches_synonym(word: str, synonym: str) -> bool:
     )
 
 
-def _expand_synonyms(stems: set[str], raw_norm: str) -> set[str]:
+def _expand_synonyms(stems: frozenset[str], raw_norm: str) -> set[str]:
     query_words = tuple(_stem_ru(word) for word in raw_norm.split())
     expanded = set()
     for group in _stemmed_synonyms():
@@ -443,12 +445,13 @@ def recommend(
     limit: int,
     *,
     explain_with_llm: bool = True,
+    links_directory: Path | None = None,
 ) -> RecommendationResult:
     """Ранжирует материалы каталога с учётом задачи, профиля, истории и популярности."""
     if not catalog or limit <= 0:
         return RecommendationResult((), "")
 
-    rec_links = _load_recommended_links(catalog_data_dir())
+    rec_links = _load_recommended_links(links_directory or catalog_data_dir())
     constraints = _parse_hard_constraints(profile.goal)
 
     # 1. Фильтрация и дедупликация
