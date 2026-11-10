@@ -64,7 +64,7 @@ def _load_env_credentials() -> tuple[str, str]:
 
 def _load_openrouter_credentials() -> tuple[str, str]:
     api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
-    model = os.environ.get("OPENROUTER_MODEL", "nvidia/nemotron-3.5-super-vl:free").strip()
+    model = os.environ.get("OPENROUTER_MODEL", "google/gemini-3.5-flash-lite").strip()
     if api_key:
         return api_key, model
 
