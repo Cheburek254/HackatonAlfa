@@ -21,6 +21,7 @@ from app.ui.avatars import AVATAR_MAX_BYTES, AVATAR_MAX_MB, prepare_avatar
 from app.ui.descriptions import format_description_html
 from app.ui.impressions import issue_impression_tickets, record_impressions
 from app.recommender import recommend
+from evaluation.catalog_quality import REPORT_NAME, catalog_fingerprint
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 QUICK_GOALS = ("Найти первых клиентов", "Увеличить продажи", "Разобраться в учёте")
@@ -86,6 +87,8 @@ def create_app(
     covers = {} if is_demo_catalog else json.loads(COVER_METADATA.read_text(encoding="utf-8"))
     app.config["CATALOG_TITLES"] = {material.id: material.title for material in catalog}
     app.config["EVALUATION_REAL_CATALOG"] = None if is_demo_catalog else catalog
+    app.config["CATALOG_QUALITY_PATH"] = None if is_demo_catalog else source.parent / REPORT_NAME
+    app.config["CATALOG_QUALITY_FINGERPRINT"] = None if is_demo_catalog else catalog_fingerprint(catalog)
     app.config["CATALOG_FORMATS"] = {} if is_demo_catalog else {material.id: _format_key(material) for material in catalog}
     app.config["CATALOG_FORMAT_LABELS"] = FORMAT_LABELS
     app.config["EVALUATION_RECOMMENDERS"] = {

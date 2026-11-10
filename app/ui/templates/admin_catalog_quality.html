@@ -1,0 +1,75 @@
+{% macro share(metric) -%}
+    {%- if metric.value is not none -%}
+        {{ "%.1f"|format(metric.value * 100)|replace('.', ',') }}% ({{ metric.numerator }}/{{ metric.denominator }})
+    {%- else -%}
+        Нет данных для расчёта
+    {%- endif -%}
+{%- endmacro %}
+<section class="account-card" id="admin-catalog-quality" aria-labelledby="admin-catalog-quality-title">
+    <h2 id="admin-catalog-quality-title" class="account-section-title">Качество рекомендаций и каталога</h2>
+    {% if catalog_quality %}
+    {% set catalog = catalog_quality.catalog %}
+    {% set history = catalog_quality.history %}
+    {% set expert = catalog_quality.expert %}
+    <p class="account-muted">Агрегированный отчёт по текущему каталогу. Дата расчёта {{ catalog_quality.generated_at[:10] }} (UTC).</p>
+    <h3>Покрытие и разнообразие</h3>
+    <p class="account-muted">Топ-3 на {{ catalog.scenario_count }} размеченных сценариях, {{ catalog.slots }} выданных позиций.</p>
+    <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Покрытие и разнообразие">
+        <table class="admin-table">
+            <thead><tr><th scope="col">Метрика</th><th scope="col">Результат</th><th scope="col">Как считали</th></tr></thead>
+            <tbody>
+                <tr><th scope="row">Покрытие каталога</th><td>{{ share(catalog.coverage) }}</td><td>Уникальные карточки, попавшие хотя бы в один топ-3.</td></tr>
+                <tr><th scope="row">Покрытие материалов без событий</th><td>{{ share(catalog.unseen) }}</td><td>Материалы, по которым в доступных журналах бэкапа не найдено событий для оценки.</td></tr>
+                <tr><th scope="row">Индекс Джини</th><td>{{ ('%.3f'|format(catalog.gini)|replace('.', ',')) if catalog.gini is not none else 'Нет данных для расчёта' }}</td><td>Распределение мест топ-3 по всему каталогу, включая материалы без показов.</td></tr>
+                <tr><th scope="row">Разнообразие типов</th><td>{{ ('%.2f'|format(catalog.type_diversity)|replace('.', ',')) if catalog.type_diversity is not none else 'Нет данных для расчёта' }}</td><td>Среднее число разных типов в непустой выдаче.</td></tr>
+                <tr><th scope="row">Семантическое разнообразие</th><td>{{ ('%.3f'|format(catalog.semantic_diversity)|replace('.', ',')) if catalog.semantic_diversity is not none else 'Нет данных для расчёта' }}</td><td>Среднее косинусное расстояние между текстовыми векторами для {{ catalog.semantic_pairs }} пар. Векторы получены из текста с помощью TF-IDF и SVD.</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <details class="admin-evaluation-details">
+        <summary>Покрытие по типам контента</summary>
+        <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Покрытие по типам контента">
+            <table class="admin-table">
+                <thead><tr><th scope="col">Тип</th><th scope="col">Покрытие</th></tr></thead>
+                <tbody>
+                    {% for row in catalog.types %}
+                    <tr><th scope="row">{{ row.label }}</th><td>{% if row.denominator %}{{ share(row) }}{% else %}Тип отсутствует в каталоге{% endif %}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </details>
+    <h3>Проверка на истории пользователей</h3>
+    <p class="account-muted">{{ history.sample }} профилей из {{ history.eligible }} с событиями в разное время. История заканчивается до последнего наблюдаемого момента. Сопоставленные события охватывают {{ catalog.size - catalog.unseen.denominator }} карточки каталога.</p>
+    <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Проверка на истории пользователей">
+        <table class="admin-table">
+            <thead><tr><th scope="col">Метрика</th><th scope="col">Результат</th><th scope="col">Как считали</th></tr></thead>
+            <tbody>
+                <tr><th scope="row">Повтор пройденного урока</th><td>{{ share(history.completed_lessons) }}</td><td>Доля выдач с ранее пройденным уроком.{% if not history.completed_lessons.denominator %} Самостоятельные уроки отсутствуют в текущей выборке каталога.{% endif %}</td></tr>
+                <tr><th scope="row">Повтор пройденного курса</th><td>{{ share(history.completed_courses) }}</td><td>Доля позиций у {{ history.completed_profiles }} профилей с завершёнными курсами.</td></tr>
+                <tr><th scope="row">Подписочные права</th><td>{{ share(history.paywall) }}</td><td>Для оценки нужны назначения подписок пользователям. Связей пользователя с курсом с заполненной подпиской в бэкапе {{ history.subscription_records }}.</td></tr>
+                <tr><th scope="row">Только платные карточки</th><td>{{ share(history.free_stress) }}</td><td>Стресс-тест для пользователя без платного доступа. Отдельно доля платных позиций {{ share(history.paid_slots) }}.</td></tr>
+                <tr><th scope="row">Совпадение тем и тегов</th><td>{{ share(history.topic_relevance) }}</td><td>Доля позиций с общей темой или тегом с материалами, оценёнными на 4–5. Профилей с такими темами {{ history.rated_profiles }}.</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <h3>Холодный старт и экспертные связи</h3>
+    <p>Критерий холодного старта выполнили {{ share(catalog_quality.cold_start.passed) }}. Все три позиции должны быть бесплатными вводными курсами или статьями из верхней четверти по ненулевому баллу популярности каталога.</p>
+    <details class="admin-evaluation-details">
+        <summary>Карточки в проверках холодного старта</summary>
+        <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Холодный старт">
+            <table class="admin-table">
+                <thead><tr><th scope="col">Профиль</th><th scope="col">Карточки</th></tr></thead>
+                <tbody>{% for row in catalog_quality.cold_start.profiles %}
+                    <tr><th scope="row">{{ row.profile }}</th><td>{% for item in row['items'] %}
+                        {{ item.title }} · {{ 'подходит' if item.suitable else 'вне критерия' }}{% if not loop.last %}<br>{% endif %}
+                    {% endfor %}</td></tr>
+                {% endfor %}</tbody>
+            </table>
+        </div>
+    </details>
+    <p>Экспертное совпадение в топ-3 — {{ share(expert.hit) }} по исходным карточкам и {{ share(expert.slots) }} по позициям. В расчёт вошли {{ expert.edges }} из {{ expert.raw_edges }} связей. Модель прошла этот тест с отключённым графом.</p>
+    {% else %}
+    <p class="admin-empty">Для этой версии каталога отчёт пока не загружен.</p>
+    {% endif %}
+</section>

@@ -446,12 +446,13 @@ def recommend(
     *,
     explain_with_llm: bool = True,
     links_directory: Path | None = None,
+    use_expert_links: bool = True,
 ) -> RecommendationResult:
     """Ранжирует материалы каталога с учётом задачи, профиля, истории и популярности."""
     if not catalog or limit <= 0:
         return RecommendationResult((), "")
 
-    rec_links = _load_recommended_links(links_directory or catalog_data_dir())
+    rec_links = _load_recommended_links(links_directory or catalog_data_dir()) if use_expert_links else {}
     constraints = _parse_hard_constraints(profile.goal)
 
     # 1. Фильтрация и дедупликация

@@ -8,6 +8,7 @@ from app.ui.accounts import (
     DEMO_USERNAME, LOGIN_PATTERN, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, admin_usernames, check_csrf,
     clear_interactions, create_admin_account, current_account, grant_admin, reset_admin_password,
 )
+from evaluation.catalog_quality import read_report as read_catalog_quality
 from evaluation.runner import EvaluationDataError, SUITE_LABELS, evaluation_scenario_counts, run_evaluation
 
 admin = Blueprint("admin", __name__, url_prefix="/admin")
@@ -61,6 +62,9 @@ def dashboard():
         top_formats=formats, top_category=category,
         evaluation_suites=SUITE_LABELS, evaluation_suite=evaluation_suite, evaluation_error=evaluation_error,
         evaluation_counts=evaluation_scenario_counts(),
+        catalog_quality=read_catalog_quality(
+            current_app.config["CATALOG_QUALITY_PATH"], current_app.config["CATALOG_QUALITY_FINGERPRINT"],
+        ),
         real_catalog_available=bool(real_catalog),
         impressions_by_day=[(day, metrics.impressions) for day, metrics in activity],
         clicks_by_day=[(day, metrics.clicks) for day, metrics in activity],
