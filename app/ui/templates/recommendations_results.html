@@ -114,11 +114,21 @@
                                 {% endif %}
                             </div>
                             {% endif %}
-                            <dl class="card-explanation">
-                                <dt>Почему подходит</dt>
-                                <dd>{{ item.reason }}</dd>
-                                <dt>Следующий шаг</dt>
-                                <dd>{{ item.next_step }}</dd>
+                            <dl class="card-explanation card-explanation-box">
+                                <div class="explanation-row">
+                                    <dt class="explanation-pill explanation-pill-why">
+                                        <span class="explanation-icon" aria-hidden="true">💡</span> Почему подходит
+                                    </dt>
+                                    <dd class="explanation-desc">{{ item.reason }}</dd>
+                                </div>
+                                {% if item.next_step %}
+                                <div class="explanation-row">
+                                    <dt class="explanation-pill explanation-pill-next">
+                                        <span class="explanation-icon" aria-hidden="true">🎯</span> Следующий шаг
+                                    </dt>
+                                    <dd class="explanation-desc">{{ item.next_step }}</dd>
+                                </div>
+                                {% endif %}
                             </dl>
                             <a class="material-link" href="{{ url_for('material_page', material_id=material.id, impression=impression_tickets[loop.index0]) }}" aria-label="Подробнее: {{ material.title }}">
                                 Подробнее о материале <span aria-hidden="true">→</span>
