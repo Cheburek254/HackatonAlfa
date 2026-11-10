@@ -28,7 +28,7 @@ from app.ui.accounts import (
 from app.ui.admin import admin
 from app.ui.chat import chat_bp
 from app.ui.avatars import AVATAR_MAX_BYTES, AVATAR_MAX_MB, prepare_avatar
-from app.ui.descriptions import format_description_html
+from app.ui.descriptions import clean_plain_text, format_description_html
 from app.ui.experiments import experiment_variant, track_experiment_activity
 from app.ui.impressions import issue_impression_tickets, record_impressions
 from app.recommender import recommend
@@ -245,6 +245,7 @@ def create_app(
     app.jinja_env.globals["chat_pages"] = CHAT_PAGES
     app.jinja_env.globals["material_format"] = _format_key
     app.jinja_env.globals["material_access_category"] = access_category
+    app.jinja_env.filters["clean_text"] = clean_plain_text
 
     @app.get("/health")
     def health():

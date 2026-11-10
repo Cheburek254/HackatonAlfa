@@ -47,7 +47,7 @@
                             </div>
                             <h3 class="next-card-title">{{ item.material.title }}</h3>
                             {% if item.material.description %}
-                            <p class="next-card-desc">{{ item.material.description | truncate(110) }}</p>
+                            <p class="next-card-desc">{{ item.material.description | clean_text | truncate(110) }}</p>
                             {% endif %}
                             <div class="next-card-bottom">
                                 {% if item.material.subscriptions %}

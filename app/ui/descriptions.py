@@ -1,5 +1,6 @@
 """Преобразование описаний каталога в ограниченный набор HTML-тегов."""
 
+import html
 import re
 from html import escape
 from html.parser import HTMLParser
@@ -64,3 +65,13 @@ def format_description_html(raw: str | None) -> str:
         f"<p>{escape(paragraph.strip()).replace(chr(10), '<br>')}</p>"
         for paragraph in re.split(r"\r?\n\s*\n", text.replace("\r\n", "\n")) if paragraph.strip()
     ) or EMPTY_DESCRIPTION
+
+
+def clean_plain_text(raw: str | None) -> str:
+    """Удаляет любые HTML-теги и сущности, возвращая чистый нормализованный текст."""
+    if not raw:
+        return ""
+    text = re.sub(r"<(?:br|/p|/div|/li|/tr|/h[1-6])[^>]*>", " ", raw, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = html.unescape(text)
+    return re.sub(r"\s+", " ", text).strip()

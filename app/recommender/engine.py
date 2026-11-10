@@ -1,5 +1,6 @@
 """Ядро персональных рекомендаций образовательных материалов «Альфа-Курса»."""
 
+import html
 import json
 import re
 from collections import Counter, defaultdict
@@ -354,6 +355,15 @@ def _format_score(material: Material, preferred_format: str | None, prefer_video
     return score, matched
 
 
+def _clean_plain_text(raw: str | None) -> str:
+    if not raw:
+        return ""
+    text = re.sub(r"<(?:br|/p|/div|/li|/tr|/h[1-6])[^>]*>", " ", raw, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = html.unescape(text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def _build_card_explanation(
     material: Material,
     profile: Profile,
@@ -402,13 +412,17 @@ def _build_card_explanation(
             prev_title = signals["history_continuation_from"]
             reasons.append(f"логичное практическое продолжение после изучения «{prev_title}»")
 
+    clean_desc = _clean_plain_text(material.description)
     if material.access == "paid":
-        short_benefit = (material.description or "Системная программа с разбором на практике.").strip().rstrip(".")
+        short_benefit = (clean_desc or "Системная программа с разбором на практике.").rstrip(".")
         if len(short_benefit) > 130:
             short_benefit = short_benefit[:127].rstrip(" ,.;:") + "..."
         reasons.append(f"Платный продукт: {short_benefit}")
-    elif not reasons and material.description:
-        reasons.append(material.description.strip().rstrip("."))
+    elif not reasons and clean_desc:
+        short_desc = clean_desc.rstrip(".")
+        if len(short_desc) > 140:
+            short_desc = short_desc[:137].rstrip(" ,.;:") + "..."
+        reasons.append(short_desc)
 
     reason_text = ". ".join(r[0].upper() + r[1:] for r in (reasons if reasons else ["Подходит под ваш профиль предпринимателя"])).rstrip(".") + "."
 

@@ -64,8 +64,8 @@
         // Bold **text**
         safe = safe.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
 
-        // Ссылки на карточки каталога и профиль.
-        safe = safe.replace(/\[([^\]]+)\]\((\/(?:materials\/[a-zA-Z0-9_-]+|profile))\)/g, '<a href="$2" class="chat-material-link">$1</a>');
+        // Ссылки на карточки каталога, профиль, настройки, авторизацию.
+        safe = safe.replace(/\[([^\]]+)\]\((\/(?:materials\/[a-zA-Z0-9_-]+|profile(?:\/settings)?(?:#[a-zA-Z0-9_-]+)?|login|register))\)/g, '<a href="$2" class="chat-material-link">$1</a>');
 
         // Lists and paragraphs
         const lines = safe.split("\n");
