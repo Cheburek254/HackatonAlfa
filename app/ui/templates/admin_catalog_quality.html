@@ -5,6 +5,28 @@
         Нет данных для расчёта
     {%- endif -%}
 {%- endmacro %}
+{% macro paywall_table(rows, label) %}
+<div class="admin-table-wrap" tabindex="0" role="region" aria-label="{{ label }}">
+    <table class="admin-table">
+        <thead><tr>
+            <th scope="col">Доступ профиля</th><th scope="col">Выдача</th>
+            <th scope="col">Есть недоступные ↓</th><th scope="col">Все карточки недоступны ↓</th>
+            <th scope="col">Недоступные позиции ↓</th><th scope="col">Пустая выдача ↓</th>
+            <th scope="col">Запрошенный доступный курс Курс+ в топ-3 ↑</th>
+        </tr></thead>
+        <tbody>
+            {% for row in rows %}
+            <tr>
+                <th scope="row">{{ row.plan }}</th><td>{{ row.mode }}</td>
+                <td>{{ share(row.any_restricted) }}</td><td>{{ share(row.all_restricted) }}</td>
+                <td>{{ share(row.restricted_slots) }}</td><td>{{ share(row.empty) }}</td>
+                <td>{{ share(row.requested_available) if row.requested_available.denominator else '—' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endmacro %}
 <section class="account-card" id="admin-catalog-quality" aria-labelledby="admin-catalog-quality-title">
     <h2 id="admin-catalog-quality-title" class="account-section-title">Качество рекомендаций и каталога</h2>
     {% if catalog_quality %}
@@ -47,12 +69,27 @@
             <tbody>
                 <tr><th scope="row">Повтор пройденного урока</th><td>{{ share(history.completed_lessons) }}</td><td>Доля выдач с ранее пройденным уроком.{% if not history.completed_lessons.denominator %} Самостоятельные уроки отсутствуют в текущей выборке каталога.{% endif %}</td></tr>
                 <tr><th scope="row">Повтор пройденного курса</th><td>{{ share(history.completed_courses) }}</td><td>Доля позиций у {{ history.completed_profiles }} профилей с завершёнными курсами.</td></tr>
-                <tr><th scope="row">Подписочные права</th><td>{{ share(history.paywall) }}</td><td>Для оценки нужны назначения подписок пользователям. Связей пользователя с курсом с заполненной подпиской в бэкапе {{ history.subscription_records }}.</td></tr>
-                <tr><th scope="row">Только платные карточки</th><td>{{ share(history.free_stress) }}</td><td>Стресс-тест для пользователя без платного доступа. Отдельно доля платных позиций {{ share(history.paid_slots) }}.</td></tr>
+                <tr><th scope="row">Только платные карточки</th><td>{{ share(history.free_stress) }}</td><td>Оценка платной выдачи на истории пользователей. Отдельно доля платных позиций {{ share(history.paid_slots) }}.</td></tr>
                 <tr><th scope="row">Совпадение тем и тегов</th><td>{{ share(history.topic_relevance) }}</td><td>Доля позиций с общей темой или тегом с материалами, оценёнными на 4–5. Профилей с такими темами {{ history.rated_profiles }}.</td></tr>
             </tbody>
         </table>
     </div>
+    <h3 id="admin-paywall">Подписочные права на синтетических профилях</h3>
+    {% if catalog_quality.synthetic_paywall %}
+    {% set paywall = catalog_quality.synthetic_paywall %}
+    <p>{{ paywall.profiles }} задач для каждого из двух профилей доступа. Без подписки доступны бесплатные карточки. С Курс+ добавляются {{ paywall.course_plus }} материалов подписки. В обоих профилях покупки отдельных материалов отсутствуют.</p>
+    <p class="account-muted">Текущая выдача использует весь каталог. В контрольном прогоне фильтр доступа применяется к кандидатам перед ранжированием. Колонка «Все карточки недоступны» считается по непустым выдачам. В бэкапе назначений подписок пользователям {{ history.subscription_records }}.</p>
+    {{ paywall_table(paywall.rows, "Сводка по подписочным правам") }}
+    <details class="admin-evaluation-details">
+        <summary>Результаты по типам запросов</summary>
+        {% for label, rows in paywall.groups.items() %}
+        <h4>{{ label }}</h4>
+        {{ paywall_table(rows, label) }}
+        {% endfor %}
+    </details>
+    {% else %}
+    <p class="account-muted">Для текущего каталога отчёт по синтетическим профилям ещё не загружен.</p>
+    {% endif %}
     <h3>Холодный старт и экспертные связи</h3>
     <p>Критерий холодного старта выполнили {{ share(catalog_quality.cold_start.passed) }}. Для пустого профиля проверяется состав онбординг-пакета. Для остальных профилей ожидаются бесплатные вводные курсы или популярные статьи.</p>
     <details class="admin-evaluation-details">

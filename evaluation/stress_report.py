@@ -9,6 +9,12 @@ REPORT_NAME = "recommendation-stress.json"
 REPORT_VERSION = 1
 
 
+def simulated_access(material, subscribed):
+    if "Курс+" in material.subscriptions:
+        return subscribed
+    return material.access == "free"
+
+
 def read_report(path, fingerprint):
     if path is None or fingerprint is None:
         return None
@@ -30,15 +36,10 @@ def check_subscriptions(catalog):
     if target is None:
         return None
 
-    def available(material, subscribed):
-        if material.id in members:
-            return subscribed
-        return material.access == "free"
-
     rows = []
     profile = Profile(goal=target.title)
     for subscribed in (False, True):
-        candidates = {m.id: m for m in catalog if available(m, subscribed)}
+        candidates = {m.id: m for m in catalog if simulated_access(m, subscribed)}
         result = recommend(tuple(candidates.values()), profile, (), 3, explain_with_llm=False, use_expert_links=False)
         ids = tuple(item.material_id for item in result.items)
         rows.append({
