@@ -138,6 +138,7 @@ def create_app(
     if algorithm_name is None and recommender is recommend:
         algorithm += ":demo-catalog" if is_demo_catalog else ":history-v3.1"
     app.jinja_env.globals["signed_in"] = lambda: current_account() is not None
+    app.jinja_env.globals["current_account"] = current_account
     app.jinja_env.globals["material_format"] = _format_key
 
     @app.get("/health")

@@ -905,8 +905,7 @@ h2 {
     flex: 1;
     min-width: 0;
     display: flex;
-    flex-direction: column;
-    gap: 2px;
+    align-items: center;
 }
 
 .chat-header-title {
@@ -918,28 +917,38 @@ h2 {
     text-overflow: ellipsis;
 }
 
-.chat-header-status {
-    font-size: 11.5px;
-    color: #22c55e;
+.chat-header-actions {
     display: flex;
     align-items: center;
-    gap: 6px;
-    font-weight: 500;
+    gap: 8px;
+    margin-left: auto;
 }
 
-.status-indicator {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: #22c55e;
-    box-shadow: 0 0 6px #22c55e;
-}
-
-.chat-header-badge {
+.chat-header-reset {
     width: 28px;
     height: 28px;
     border-radius: 50%;
-    background: rgba(34, 197, 94, 0.12);
+    background: transparent;
+    color: rgba(255, 255, 255, 0.7);
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s ease, background 0.15s ease, transform 0.2s ease;
+    padding: 0;
+    flex-shrink: 0;
+}
+
+.chat-header-reset:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.15);
+    transform: rotate(90deg);
+}
+
+.chat-header-badge {
+    width: 14px;
+    height: 14px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -947,10 +956,11 @@ h2 {
 }
 
 .badge-dot {
-    width: 10px;
-    height: 10px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
     background: #22c55e;
+    box-shadow: none;
 }
 
 .alfa-chat-messages {
@@ -983,6 +993,21 @@ h2 {
     line-height: 1.45;
     border-radius: 16px;
     word-break: break-word;
+}
+
+.message-bubble a {
+    color: #ef3124;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    text-decoration-thickness: 1.5px;
+    font-weight: 600;
+    word-break: break-word;
+    transition: color 0.15s ease, opacity 0.15s ease;
+}
+
+.message-bubble a:hover {
+    color: #b91c1c;
+    text-decoration: underline;
 }
 
 .chat-message-assistant .message-bubble {
@@ -1162,14 +1187,6 @@ h2 {
     transform: scale(1.05);
 }
 
-.chat-footer-bar {
-    padding: 5px 14px;
-    background: #fbfbfc;
-    border-top: 1px solid #f2f3f5;
-    text-align: center;
-    font-size: 11px;
-    color: #8c939d;
-}
 
 @media (max-width: 480px) {
     .alfa-chat-widget {

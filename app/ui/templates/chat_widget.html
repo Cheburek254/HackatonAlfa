@@ -1,4 +1,4 @@
-<div id="alfa-chat-widget" class="alfa-chat-widget">
+<div id="alfa-chat-widget" class="alfa-chat-widget" data-user-id="{{ current_account().id if current_account and current_account() else 'guest' }}">
     <button id="alfa-chat-trigger" class="alfa-chat-trigger" type="button" aria-label="Открыть чат с ИИ-помощником" aria-expanded="false">
         <svg class="chat-icon-open" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
@@ -11,7 +11,7 @@
 
     <div id="alfa-chat-window" class="alfa-chat-window" role="dialog" aria-labelledby="chat-header-title">
         <div class="alfa-chat-header">
-            <button id="alfa-chat-close-btn" class="chat-header-close" type="button" aria-label="Закрыть чат">
+            <button id="alfa-chat-close-btn" class="chat-header-close" type="button" aria-label="Закрыть чат" title="Закрыть">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <line x1="18" y1="6" x2="6" y2="18"/>
                     <line x1="6" y1="6" x2="18" y2="18"/>
@@ -19,13 +19,19 @@
             </button>
             <div class="chat-header-info">
                 <span id="chat-header-title" class="chat-header-title">ИИ-помощник Альфа-Курс</span>
-                <span class="chat-header-status">
-                    <span class="status-indicator"></span>
-                    Нейросеть онлайн
-                </span>
             </div>
-            <div class="chat-header-badge" aria-label="ИИ-помощник Альфа-Банк">
-                <span class="badge-dot"></span>
+            <div class="chat-header-actions">
+                <button id="alfa-chat-reset-btn" class="chat-header-reset" type="button" aria-label="Начать новый диалог" title="Очистить историю диалога">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
+                        <path d="M21 3v5h-5"/>
+                        <path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
+                        <path d="M3 21v-5h5"/>
+                    </svg>
+                </button>
+                <div class="chat-header-badge" title="ИИ-помощник онлайн" aria-label="ИИ-помощник онлайн">
+                    <span class="badge-dot"></span>
+                </div>
             </div>
         </div>
 
@@ -65,9 +71,5 @@
                 </svg>
             </button>
         </form>
-
-        <div class="chat-footer-bar">
-            <span>✨ На базе Gemini AI · Альфа-Банк</span>
-        </div>
     </div>
 </div>
