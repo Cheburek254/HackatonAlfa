@@ -603,24 +603,38 @@ h2 {
     position: absolute;
     top: 16px;
     right: 16px;
-    z-index: 2;
+    z-index: 10;
+    margin: 0;
+    padding: 0;
 }
 .material-preview-close .button {
+    width: 40px;
     min-width: 40px;
     height: 40px;
     border-radius: 50%;
     padding: 0;
+    margin: 0;
     color: var(--ink);
     background: #f1f1f3;
-    font-size: 24px;
-    display: inline-flex;
+    display: flex;
     align-items: center;
     justify-content: center;
     border: none;
     cursor: pointer;
-    transition: background 0.15s ease;
+    line-height: 1;
+    transition: background 0.15s ease, transform 0.12s ease;
 }
-.material-preview-close .button:hover { background: #e2e2e7; }
+.material-preview-close .button:hover {
+    background: #e2e2e7;
+    transform: scale(1.05);
+}
+.material-preview-close .button svg {
+    display: block;
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    pointer-events: none;
+}
 .follow-up, .empty-state {
     margin: 0 0 18px;
     padding: 14px 18px;
@@ -766,4 +780,368 @@ h2 {
     .account-pick { grid-column: 1 / -1; }
     .results { padding-block: 34px 36px; border-radius: 24px 24px 0 0; }
     .footer-content { align-items: start; justify-content: center; flex-direction: column; gap: 5px; padding-block: 13px; }
+}
+
+
+/* ==========================================================================
+   Виджет чата с ИИ-помощником (стиль Alfa-Bank)
+   ========================================================================== */
+.alfa-chat-widget {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    z-index: 9999;
+    font-family: inherit;
+}
+
+.alfa-chat-trigger {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: #111111;
+    color: #ffffff;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.32), 0 2px 6px rgba(0, 0, 0, 0.15);
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.alfa-chat-trigger:hover {
+    transform: scale(1.08);
+    background: #000000;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+}
+
+.alfa-chat-trigger:active {
+    transform: scale(0.96);
+}
+
+.alfa-chat-trigger svg {
+    display: block;
+    pointer-events: none;
+}
+
+.alfa-chat-window {
+    position: fixed;
+    right: 24px;
+    bottom: 96px;
+    width: 380px;
+    max-width: calc(100vw - 32px);
+    height: 560px;
+    max-height: calc(100vh - 120px);
+    background: #ffffff;
+    border-radius: 20px;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.24), 0 4px 16px rgba(0, 0, 0, 0.08);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    z-index: 10000;
+    animation: alfaChatOpen 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes alfaChatOpen {
+    from {
+        opacity: 0;
+        transform: translateY(16px) scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.alfa-chat-header {
+    background: #16171a;
+    color: #ffffff;
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.chat-header-close {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease, transform 0.1s ease;
+    flex-shrink: 0;
+    padding: 0;
+}
+
+.chat-header-close:hover {
+    background: rgba(255, 255, 255, 0.22);
+    transform: scale(1.05);
+}
+
+.chat-header-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.chat-header-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #ffffff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.chat-header-status {
+    font-size: 11.5px;
+    color: #22c55e;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 500;
+}
+
+.status-indicator {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #22c55e;
+    box-shadow: 0 0 6px #22c55e;
+}
+
+.chat-header-badge {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: rgba(34, 197, 94, 0.12);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.badge-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #22c55e;
+}
+
+.alfa-chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    background: #f8f9fa;
+}
+
+.chat-message {
+    display: flex;
+    flex-direction: column;
+    max-width: 86%;
+}
+
+.chat-message-assistant {
+    align-self: flex-start;
+}
+
+.chat-message-user {
+    align-self: flex-end;
+}
+
+.message-bubble {
+    padding: 11px 14px;
+    font-size: 13.5px;
+    line-height: 1.45;
+    border-radius: 16px;
+    word-break: break-word;
+}
+
+.chat-message-assistant .message-bubble {
+    background: #ffffff;
+    color: var(--ink);
+    border: 1px solid #eef0f3;
+    border-bottom-left-radius: 4px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.chat-message-user .message-bubble {
+    background: #ef3124;
+    color: #ffffff;
+    border-bottom-right-radius: 4px;
+    box-shadow: 0 2px 8px rgba(239, 49, 36, 0.25);
+}
+
+.message-bubble p {
+    margin: 0 0 8px;
+}
+.message-bubble p:last-child {
+    margin-bottom: 0;
+}
+.chat-list {
+    margin: 4px 0 8px 16px;
+    padding: 0;
+}
+.chat-list li {
+    margin-bottom: 4px;
+}
+
+.chat-quick-replies {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+    margin-top: 4px;
+    padding-left: 20px;
+}
+
+.quick-reply-pill {
+    background: #ffffff;
+    border: 1.5px solid #202124;
+    color: #202124;
+    padding: 7px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-align: right;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.quick-reply-pill:hover {
+    background: #f3f4f6;
+    border-color: #ef3124;
+    color: #ef3124;
+    transform: translateY(-1px);
+}
+
+.alfa-chat-typing {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 16px 8px;
+    background: #f8f9fa;
+    color: #6c757d;
+    font-size: 12px;
+}
+
+.typing-bubble {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: #ffffff;
+    padding: 6px 10px;
+    border-radius: 12px;
+    border: 1px solid #eef0f3;
+}
+
+.typing-bubble .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #9ca3af;
+    animation: typingBounce 1.2s infinite ease-in-out;
+}
+
+.typing-bubble .dot:nth-child(2) {
+    animation-delay: 0.2s;
+}
+.typing-bubble .dot:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+@keyframes typingBounce {
+    0%, 60%, 100% {
+        transform: translateY(0);
+        opacity: 0.4;
+    }
+    30% {
+        transform: translateY(-4px);
+        opacity: 1;
+    }
+}
+
+.alfa-chat-input-row {
+    padding: 10px 14px;
+    border-top: 1px solid #eef0f3;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #ffffff;
+}
+
+.chat-input {
+    flex: 1;
+    border: 1px solid #d9dce1;
+    border-radius: 22px;
+    padding: 9px 15px;
+    font-size: 13.5px;
+    outline: none;
+    font-family: inherit;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.chat-input:focus {
+    border-color: #ef3124;
+    box-shadow: 0 0 0 3px rgba(239, 49, 36, 0.12);
+}
+
+.chat-send-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: #111111;
+    color: #ffffff;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: background 0.15s ease, transform 0.1s ease;
+    padding: 0;
+}
+
+.chat-send-btn:hover {
+    background: #ef3124;
+    transform: scale(1.05);
+}
+
+.chat-footer-bar {
+    padding: 5px 14px;
+    background: #fbfbfc;
+    border-top: 1px solid #f2f3f5;
+    text-align: center;
+    font-size: 11px;
+    color: #8c939d;
+}
+
+@media (max-width: 480px) {
+    .alfa-chat-widget {
+        right: 14px;
+        bottom: 14px;
+    }
+    .alfa-chat-trigger {
+        width: 52px;
+        height: 52px;
+    }
+    .alfa-chat-window {
+        right: 12px;
+        bottom: 76px;
+        width: calc(100vw - 24px);
+        height: calc(100vh - 100px);
+        border-radius: 16px;
+    }
 }

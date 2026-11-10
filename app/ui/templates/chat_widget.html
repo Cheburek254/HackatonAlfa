@@ -1,0 +1,73 @@
+<div id="alfa-chat-widget" class="alfa-chat-widget">
+    <button id="alfa-chat-trigger" class="alfa-chat-trigger" type="button" aria-label="Открыть чат с ИИ-помощником" aria-expanded="false">
+        <svg class="chat-icon-open" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        </svg>
+        <svg class="chat-icon-close" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden>
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+    </button>
+
+    <div id="alfa-chat-window" class="alfa-chat-window" role="dialog" aria-labelledby="chat-header-title" hidden>
+        <div class="alfa-chat-header">
+            <button id="alfa-chat-close-btn" class="chat-header-close" type="button" aria-label="Закрыть чат">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+            </button>
+            <div class="chat-header-info">
+                <span id="chat-header-title" class="chat-header-title">Напишите ваше сообщение</span>
+                <span class="chat-header-status">
+                    <span class="status-indicator"></span>
+                    Операторы онлайн!
+                </span>
+            </div>
+            <div class="chat-header-badge" aria-label="ИИ-помощник Альфа-Банк">
+                <span class="badge-dot"></span>
+            </div>
+        </div>
+
+        <div id="alfa-chat-messages" class="alfa-chat-messages" role="log" aria-live="polite">
+            <div class="chat-message chat-message-assistant">
+                <div class="message-bubble">
+                    Здравствуйте! Я ИИ-помощник платформы <strong>«Альфа-Курс»</strong>.<br><br>
+                    Подскажу подходящие курсы, шаблоны и статьи или помогу разобраться с бизнес-задачей. С чего хотите начать?
+                </div>
+            </div>
+
+            <div id="chat-quick-replies" class="chat-quick-replies" aria-label="Быстрые вопросы">
+                <button type="button" class="quick-reply-pill" data-prompt="Моё обучение на Альфа-Курсе">Моё обучение на Альфа-Курсе</button>
+                <button type="button" class="quick-reply-pill" data-prompt="Хочу начать учиться">Хочу начать учиться</button>
+                <button type="button" class="quick-reply-pill" data-prompt="Как поднять продажи и привлечь клиентов?">Как поднять продажи</button>
+                <button type="button" class="quick-reply-pill" data-prompt="Посоветуй готовые шаблоны и таблицы для учета">Шаблоны для учета</button>
+                <button type="button" class="quick-reply-pill" data-prompt="Техническая проблема">Техническая проблема</button>
+            </div>
+        </div>
+
+        <div id="alfa-chat-typing" class="alfa-chat-typing" hidden>
+            <div class="typing-bubble">
+                <span class="dot"></span>
+                <span class="dot"></span>
+                <span class="dot"></span>
+            </div>
+            <span class="typing-text">ИИ-помощник печатает...</span>
+        </div>
+
+        <form id="alfa-chat-form" class="alfa-chat-input-row" autocomplete="off">
+            <label for="alfa-chat-input" class="sr-only">Введите сообщение</label>
+            <input id="alfa-chat-input" class="chat-input" type="text" placeholder="Введите сообщение..." maxlength="500" required>
+            <button id="alfa-chat-send" class="chat-send-btn" type="submit" aria-label="Отправить">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="12" y1="19" x2="12" y2="5"/>
+                    <polyline points="5 12 12 5 19 12"/>
+                </svg>
+            </button>
+        </form>
+
+        <div class="chat-footer-bar">
+            <span>✨ На базе Gemini AI · Альфа-Банк</span>
+        </div>
+    </div>
+</div>

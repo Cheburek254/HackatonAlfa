@@ -24,6 +24,7 @@ from app.ui.accounts import (
     update_profile,
 )
 from app.ui.admin import admin
+from app.ui.chat import chat_bp
 from app.ui.avatars import AVATAR_MAX_BYTES, AVATAR_MAX_MB, prepare_avatar
 from app.ui.descriptions import format_description_html
 from app.ui.impressions import issue_impression_tickets, record_impressions
@@ -128,6 +129,7 @@ def create_app(
     sample_history = load_history(FIXTURES / "history.demo.json") if is_demo_catalog else ()
     configure_accounts(app, database_path or account_database_path())
     app.register_blueprint(admin)
+    app.register_blueprint(chat_bp)
     recommender_type = type(recommender)
     algorithm = algorithm_name or (
         f"{getattr(recommender, '__module__', recommender_type.__module__)}."
@@ -156,7 +158,7 @@ def create_app(
             if request.endpoint == "index":
                 response.headers["Content-Security-Policy"] += "; script-src 'self'; connect-src 'self'"
             elif request.endpoint in {"accounts.login", "accounts.register", "profile_page", "profile_settings"}:
-                response.headers["Content-Security-Policy"] += "; script-src 'self'"
+                response.headers["Content-Security-Policy"] += "; script-src 'self'; connect-src 'self'"
             response.headers["Referrer-Policy"] = "no-referrer"
         return response
 
