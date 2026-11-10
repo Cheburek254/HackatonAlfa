@@ -71,7 +71,8 @@ document.addEventListener("submit", async (event) => {
     status.textContent = "";
     section.setAttribute("aria-busy", "true");
     try {
-        const response = await fetch(submitter?.hasAttribute("formaction") ? submitter.formAction : form.action, {
+        const action = submitter?.getAttribute("formaction") ?? form.getAttribute("action");
+        const response = await fetch(action || window.location.href, {
             method: "POST",
             headers: { "X-Recommendation-Fragment": "1" },
             body: new URLSearchParams(data),
