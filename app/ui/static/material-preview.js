@@ -4,24 +4,64 @@ const dailyTrack = document.querySelector("#daily-track");
 
 if (dailyTrack) {
     const arrows = [...document.querySelectorAll("[data-daily-scroll]")];
-    const updateArrows = () => {
-        const end = dailyTrack.scrollWidth - dailyTrack.clientWidth;
+    const originals = [...dailyTrack.children];
+    let clones = [];
+    let cycle = 0;
+    let scrollTimer;
+    const modulo = (value, width) => ((value % width) + width) % width;
+    const jump = (left) => dailyTrack.scrollTo({ left, behavior: "instant" });
+    const cloneCards = () => originals.map((card) => {
+        const copy = card.cloneNode(true);
+        copy.setAttribute("aria-hidden", "true");
+        copy.querySelector(".material-link").tabIndex = -1;
+        return copy;
+    });
+    const arrange = () => {
+        if (!originals.length) {
+            return;
+        }
+        const first = originals[0];
+        const last = originals.at(-1);
+        const overflow = last.offsetLeft + last.offsetWidth - first.offsetLeft > dailyTrack.clientWidth - 6;
         for (const arrow of arrows) {
-            arrow.hidden = end < 2;
-            const atEdge = arrow.dataset.dailyScroll === "-1" ? dailyTrack.scrollLeft < 2 : dailyTrack.scrollLeft >= end - 2;
-            arrow.setAttribute("aria-disabled", String(atEdge));
+            arrow.hidden = !overflow;
+        }
+        if (!overflow) {
+            clones.forEach((card) => card.remove());
+            clones = [];
+            cycle = 0;
+            jump(0);
+            return;
+        }
+        const progress = cycle ? modulo(dailyTrack.scrollLeft - cycle, cycle) / cycle : 0;
+        if (!clones.length) {
+            const preceding = cloneCards();
+            const following = cloneCards();
+            dailyTrack.prepend(...preceding);
+            dailyTrack.append(...following);
+            clones = [...preceding, ...following];
+        }
+        cycle = first.offsetLeft - clones[0].offsetLeft;
+        jump(cycle * (1 + progress));
+    };
+    const recenter = () => {
+        const left = dailyTrack.scrollLeft;
+        if (cycle && (left < cycle - 1 || left >= 2 * cycle - 1)) {
+            jump(cycle + modulo(left - cycle, cycle));
         }
     };
     for (const arrow of arrows) {
         arrow.addEventListener("click", () => {
-            if (arrow.getAttribute("aria-disabled") !== "true") {
-                dailyTrack.scrollBy({ left: Number(arrow.dataset.dailyScroll) * dailyTrack.clientWidth * 0.82 });
-            }
+            recenter();
+            dailyTrack.scrollBy({ left: Number(arrow.dataset.dailyScroll) * dailyTrack.clientWidth * 0.82 });
         });
     }
-    dailyTrack.addEventListener("scroll", updateArrows, { passive: true });
-    window.addEventListener("resize", updateArrows);
-    updateArrows();
+    dailyTrack.addEventListener("scroll", () => {
+        clearTimeout(scrollTimer);
+        scrollTimer = setTimeout(recenter, 120);
+    }, { passive: true });
+    window.addEventListener("resize", arrange);
+    arrange();
 }
 
 const impressionObserver = "IntersectionObserver" in window ? new IntersectionObserver((entries, observer) => {
