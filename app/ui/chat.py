@@ -11,7 +11,10 @@ from pathlib import Path
 from flask import Blueprint, current_app, jsonify, request, session
 
 from app.catalog.subscriptions import entitled_catalog
+from app.contracts import Profile
+from app.recommender import recommend
 from app.ui.accounts import current_account, recent_interactions, saved_profile
+from evaluation.hybrid import acceptable, constraints, make_bm25, merge_orders
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +60,20 @@ def _load_env_credentials() -> tuple[str, str]:
     return api_key, model
 
 
+_BM25_CACHE = {}
+
+
+def _get_bm25(catalog: tuple | list):
+    cat_key = (len(catalog), id(catalog))
+    if cat_key not in _BM25_CACHE:
+        try:
+            _BM25_CACHE[cat_key] = make_bm25(catalog)
+        except Exception as exc:
+            logger.warning("Не удалось инициализировать BM25 для чата: %s", exc)
+            return None
+    return _BM25_CACHE[cat_key]
+
+
 def _find_relevant_materials(
     query: str,
     profile: dict,
@@ -67,12 +84,53 @@ def _find_relevant_materials(
     if not catalog:
         return []
 
+    materials_map = {m.id: m for m in catalog}
+    viewed_set = {t.casefold() for t in viewed_titles}
+
+    # 1. Оптимальный гибридный алгоритм (BM25 + recommend + RRF + constraints)
+    try:
+        bm25 = _get_bm25(catalog)
+        if bm25 is not None:
+            rec_profile = Profile(
+                goal=query,
+                industry=profile.get("industry"),
+                stage=profile.get("stage"),
+                experience=profile.get("experience"),
+                team_size=profile.get("team_size"),
+            )
+            bm25_ids = bm25(query)
+            core_res = recommend(catalog, rec_profile, (), 30, explain_with_llm=False)
+            core_ids = tuple(r.material_id for r in core_res.items)
+
+            filters = constraints(query)
+            valid_bm25 = tuple(mid for mid in bm25_ids if mid in materials_map and acceptable(materials_map[mid], filters))
+            valid_core = tuple(mid for mid in core_ids if mid in materials_map and acceptable(materials_map[mid], filters))
+
+            hybrid_ids = merge_orders((valid_bm25, valid_core))
+
+            unseen = []
+            seen = []
+            for mid in hybrid_ids:
+                m = materials_map.get(mid)
+                if not m:
+                    continue
+                if m.title.casefold() in viewed_set:
+                    seen.append(m)
+                else:
+                    unseen.append(m)
+
+            candidates = (unseen + seen)[:limit]
+            if candidates:
+                return candidates
+    except Exception as exc:
+        logger.warning("Ошибка в гибридном поиске чата, откат к эвристике: %s", exc)
+
+    # 2. Запасной эвристический подбор (fallback)
     words = set(re.findall(r"\w{3,}", query.casefold()))
     industry = (profile.get("industry") or "").casefold()
     topic = (profile.get("learning_topic") or "").casefold()
     stage = (profile.get("stage") or "").casefold()
     pref_format = (profile.get("preferred_format") or "").casefold()
-    viewed_set = {t.casefold() for t in viewed_titles}
 
     scored = []
     for m in catalog:

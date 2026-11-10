@@ -104,5 +104,22 @@ class ChatApiTest(unittest.TestCase):
         self.assertIn("connect-src 'self'", result.headers["Content-Security-Policy"])
 
 
+    def test_hybrid_ranking_selects_relevant_materials(self):
+        from app.catalog import DEMO_CATALOG_PATH, load_catalog
+        from app.ui.chat import _find_relevant_materials
+
+        catalog = load_catalog(DEMO_CATALOG_PATH)
+        results = _find_relevant_materials(
+            "продажи для магазина",
+            {"industry": "розница", "stage": "старт"},
+            catalog,
+            viewed_titles=[],
+            limit=3,
+        )
+        self.assertTrue(len(results) > 0)
+        matched_ids = [m.id for m in results]
+        self.assertIn("marketing-first-sales", matched_ids)
+
+
 if __name__ == "__main__":
     unittest.main()

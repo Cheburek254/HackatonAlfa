@@ -883,7 +883,8 @@ h2 {
     color: #ef3124;
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    white-space: nowrap;
+    margin-left: auto;
 }
 
 .material-card-actions {
@@ -1012,25 +1013,19 @@ h2 {
 .explanation-pill {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
     font-size: 11px;
     font-weight: 750;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.05em;
     color: #475569;
 }
 
 .explanation-pill-why {
-    color: #b91c1c;
+    color: #ef3124;
 }
 
 .explanation-pill-next {
-    color: #0f172a;
-}
-
-.explanation-icon {
-    font-size: 13px;
-    line-height: 1;
+    color: #1e293b;
 }
 
 .explanation-desc {
