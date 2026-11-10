@@ -83,6 +83,35 @@ class RecommenderTest(unittest.TestCase):
         self.assertGreaterEqual(sum(mid.startswith("new-") for mid in top(past + (first, second))), 2)
         self.assertTrue(top(past + (first, second), Profile(goal="бухгалтерия"))[0].startswith("old-"))
 
+    def test_ambiguous_task_keeps_a_confirmed_pair_after_one_outlier(self):
+        catalog = tuple(
+            Material(f"{topic}-{n}", f"{topic} {n}", f"https://example.com/{topic}/{n}", topics=(topic,))
+            for topic in ("Налоги", "Поставки") for n in range(4)
+        )
+        profile = Profile(goal="Что мне лучше проверить перед следующим шагом?")
+
+        def top(*materials):
+            history = tuple(InteractionEvent(mid, "click") for mid in materials)
+            return tuple(card.material_id for card in recommend(catalog, profile, history, 3).items)
+
+        first = top("Налоги-0", "Налоги-1")
+        self.assertTrue(all(mid.startswith("Налоги") for mid in first[:2]))
+        self.assertEqual(top("Налоги-0", "Налоги-1", "Поставки-0")[:2], first[:2])
+        self.assertEqual(top("Налоги-0", "Налоги-1", "Поставки-0", "Поставки-0")[:2], first[:2])
+        self.assertTrue(all(mid.startswith("Поставки") for mid in top("Налоги-0", "Налоги-1", "Поставки-0", "Поставки-1")[:2]))
+
+    def test_lone_click_can_find_a_hidden_expert_relation_via_known_neighbors(self):
+        catalog = (
+            Material("distractor", "Реклама", "https://example.com/advert", popularity=3700),
+            Material("source", "Бюджетирование", "https://example.com/budget"),
+            Material("neighbor", "Денежный поток", "https://example.com/cashflow"),
+            Material("target", "Оборотный капитал", "https://example.com/working-capital"),
+        )
+        training = {"source": ["neighbor"], "neighbor": ["source", "target"], "target": ["neighbor"]}
+        event = (InteractionEvent("source", "click"),)
+        self.assertEqual(recommend(catalog, Profile(), event, 1, expert_links=training).items[0].material_id, "target")
+        self.assertEqual(recommend(catalog, Profile(), event, 1, expert_links={}).items[0].material_id, "distractor")
+
     def test_scenario_3_weak_match_provides_follow_up(self):
         """Сценарий 3 из Приложения 2: запрос вне каталога возвращает общую подборку и уточнение."""
         result = recommend(

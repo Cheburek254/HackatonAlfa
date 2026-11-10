@@ -2,10 +2,11 @@
 
 import json
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from functools import lru_cache
+from math import log1p, sqrt
 from pathlib import Path
 
 from app.catalog import catalog_data_dir
@@ -26,6 +27,13 @@ HISTORY_EVENT_WEIGHTS = {"view": 0.08, "click": 1.0, "complete": 1.25}
 UNCONFIRMED_TOPIC_WEIGHT = 0.45
 TITLE_HISTORY_WEIGHT = 8.0
 STRONG_TASK_SCORE = 19.0
+SESSION_GOAL_WORDS = frozenset((
+    "шаг", "дальше", "начать", "план", "задача", "работа", "проверка", "система", "способ",
+    "подход", "порядок", "проблема", "решение", "случай", "материал", "коллега", "команда",
+    "неделя", "месяц", "квартал", "сбой", "рост", "этап", "результат", "процесс",
+    "чем", "здесь", "меня", "может", "стоит", "заранее", "подготовиться", "сломаться",
+    "следующий", "поможет", "понять", "меньше", "них", "усложнит", "ближайший", "составить", "почитать",
+))
 
 STOPWORDS = {
     "и", "в", "во", "на", "по", "с", "со", "к", "ко", "от", "до", "из", "за", "для", "про",
@@ -450,6 +458,93 @@ def _timestamp(value: datetime) -> float:
     return (value if value.tzinfo else value.replace(tzinfo=UTC)).timestamp()
 
 
+@lru_cache(maxsize=12)
+def _affinity_index(records):
+    titles = {mid: _tokenize_stems(title) - ACTION_VERB_STEMS for mid, title, _ in records}
+    topics = {mid: frozenset(filter(None, map(_normalize_text, tags))) for mid, _, tags in records}
+    title_counts = Counter(term for terms in titles.values() for term in terms if not term.isdigit())
+    topic_counts = Counter(topic for tags in topics.values() for topic in tags)
+    count = len(records)
+    return (
+        titles, topics,
+        {term: log1p(count / freq) for term, freq in title_counts.items()},
+        {topic: log1p(count / freq) for topic, freq in topic_counts.items()},
+    )
+
+
+def _affinity_scores(materials, clicks, seen, links, *, browse_from_seed):
+    if len(clicks) < 2 and not browse_from_seed:
+        return {}, ()
+    index = tuple((m.id, m.title, m.topics) for m in materials.values())
+    titles, topics, title_weights, topic_weights = _affinity_index(index)
+    small_catalog = len(materials) <= 20
+
+    def similarity(source, candidate):
+        shared_terms = sum(title_weights.get(t, 0.) for t in titles[source] & titles[candidate])
+        shared_topics = sum(topic_weights[t] for t in topics[source] & topics[candidate]
+                            if topic_weights[t] >= 2.23 or small_catalog)
+        return (shared_terms + .7 * shared_topics) / sqrt(4 + len(titles[candidate]))
+
+    eligible = materials.keys() - {mid for mid, kind in seen.items() if kind in {"click", "complete"}}
+    if browse_from_seed:
+        seed = clicks[0]
+        neighbors = links.get(seed, ())
+        through_neighbors = defaultdict(float)
+        for mid in neighbors:
+            adjacent = links.get(mid, ())
+            for candidate in adjacent:
+                through_neighbors[candidate] += 1 / sqrt(len(adjacent))
+        direct = set(neighbors)
+        return {
+            mid: similarity(seed, mid)
+                 + 2.0 * through_neighbors[mid] / sqrt(max(1, len(links.get(mid, ()))))
+                 + (0.6 if mid in direct else 0.)
+            for mid in eligible
+        }, (seed,)
+
+    def coherent(left, right):
+        if small_catalog:
+            return bool(topics[left] & topics[right] or titles[left] & titles[right])
+        return (any(title_weights.get(t, 0.) >= 3 for t in titles[left] & titles[right])
+                or any(topic_weights[t] >= 2.35 for t in topics[left] & topics[right]))
+
+    # При одиночном выбросе остаётся предыдущая подтверждённая пара.
+    for left, right in zip(clicks[:4], clicks[1:5]):
+        if coherent(left, right):
+            scores = {}
+            for mid in eligible:
+                a, b = similarity(left, mid), similarity(right, mid)
+                score = min(a, b) + .7 * max(a, b)
+                if score >= .6:
+                    scores[mid] = score
+            return scores, (left, right)
+    return {}, ()
+
+
+def _explore_after_seed(scored, seed):
+    remaining = [row for row in scored if row[1].id != seed.id]
+    if len(remaining) < 3:
+        return scored
+
+    def material_type(material):
+        return material.entity_type or material.format
+
+    first_two = [row[1] for row in remaining[:2]]
+    formats = {material_type(material) for material in first_two}
+    clicked_topics = set(map(_normalize_text, seed.topics))
+
+    def has_new_topic(material):
+        return bool(set(map(_normalize_text, material.topics)) - clicked_topics)
+
+    for index, (_, material, _) in enumerate(remaining[2:], 2):
+        varied_format = len(formats) >= 2 or material_type(material) not in formats
+        varied_topic = any(map(has_new_topic, first_two)) or has_new_topic(material)
+        if varied_format and varied_topic:
+            remaining.insert(2, remaining.pop(index))
+            break
+    return remaining + [row for row in scored if row[1].id == seed.id]
+
+
 def _history_signals(history, materials, links, as_of):
     """Два разных материала подтверждают тему. Повторы и открытия превью не суммируются."""
     latest = {}
@@ -466,7 +561,7 @@ def _history_signals(history, materials, links, as_of):
     reference = _timestamp(as_of) if as_of else max(timestamps, default=None)
     ordered = sorted(latest.values(), key=lambda row: row[0][2])
     topics, industries, title_terms = defaultdict(list), defaultdict(list), defaultdict(list)
-    signals = []
+    signals, recent_clicks = [], []
     for offset, (_, event, when) in enumerate(reversed(ordered)):
         if when is not None and reference is not None:
             age = max(0., (reference - when) / SECONDS_PER_DAY)
@@ -488,6 +583,8 @@ def _history_signals(history, materials, links, as_of):
         if confirmed:
             signals.append((event.material_id, source_topics, source.title, decay, recent and confirmed == 2))
             if recent:
+                if event.kind == "click":
+                    recent_clicks.append(event.material_id)
                 for term in _tokenize_stems(source.title) - ACTION_VERB_STEMS:
                     if not term.isdigit():
                         title_terms[term].append((len(signals) - 1, decay))
@@ -515,7 +612,7 @@ def _history_signals(history, materials, links, as_of):
             if boost > linked_scores.get(linked, (0., ""))[0]:
                 linked_scores[linked] = (boost, title)
     seen = {mid: row[1].kind for mid, row in latest.items()}
-    return topic_scores, industry_scores, term_scores, linked_scores, seen
+    return topic_scores, industry_scores, term_scores, linked_scores, seen, recent_clicks
 
 
 def recommend(
@@ -567,7 +664,7 @@ def recommend(
     valid_history = [ev for ev in history if ev.material_id in catalog_by_id]
     if not valid_history and (starter := onboarding(catalog, profile, limit)) is not None:
         return starter
-    topic_scores, industry_scores, term_scores, linked_scores, seen_events = _history_signals(
+    topic_scores, industry_scores, term_scores, linked_scores, seen_events, recent_clicks = _history_signals(
         valid_history, catalog_by_id, rec_links, history_as_of,
     )
 
@@ -594,6 +691,25 @@ def recommend(
         )
     )
     is_cold_start = not goal_norm and not learning_topic_norm and not valid_history and not has_profile_params
+    browse_from_seed = (
+        len(recent_clicks) == 1 and not goal_norm and not learning_topic_norm and not has_profile_params
+        and sum(kind in {"click", "complete"} for kind in seen_events.values()) == 1
+    )
+    affinity, affinity_sources = _affinity_scores(
+        catalog_by_id, recent_clicks, seen_events, rec_links, browse_from_seed=browse_from_seed,
+    )
+    if len(affinity_sources) == 2 and recent_clicks[0] not in affinity_sources:
+        # Ещё один клик вне подтверждённой пары остаётся в журнале, но не смещает подборку.
+        established_history = [event for event in valid_history if event.material_id != recent_clicks[0]]
+        topic_scores, industry_scores, term_scores, linked_scores, _, _ = _history_signals(
+            established_history, catalog_by_id, rec_links, history_as_of,
+        )
+    generic_goal_terms = ACTION_VERB_STEMS | _tokenize_stems(" ".join(SESSION_GOAL_WORDS))
+    goal_details = goal_stems - generic_goal_terms
+    last_clause = re.split(r"[.!?]+\s*", goal_raw.rstrip(".!?"))[-1]
+    exploratory_goal = len(_tokenize_stems(last_clause) - generic_goal_terms) <= 1
+    short_goal = len(goal_norm.split()) <= 4
+    has_concrete_goal = False
 
     scored_items: list[tuple[float, Material, dict]] = []
     max_task_score = 0.0
@@ -603,6 +719,12 @@ def recommend(
         desc_norm = _normalize_text(mat.description)
         topics_norm_map = {_normalize_text(t): t for t in mat.topics if _normalize_text(t)}
         title_stems = _tokenize_stems(mat.title)
+        if len(affinity_sources) == 2 and goal_details and not has_concrete_goal:
+            shared = len(goal_details & title_stems)
+            has_concrete_goal |= (
+                (short_goal and goal_details <= title_stems)
+                or (shared >= 2 and shared * 3 >= len(goal_details) * 2)
+            )
         desc_stems = _tokenize_stems(mat.description)
         topic_stems = _tokenize_stems(" ".join(mat.topics))
         ind_stems = _tokenize_stems(" ".join(mat.industries))
@@ -711,6 +833,8 @@ def recommend(
                 if seen != "click":
                     history_title_score = max((term_scores.get(term, 0.) for term in title_stems), default=0.)
                 hist_score = topic_score + industry_score + history_title_score + graph_score
+                if browse_from_seed:
+                    hist_score += 8.0 * affinity.get(mat.id, 0.)
                 if seen == "click":
                     hist_score -= 1.2
                 elif topic_score >= 2 or graph_score >= 2:
@@ -783,6 +907,18 @@ def recommend(
 
     # При наличии явной задачи и хороших совпадений отбрасываем совсем нерелевантные материалы,
     # если хватает релевантных кандидатов
+    # Недавняя подтверждённая тема получает отдельные места при расплывчатом запросе.
+    # Кандидаты уже прошли ограничения формата, цены и доступа.
+    context_items = []
+    hard_goal = constraints["only_free"] or constraints["only_format"] or constraints["max_budget"] is not None
+    explicit_format = _normalize_text(profile.preferred_format or "") not in {"", "любой формат"}
+    profile_focus = profile.experience or learning_topic_norm or explicit_format
+    if len(affinity_sources) == 2 and exploratory_goal and not has_concrete_goal and not hard_goal and not profile_focus:
+        ranked_context = sorted((row for row in scored_items if row[1].id in affinity),
+                                key=lambda row: (-affinity[row[1].id], -row[0]))
+        if len(ranked_context) >= 2:
+            context_items = ranked_context[:min(2, limit)]
+
     if goal_norm and not is_weak_match:
         relevant_pool = [item for item in scored_items if item[2]["task_score"] > 0
                          or (max_task_score < STRONG_TASK_SCORE and item[2]["history_title_score"] >= TITLE_HISTORY_WEIGHT)]
@@ -790,9 +926,12 @@ def recommend(
             scored_items = relevant_pool
 
     scored_items.sort(key=lambda x: x[0], reverse=True)
+    if browse_from_seed and limit >= 3:
+        scored_items = _explore_after_seed(scored_items, catalog_by_id[affinity_sources[0]])
 
     # Выбираем топ-limit материалов
-    selected = scored_items[:limit]
+    selected_ids = {mat.id for _, mat, _ in context_items}
+    selected = context_items + [row for row in scored_items if row[1].id not in selected_ids][:limit - len(context_items)]
 
     recommendations: list[Recommendation] = []
     selected_materials: list[Material] = []
@@ -807,7 +946,9 @@ def recommend(
         return RecommendationResult((), "")
 
     first_mat = selected_materials[0]
-    if is_weak_match:
+    if context_items:
+        ordering_reason = "Первые материалы продолжают тему двух ваших недавних переходов. Остальная подборка учитывает запрос и профиль."
+    elif is_weak_match:
         ordering_reason = (
             f"Поскольку точного совпадения по запросу «{goal_raw}» в каталоге нет, "
             f"на первое место вынесен наиболее близкий базовый материал «{first_mat.title}», "
