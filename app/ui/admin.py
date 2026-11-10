@@ -8,7 +8,7 @@ from app.ui.accounts import (
     DEMO_USERNAME, LOGIN_PATTERN, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, admin_usernames, check_csrf,
     clear_interactions, create_admin_account, current_account, grant_admin, reset_admin_password,
 )
-from evaluation.runner import EvaluationDataError, SUITE_LABELS, run_evaluation
+from evaluation.runner import EvaluationDataError, SUITE_LABELS, evaluation_scenario_counts, run_evaluation
 
 admin = Blueprint("admin", __name__, url_prefix="/admin")
 PASSWORD_HINT = f"Пароль должен содержать от {PASSWORD_MIN_LENGTH} до {PASSWORD_MAX_LENGTH} символов."
@@ -60,6 +60,7 @@ def dashboard():
         top_cards=read_top_cards(database, material_ids), titles=current_app.config["CATALOG_TITLES"], comparison=comparison,
         top_formats=formats, top_category=category,
         evaluation_suites=SUITE_LABELS, evaluation_suite=evaluation_suite, evaluation_error=evaluation_error,
+        evaluation_counts=evaluation_scenario_counts(),
         real_catalog_available=bool(real_catalog),
         impressions_by_day=[(day, metrics.impressions) for day, metrics in activity],
         clicks_by_day=[(day, metrics.clicks) for day, metrics in activity],

@@ -136,8 +136,8 @@ class WebFlowTest(unittest.TestCase):
         self.assertNotIn("Проверено сценариев", unavailable)
 
         real_cases = json.loads((EVALUATION_DIR / "profiles.real.json").read_text(encoding="utf-8"))
-        self.assertEqual(len(real_cases), 100)
-        self.assertEqual(len({case["id"] for case in real_cases}), 100)
+        self.assertEqual(len(real_cases), 350)
+        self.assertEqual(len({case["id"] for case in real_cases}), 350)
         self.assertTrue(all(case["relevant_ids"] for case in real_cases))
         referenced_ids = {mid for case in real_cases for mid in case["relevant_ids"]}
         referenced_ids.update(event["material_id"] for case in real_cases for event in case.get("history", ()))
@@ -149,7 +149,8 @@ class WebFlowTest(unittest.TestCase):
         self.app.config["CATALOG_TITLES"] = {material.id: material.title}
         real_report = self.post_form("/admin", {"evaluation_suite": "real"}, client=new_admin).get_data(as_text=True)
         self.assertIn("Реальный каталог · результаты", real_report)
-        self.assertIn("Проверено сценариев: 100", real_report)
+        self.assertIn("350 размеченных сценариев", real_report)
+        self.assertIn("Проверено сценариев: 350", real_report)
         self.assertNotIn("outside-catalog", real_report)
         self.assertIn(material.title, new_admin.get("/admin?category=курс").get_data(as_text=True))
         self.assertNotIn(material.title, new_admin.get("/admin?category=статья").get_data(as_text=True))

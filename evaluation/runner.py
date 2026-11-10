@@ -2,6 +2,7 @@
 
 import json
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 from app.catalog import DEMO_CATALOG_PATH, load_catalog, load_history
@@ -16,6 +17,15 @@ SUITE_LABELS = {"demo": "Синтетический каталог", "real": "Р
 
 class EvaluationDataError(ValueError):
     """Разметку нельзя оценить на текущем каталоге."""
+
+
+@lru_cache(maxsize=len(SUITE_LABELS))
+def _load_cases(suite: str) -> list[dict]:
+    return json.loads((EVALUATION_DIR / f"profiles.{suite}.json").read_text(encoding="utf-8"))
+
+
+def evaluation_scenario_counts() -> dict[str, int]:
+    return {suite: len(_load_cases(suite)) for suite in SUITE_LABELS}
 
 
 def load_real_catalog(source: Path) -> tuple[Material, ...]:
@@ -68,7 +78,7 @@ def run_evaluation(
     else:
         raise EvaluationDataError("Неизвестный набор сценариев.")
     catalog_ids = {material.id for material in catalog}
-    cases = json.loads((EVALUATION_DIR / f"profiles.{suite}.json").read_text(encoding="utf-8"))
+    cases = _load_cases(suite)
     for case in cases:
         referenced = set(case["relevant_ids"]) | {event["material_id"] for event in case.get("history", ())}
         if unknown_ids := referenced - catalog_ids:

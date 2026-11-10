@@ -160,7 +160,7 @@
                     {% for suite, label in evaluation_suites.items() %}
                     <form class="admin-form" method="post" action="{{ url_for('admin.dashboard', category=top_category, _anchor='admin-evaluation') }}" aria-labelledby="evaluation-{{ suite }}-title">
                         <h3 id="evaluation-{{ suite }}-title">{{ label }}</h3>
-                        <p class="account-muted">{{ '50 сценариев на демонстрационных материалах.' if suite == 'demo' else '100 размеченных сценариев на материалах «Альфа-Курса».' }}</p>
+                        <p class="account-muted">{{ evaluation_counts[suite] }} {{ 'сценариев на демонстрационных материалах.' if suite == 'demo' else 'размеченных сценариев на материалах «Альфа-Курса».' }}</p>
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button class="button {{ 'button-primary' if suite == 'real' else 'button-profile' }}" type="submit" name="evaluation_suite" value="{{ suite }}"{% if suite == 'real' and not real_catalog_available %} disabled{% endif %}>{{ 'Запустить синтетические тесты' if suite == 'demo' else 'Запустить тесты на реальном каталоге' }}</button>
                         {% if suite == 'real' and not real_catalog_available %}
