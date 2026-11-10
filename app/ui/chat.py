@@ -51,7 +51,7 @@ POPULAR_MATERIALS = [
 
 def _load_env_credentials() -> tuple[str, str]:
     api_key = os.environ.get("ALFA_LLM_API_KEY", "").strip()
-    model = os.environ.get("ALFA_LLM_MODEL", "gemini-2.5-flash").strip()
+    model = os.environ.get("ALFA_LLM_MODEL", "gemini-3.5-flash-lite").strip()
     if api_key:
         return api_key, model
 
@@ -209,7 +209,9 @@ def _linkify_materials(text: str, candidates: list) -> str:
 
 
 def _call_gemini(api_key: str, model: str, message: str, history: list[dict], system_prompt: str = BASE_SYSTEM_PROMPT) -> str | None:
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    candidate_models = [model] if model else ["gemini-3.5-flash-lite"]
+    if "gemini-3.5-flash-lite" not in candidate_models:
+        candidate_models.append("gemini-3.5-flash-lite")
 
     contents = []
     for item in history[-6:]:
@@ -230,22 +232,29 @@ def _call_gemini(api_key: str, model: str, message: str, history: list[dict], sy
     }
 
     data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers={"Content-Type": "application/json", "User-Agent": "AlfaCourseChat/1.0"},
-    )
 
-    try:
-        with urllib.request.urlopen(req, timeout=9) as response:
-            res_data = json.loads(response.read().decode("utf-8"))
-            candidates = res_data.get("candidates") or []
-            if candidates:
-                parts = candidates[0].get("content", {}).get("parts", [])
-                if parts and "text" in parts[0]:
-                    return parts[0]["text"].strip()
-    except Exception as exc:
-        logger.warning("Ошибка при обращении к Gemini API (%s): %s", model, exc)
+    for current_model in candidate_models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{current_model}:generateContent?key={api_key}"
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json", "User-Agent": "AlfaCourseChat/1.0"},
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=9) as response:
+                res_data = json.loads(response.read().decode("utf-8"))
+                candidates = res_data.get("candidates") or []
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    if parts and "text" in parts[0]:
+                        return parts[0]["text"].strip()
+        except urllib.error.HTTPError as exc:
+            logger.warning("HTTP ошибка Gemini API (%s, code %s): %s", current_model, exc.code, exc)
+            if exc.code == 429:
+                continue
+        except Exception as exc:
+            logger.warning("Ошибка при обращении к Gemini API (%s): %s", current_model, exc)
 
     return None
 
