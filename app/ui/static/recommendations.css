@@ -819,9 +819,22 @@ h2 {
     transform: scale(0.96);
 }
 
-.alfa-chat-trigger svg {
+.alfa-chat-trigger .chat-icon-open {
     display: block;
     pointer-events: none;
+}
+
+.alfa-chat-trigger .chat-icon-close {
+    display: none;
+    pointer-events: none;
+}
+
+.alfa-chat-trigger.is-active .chat-icon-open {
+    display: none;
+}
+
+.alfa-chat-trigger.is-active .chat-icon-close {
+    display: block;
 }
 
 .alfa-chat-window {
@@ -835,10 +848,14 @@ h2 {
     background: #ffffff;
     border-radius: 20px;
     box-shadow: 0 16px 48px rgba(0, 0, 0, 0.24), 0 4px 16px rgba(0, 0, 0, 0.08);
-    display: flex;
+    display: none !important;
     flex-direction: column;
     overflow: hidden;
     z-index: 10000;
+}
+
+.alfa-chat-window.is-open {
+    display: flex !important;
     animation: alfaChatOpen 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -1028,7 +1045,7 @@ h2 {
 }
 
 .alfa-chat-typing {
-    display: flex;
+    display: none;
     align-items: center;
     gap: 8px;
     padding: 6px 16px 8px;
@@ -1077,7 +1094,7 @@ h2 {
     padding: 10px 14px;
     border-top: 1px solid #eef0f3;
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     gap: 8px;
     background: #ffffff;
 }
@@ -1085,11 +1102,20 @@ h2 {
 .chat-input {
     flex: 1;
     border: 1px solid #d9dce1;
-    border-radius: 22px;
+    border-radius: 20px;
     padding: 9px 15px;
     font-size: 13.5px;
+    line-height: 1.4;
     outline: none;
     font-family: inherit;
+    resize: none;
+    min-height: 38px;
+    max-height: 120px;
+    height: 38px;
+    overflow-y: auto;
+    box-sizing: border-box;
+    background: #ffffff;
+    color: var(--ink);
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
@@ -1110,6 +1136,7 @@ h2 {
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
+    margin-bottom: 1px;
     transition: background 0.15s ease, transform 0.1s ease;
     padding: 0;
 }

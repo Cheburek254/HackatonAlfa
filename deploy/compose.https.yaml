@@ -12,6 +12,7 @@ services:
       - --call
       - app.ui.web:create_app
     networks:
+      default:
       tls_backend:
         ipv4_address: 172.31.249.3
 

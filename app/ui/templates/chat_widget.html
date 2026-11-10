@@ -3,13 +3,13 @@
         <svg class="chat-icon-open" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
         </svg>
-        <svg class="chat-icon-close" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden>
+        <svg class="chat-icon-close" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <line x1="18" y1="6" x2="6" y2="18"/>
             <line x1="6" y1="6" x2="18" y2="18"/>
         </svg>
     </button>
 
-    <div id="alfa-chat-window" class="alfa-chat-window" role="dialog" aria-labelledby="chat-header-title" hidden>
+    <div id="alfa-chat-window" class="alfa-chat-window" role="dialog" aria-labelledby="chat-header-title">
         <div class="alfa-chat-header">
             <button id="alfa-chat-close-btn" class="chat-header-close" type="button" aria-label="Закрыть чат">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -18,10 +18,10 @@
                 </svg>
             </button>
             <div class="chat-header-info">
-                <span id="chat-header-title" class="chat-header-title">Напишите ваше сообщение</span>
+                <span id="chat-header-title" class="chat-header-title">ИИ-помощник Альфа-Курс</span>
                 <span class="chat-header-status">
                     <span class="status-indicator"></span>
-                    Операторы онлайн!
+                    Нейросеть онлайн
                 </span>
             </div>
             <div class="chat-header-badge" aria-label="ИИ-помощник Альфа-Банк">
@@ -32,8 +32,8 @@
         <div id="alfa-chat-messages" class="alfa-chat-messages" role="log" aria-live="polite">
             <div class="chat-message chat-message-assistant">
                 <div class="message-bubble">
-                    Здравствуйте! Я ИИ-помощник платформы <strong>«Альфа-Курс»</strong>.<br><br>
-                    Подскажу подходящие курсы, шаблоны и статьи или помогу разобраться с бизнес-задачей. С чего хотите начать?
+                    Здравствуйте! Я ИИ-помощник образовательной платформы <strong>«Альфа-Курс»</strong>.<br><br>
+                    Помогу разобраться с бизнес-задачей, подберу практические курсы, статьи или шаблоны документов. С чего хотите начать?
                 </div>
             </div>
 
@@ -46,7 +46,7 @@
             </div>
         </div>
 
-        <div id="alfa-chat-typing" class="alfa-chat-typing" hidden>
+        <div id="alfa-chat-typing" class="alfa-chat-typing">
             <div class="typing-bubble">
                 <span class="dot"></span>
                 <span class="dot"></span>
@@ -57,7 +57,7 @@
 
         <form id="alfa-chat-form" class="alfa-chat-input-row" autocomplete="off">
             <label for="alfa-chat-input" class="sr-only">Введите сообщение</label>
-            <input id="alfa-chat-input" class="chat-input" type="text" placeholder="Введите сообщение..." maxlength="500" required>
+            <textarea id="alfa-chat-input" class="chat-input" rows="1" placeholder="Введите сообщение..." maxlength="1000" required></textarea>
             <button id="alfa-chat-send" class="chat-send-btn" type="submit" aria-label="Отправить">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <line x1="12" y1="19" x2="12" y2="5"/>

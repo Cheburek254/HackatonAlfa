@@ -7,14 +7,39 @@
     const messagesEl = document.getElementById("alfa-chat-messages");
     const quickReplies = document.getElementById("chat-quick-replies");
     const typingIndicator = document.getElementById("alfa-chat-typing");
-    const iconOpen = trigger ? trigger.querySelector(".chat-icon-open") : null;
-    const iconClose = trigger ? trigger.querySelector(".chat-icon-close") : null;
 
     if (!trigger || !windowEl || !form || !input || !messagesEl) {
         return;
     }
 
+    // Default state: strictly closed
+    windowEl.classList.remove("is-open");
+    trigger.classList.remove("is-active");
+    trigger.setAttribute("aria-expanded", "false");
+    if (typingIndicator) {
+        typingIndicator.style.display = "none";
+    }
+
     const history = [];
+
+    function autoResize() {
+        input.style.height = "auto";
+        const newHeight = Math.min(input.scrollHeight, 120);
+        input.style.height = (newHeight > 38 ? newHeight : 38) + "px";
+    }
+
+    input.addEventListener("input", autoResize);
+
+    input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            form.requestSubmit ? form.requestSubmit() : form.dispatchEvent(new Event("submit", { cancelable: true }));
+        }
+    });
+
+    function scrollToBottom() {
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
 
     function formatReplyText(text) {
         if (!text) return "";
@@ -61,10 +86,6 @@
         return result.join("");
     }
 
-    function scrollToBottom() {
-        messagesEl.scrollTop = messagesEl.scrollHeight;
-    }
-
     function appendMessage(text, role) {
         const msgDiv = document.createElement("div");
         msgDiv.className = `chat-message chat-message-${role}`;
@@ -82,27 +103,39 @@
         scrollToBottom();
     }
 
-    function toggleChat(open) {
-        const isOpen = open !== undefined ? open : windowEl.hidden;
-        windowEl.hidden = !isOpen;
-        trigger.setAttribute("aria-expanded", String(isOpen));
-        if (iconOpen && iconClose) {
-            iconOpen.hidden = isOpen;
-            iconClose.hidden = !isOpen;
-        }
+    function toggleChat(forceState) {
+        const isOpen = forceState !== undefined ? forceState : !windowEl.classList.contains("is-open");
         if (isOpen) {
-            input.focus();
-            scrollToBottom();
+            windowEl.classList.add("is-open");
+            trigger.classList.add("is-active");
+            trigger.setAttribute("aria-expanded", "true");
+            setTimeout(() => {
+                input.focus();
+                scrollToBottom();
+            }, 60);
+        } else {
+            windowEl.classList.remove("is-open");
+            trigger.classList.remove("is-active");
+            trigger.setAttribute("aria-expanded", "false");
         }
     }
 
-    trigger.addEventListener("click", () => toggleChat());
+    trigger.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleChat();
+    });
+
     if (closeBtn) {
-        closeBtn.addEventListener("click", () => toggleChat(false));
+        closeBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleChat(false);
+        });
     }
 
     document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape" && !windowEl.hidden) {
+        if (e.key === "Escape" && windowEl.classList.contains("is-open")) {
             toggleChat(false);
         }
     });
@@ -112,22 +145,34 @@
             const pill = e.target.closest(".quick-reply-pill");
             if (!pill) return;
             const prompt = pill.dataset.prompt || pill.textContent.trim();
-            quickReplies.hidden = true;
+            hideQuickReplies();
             sendMessage(prompt);
         });
+    }
+
+    function hideQuickReplies() {
+        if (quickReplies) {
+            quickReplies.style.display = "none";
+        }
     }
 
     async function sendMessage(text) {
         const query = (text || "").trim();
         if (!query) return;
 
+        // Hide suggestions immediately when any request is sent
+        hideQuickReplies();
+
         appendMessage(query, "user");
         history.push({ role: "user", text: query });
-        if (quickReplies) quickReplies.hidden = true;
 
         input.value = "";
+        input.style.height = "38px";
         input.disabled = true;
-        if (typingIndicator) typingIndicator.hidden = false;
+
+        if (typingIndicator) {
+            typingIndicator.style.display = "flex";
+        }
         scrollToBottom();
 
         try {
@@ -150,11 +195,13 @@
             history.push({ role: "model", text: reply });
         } catch (err) {
             appendMessage(
-                "Извините, сервис временно недоступен. Попробуйте сформулировать вопрос иначе или обновить страницу.",
+                "Извините, сейчас сервер обновляется. Попробуйте повторить запрос через пару секунд.",
                 "assistant"
             );
         } finally {
-            if (typingIndicator) typingIndicator.hidden = true;
+            if (typingIndicator) {
+                typingIndicator.style.display = "none";
+            }
             input.disabled = false;
             input.focus();
             scrollToBottom();
