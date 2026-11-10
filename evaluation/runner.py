@@ -1,14 +1,16 @@
 """Один набор сценариев для CLI и админ-панели."""
 
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from functools import lru_cache
+from hashlib import sha256
 from math import log2
 from pathlib import Path
 
-from app.catalog import DEMO_CATALOG_PATH, load_catalog, load_history, material_format
+from app.catalog import DEMO_CATALOG_PATH, load_catalog, load_history
 from app.contracts import InteractionEvent, Material, Profile, Recommender
-from evaluation.topic_baseline import recommend_by_topic
+from app.recommender import RANKING_MODES
+from app.recommender.baseline import recommend_popular_courses
 
 EVALUATION_DIR = Path(__file__).resolve().parent
 FIXTURES_DIR = EVALUATION_DIR.parent / "fixtures"
@@ -27,6 +29,12 @@ def _load_cases(suite: str) -> list[dict]:
 
 def evaluation_scenario_counts() -> dict[str, int]:
     return {suite: len(_load_cases(suite)) for suite in SUITE_LABELS}
+
+
+def _summary_identity(suite: str, weight: float, fingerprint: str | None) -> dict:
+    case_data = (EVALUATION_DIR / f"profiles.{suite}.json").read_bytes()
+    return {"version": 1, "suite": suite, "bm25_weight": weight, "catalog": fingerprint,
+            "scenarios": sha256(case_data).hexdigest()}
 
 
 def load_real_catalog(source: Path) -> tuple[Material, ...]:
@@ -73,6 +81,25 @@ class EvaluationReport:
     scenario_count: int
 
 
+def summary_payload(report: EvaluationReport, suite: str, weight: float, fingerprint: str | None) -> dict:
+    return {**_summary_identity(suite, weight, fingerprint), "scenario_count": report.scenario_count,
+            "summaries": [asdict(row) | {"hit_rate": row.hit_rate} for row in report.summaries]}
+
+
+def read_summary(path: Path, suite: str, weight: float, fingerprint: str | None) -> dict | None:
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+        identity = _summary_identity(suite, weight, fingerprint)
+        rows = report["summaries"]
+        if all(report.get(key) == value for key, value in identity.items()) and (
+            [row["method"] for row in rows] == list(RANKING_MODES.values())
+        ):
+            return report
+    except (OSError, ValueError, TypeError, KeyError):
+        pass
+    return None
+
+
 def _ranking_scores(ids: tuple[str, ...], relevant: set[str]) -> tuple[float, float, float, float]:
     hit_ranks = []
     remaining = relevant.copy()
@@ -90,7 +117,8 @@ def _ranking_scores(ids: tuple[str, ...], relevant: set[str]) -> tuple[float, fl
 
 
 def run_evaluation(
-    recommender: Recommender, *, suite: str = "demo", real_catalog: tuple[Material, ...] | None = None,
+    recommender: Recommender, hybrid: Recommender | None = None, *, suite: str = "demo",
+    real_catalog: tuple[Material, ...] | None = None,
 ) -> EvaluationReport:
     if suite == "demo":
         catalog = load_catalog(DEMO_CATALOG_PATH) + load_catalog(EVALUATION_DIR / "catalog.extra.json")
@@ -109,12 +137,11 @@ def run_evaluation(
                 f"Каталог не совпадает с разметкой. В сценарии {case['id']} отсутствуют материалы: "
                 f"{', '.join(sorted(unknown_ids))}."
             )
-    popular_courses = sorted(
-        (m for m in catalog if (m.entity_type == "course" or material_format(m) == "курс") and m.popularity is not None),
-        key=lambda m: (-m.popularity, m.id),
-    )
-    popular_ids = tuple(dict.fromkeys(m.id for m in popular_courses))[:TOP_K]
-    methods = ("Популярные курсы", "Тематический бейзлайн", "recommend")
+    popular_ids = tuple(item.material_id for item in recommend_popular_courses(catalog, TOP_K).items)
+    rankers = ((RANKING_MODES["recommend"], recommender),)
+    if hybrid is not None:
+        rankers += ((RANKING_MODES["hybrid"], hybrid),)
+    methods = (RANKING_MODES["popular"], *(name for name, _ in rankers))
     scores_by_method: dict[str, list[tuple[float, float, float, float]]] = {name: [] for name in methods}
     rows = []
 
@@ -125,9 +152,10 @@ def run_evaluation(
             InteractionEvent(**event) for event in case.get("history", ())
         )
         profile = Profile(**case["profile"])
-        topic = recommend_by_topic(catalog, profile, history, limit=TOP_K)
-        personalized = recommender(catalog, profile, history, limit=TOP_K)
-        orders = (popular_ids, *(tuple(item.material_id for item in result.items[:TOP_K]) for result in (topic, personalized)))
+        orders = (popular_ids, *(
+            tuple(item.material_id for item in rank(catalog, profile, history, limit=TOP_K).items[:TOP_K])
+            for _, rank in rankers
+        ))
         for name, ids in zip(methods, orders, strict=True):
             scores = (None, None, None, None)
             if relevant and (name != methods[0] or popular_ids):

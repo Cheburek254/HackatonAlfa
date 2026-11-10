@@ -7,6 +7,25 @@
 </dl>
 {% endblock %}
 {% block admin_content %}
+<section class="account-card" id="admin-ranking-mode" aria-labelledby="admin-ranking-title">
+    <h2 class="account-section-title" id="admin-ranking-title">Алгоритм рекомендаций</h2>
+    <p class="account-muted">Режим для всех гостей и аккаунтов. Применяется при следующем запросе к каталогу или чату.</p>
+    {% for message in get_flashed_messages(category_filter=['ranking_success']) %}
+    <p class="account-notice admin-message" role="status">{{ message }}</p>
+    {% endfor %}
+    <form class="admin-inline-form" method="post" action="{{ url_for('admin.change_recommendation_mode') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>Текущий алгоритм
+            <select name="mode">
+                {% for mode, label in ranking_modes.items() %}
+                <option value="{{ mode }}"{% if mode == ranking_mode %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <button class="button button-primary" type="submit">Применить для всех</button>
+    </form>
+</section>
+
 <section class="account-card" id="admin-summary" aria-labelledby="admin-summary-title">
     <h2 class="account-section-title" id="admin-summary-title">Оценка качества рекомендаций</h2>
     {% if report_date %}

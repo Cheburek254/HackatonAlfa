@@ -7,10 +7,10 @@ from app.catalog.subscriptions import entitled_catalog
 from app.recommender import recommend
 
 REPORT_NAME = "recommendation-stress.json"
-REPORT_VERSION = 1
+REPORT_VERSION = 2
 
 
-def read_report(path, fingerprint):
+def read_report(path, fingerprint, bm25_weight=None):
     if path is None or fingerprint is None:
         return None
     try:
@@ -20,12 +20,13 @@ def read_report(path, fingerprint):
     if (isinstance(report, dict) and report.get("version") == REPORT_VERSION
             and report.get("catalog_fingerprint") == fingerprint
             and isinstance(report.get("suites"), list) and len(report["suites"]) == 5
-            and isinstance(report.get("previous"), list) and isinstance(report.get("graph"), dict)):
+            and (bm25_weight is None or report.get("bm25_weight") == bm25_weight)
+            and isinstance(report.get("graph"), dict)):
         return report
     return None
 
 
-def check_subscriptions(catalog):
+def check_subscriptions(catalog, bm25_weight=0.0):
     members = {m.id for m in catalog if "Курс+" in m.subscriptions}
     target = next((m for m in catalog if m.id in members and m.title == "Как управлять командой"), None)
     if target is None:
@@ -35,7 +36,8 @@ def check_subscriptions(catalog):
     profile = Profile(goal=target.title)
     for subscribed in (False, True):
         candidates = {m.id: m for m in entitled_catalog(catalog, subscribed)}
-        result = recommend(tuple(candidates.values()), profile, (), 3, explain_with_llm=False, use_expert_links=False)
+        result = recommend(tuple(candidates.values()), profile, (), 3, explain_with_llm=False,
+                           use_expert_links=False, bm25_weight=bm25_weight)
         ids = tuple(item.material_id for item in result.items)
         rows.append({
             "label": "С подпиской Курс+" if subscribed else "Без подписки",

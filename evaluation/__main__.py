@@ -1,18 +1,23 @@
 """Сравнение бейзлайна и recommend на одной разметке."""
 
+import json
 from argparse import ArgumentParser
 from functools import partial
 from pathlib import Path
 
 from app.catalog import catalog_source
 from app.recommender import recommend
-from evaluation.runner import EvaluationDataError, FIXTURES_DIR, SUITE_LABELS, load_real_catalog, run_evaluation
+from app.recommender.hybrid import configured_bm25_weight
+from evaluation.catalog_quality import catalog_fingerprint
+from evaluation.runner import FIXTURES_DIR, SUITE_LABELS, load_real_catalog, run_evaluation, summary_payload
 
 
 def main() -> None:
-    parser = ArgumentParser(description="Сравнение популярных курсов, тематического бейзлайна и recommend.")
+    parser = ArgumentParser(description="Сравнение популярных курсов, recommend и BM25 + recommend.")
     parser.add_argument("--suite", choices=SUITE_LABELS, default="demo", help="Набор сценариев")
     parser.add_argument("--catalog", type=Path, help="Путь к экспорту SQLite/JSON для реального набора")
+    parser.add_argument("--bm25-weight", type=float, help="Вес BM25 в смешанном режиме от 0 до 1")
+    parser.add_argument("--summary-json", type=Path, help="Сохранить итоги трёх режимов в JSON")
     args = parser.parse_args()
     if args.catalog and args.suite != "real":
         parser.error("--catalog используется только вместе с --suite real")
@@ -23,11 +28,18 @@ def main() -> None:
             source = args.catalog or catalog_source()
             catalog = load_real_catalog(source)
             links_directory = source.parent
+        weight = configured_bm25_weight() if args.bm25_weight is None else args.bm25_weight
+        if not 0 <= weight <= 1:
+            parser.error("--bm25-weight должен быть в диапазоне от 0 до 1")
         offline = partial(recommend, explain_with_llm=False, links_directory=links_directory, balance_access=True)
-        report = run_evaluation(offline, suite=args.suite, real_catalog=catalog)
-    except (EvaluationDataError, FileNotFoundError) as error:
+        report = run_evaluation(offline, partial(offline, bm25_weight=weight), suite=args.suite, real_catalog=catalog)
+        if args.summary_json:
+            summary = summary_payload(report, args.suite, weight, catalog_fingerprint(catalog) if catalog else None)
+            args.summary_json.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    except (ValueError, FileNotFoundError) as error:
         parser.exit(1, f"{error}\n")
     print(f"{SUITE_LABELS[args.suite]}. Сценариев: {report.scenario_count}.\n")
+    print(f"Вес BM25: {weight:.1%}. Вес recommend: {1 - weight:.1%}.\n")
     print("| Метод | Hit@3 | MRR@3 | Precision@3 | nDCG@3 | MAP@3 |")
     print("| --- | ---: | ---: | ---: | ---: | ---: |")
     for row in report.summaries:

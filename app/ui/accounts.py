@@ -20,6 +20,7 @@ from flask.sessions import SecureCookieSessionInterface
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.contracts import InteractionEvent
+from app.recommender import DEFAULT_RANKING_MODE
 
 PROFILE_FIELDS = {
     "stage": ("Стадия бизнеса", ("идея", "запуск", "работающий бизнес", "рост")),
@@ -84,6 +85,10 @@ CREATE TABLE IF NOT EXISTS account_sessions (
 );
 CREATE TABLE IF NOT EXISTS admin_accounts (
     user_id INTEGER PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS recommendation_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    mode TEXT NOT NULL CHECK (mode IN ('popular', 'recommend', 'hybrid'))
 );
 CREATE TABLE IF NOT EXISTS course_plus_accounts (
     user_id INTEGER PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE
@@ -195,6 +200,19 @@ def _close_db(_error: BaseException | None) -> None:
     connection = g.pop("accounts_db", None)
     if connection is not None:
         connection.close()
+
+
+def recommendation_mode() -> str:
+    row = _db().execute("SELECT mode FROM recommendation_settings WHERE id = 1").fetchone()
+    return row["mode"] if row is not None else DEFAULT_RANKING_MODE
+
+
+def set_recommendation_mode(mode: str) -> None:
+    with _db() as connection:
+        connection.execute(
+            "INSERT INTO recommendation_settings (id, mode) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET mode = excluded.mode",
+            (mode,),
+        )
 
 
 def profile_values(values: Mapping[str, object]) -> dict[str, str | None]:

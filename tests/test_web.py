@@ -15,6 +15,7 @@ from PIL import Image
 from app.contracts import Material, Profile, Recommendation, RecommendationResult
 from app.ctr_report import DailyActivity, Metrics, read_daily_activity, read_report, read_top_cards
 from app.live_data import LiveDataSnapshot
+from app.ui.accounts import create_admin_account
 from app.ui.stub import recommend as stub_recommend
 from app.ui.web import create_app
 from evaluation.runner import EVALUATION_DIR
@@ -65,6 +66,42 @@ class WebFlowTest(unittest.TestCase):
         self.assertIn("Сверьте план запуска", page)
         self.assertIn("Что уже сделали?", page)
         self.assertIn('href="/materials/start-checklist?impression=', page)
+
+    def test_admin_ranking_mode_applies_to_guests_and_accounts_and_survives_restart(self):
+        app = create_app(database_path=self.database_path)
+        with app.app_context():
+            self.assertTrue(create_admin_account("ranking-admin", self.password))
+        admin_client, guest, account = app.test_client(), app.test_client(), app.test_client()
+        endpoint = "/admin/recommendation-mode"
+        self.assertEqual(guest.post(endpoint, data={"mode": "popular"}).location, "/admin/login")
+        self.assertEqual(self.post_form("/login/demo", {}, client=account, page="/login").status_code, 303)
+        self.assertEqual(account.post(endpoint, data={"mode": "popular"}).status_code, 403)
+        self.assertEqual(self.post_form("/admin/login", {"username": "ranking-admin", "password": self.password},
+                                        client=admin_client).status_code, 303)
+        self.assertEqual(admin_client.post(endpoint, data={"mode": "popular"}).status_code, 400)
+        self.assertEqual(self.post_form(endpoint, {"mode": "unknown"}, client=admin_client, page="/admin").status_code, 400)
+
+        def select(mode):
+            response = self.post_form(endpoint, {"mode": mode}, client=admin_client, page="/admin")
+            self.assertEqual(response.location, "/admin#admin-ranking-mode")
+
+        def results(browser, goal):
+            return browser.post("/", data={"goal": goal}).get_data(as_text=True)
+
+        def cards(page):
+            return re.findall(r'data-material-id="([^"]+)"', page)
+
+        select("popular")
+        baseline = results(guest, "первые клиенты")
+        self.assertIn("Курсы отсортированы по популярности", baseline)
+        self.assertEqual(cards(baseline), cards(results(account, "налоги")))
+        self.assertNotIn("start-checklist", cards(baseline))
+        fresh_app = create_app(database_path=self.database_path)
+        self.assertEqual(cards(results(fresh_app.test_client(), "учёт")), cards(baseline))
+        select("recommend")
+        self.assertNotEqual(cards(results(guest, "финансы")), cards(baseline))
+        select("hybrid")
+        self.assertIn("Подборка учитывает совпадения", results(guest, "финансы"))
 
     def test_admin_login_report_and_role_management(self):
         self.assertEqual(self.client.get("/admin").location, "/admin/login")
@@ -134,7 +171,7 @@ class WebFlowTest(unittest.TestCase):
         self.assertIn("Синтетический каталог · результаты", comparison)
         self.assertIn("Hit@3", comparison)
         self.assertIn("MRR@3", comparison)
-        for metric in ("Precision@3", "nDCG@3", "MAP@3", "Популярные курсы"):
+        for metric in ("Precision@3", "nDCG@3", "MAP@3", "популярные курсы", "BM25 + recommend"):
             self.assertIn(metric, comparison)
         self.assertIn("План A/B-теста", new_admin.get("/admin/roadmap").get_data(as_text=True))
         self.assertIn("outside-catalog", comparison)

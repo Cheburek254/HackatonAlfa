@@ -3,10 +3,17 @@ from math import log2
 from unittest.mock import patch
 
 from app.contracts import Material, RecommendationResult
+from app.recommender.hybrid import merge_orders
 from evaluation.runner import _ranking_scores, run_evaluation
 
 
 class EvaluationTest(unittest.TestCase):
+    def test_rank_fusion_supports_iterators_and_can_disable_a_signal(self):
+        orders = (("core", "both"), ("text", "both"))
+        self.assertEqual(merge_orders(iter(orders))[0], "both")
+        self.assertEqual(merge_orders(orders, weights=(1, 0)), ["core", "both"])
+        self.assertEqual(merge_orders(orders, weights=(0, 1)), ["text", "both"])
+
     def test_ranking_scores_discount_later_matches_and_ignore_duplicates(self):
         rr, precision, ndcg, ap = _ranking_scores(("other", "match", "match"), {"match", "another"})
         self.assertEqual(rr, 1 / 2)
@@ -27,7 +34,8 @@ class EvaluationTest(unittest.TestCase):
             {"id": "outside", "note": "", "profile": {}, "relevant_ids": []},
         ]
         with patch("evaluation.runner._load_cases", return_value=cases):
-            report = run_evaluation(lambda *args, **kwargs: RecommendationResult((), ""), suite="real", real_catalog=catalog)
+            empty = lambda *args, **kwargs: RecommendationResult((), "")
+            report = run_evaluation(empty, empty, suite="real", real_catalog=catalog)
         baseline = report.summaries[0]
         self.assertEqual((baseline.eligible, baseline.hits, baseline.mrr, baseline.map_at_k), (2, 1, 1 / 4, 1 / 4))
         self.assertTrue(all(row.material_ids == ("top", "lower") for row in report.rows[::3]))

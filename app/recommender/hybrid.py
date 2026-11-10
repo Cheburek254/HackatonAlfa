@@ -1,17 +1,26 @@
-"""Экспериментальный BM25 и объединение рангов для офлайн-оценки."""
+"""BM25 и взвешенное объединение порядков для каталога, чата и офлайн-прогонов."""
 
+import os
 import re
 from collections import Counter, defaultdict
-from functools import cache
+from functools import lru_cache
 from math import log1p
 
 from app.catalog import material_format
-from app.contracts import Recommendation, RecommendationResult
-from app.recommender.engine import STOPWORDS, _normalize_text, _stem_ru
+from app.catalog.subscriptions import access_category
+from app.contracts import Material
 
 FIELD_WEIGHTS = (3, 1, 1)
 K1, B = 1.2, 0.75
 FUSION_DEPTH, RRF_OFFSET = 50, 20
+DEFAULT_BM25_WEIGHT = 0.25
+
+
+def configured_bm25_weight() -> float:
+    weight = float(os.environ.get("ALFA_BM25_WEIGHT", str(DEFAULT_BM25_WEIGHT)))
+    if not 0 <= weight <= 1:
+        raise ValueError("ALFA_BM25_WEIGHT must be between 0 and 1")
+    return weight
 
 FORMAT_WORDS = {
     "курс": r"курс(?:а|у|е|ы|ов)?",
@@ -31,6 +40,8 @@ FORMAT_REQUEST = re.compile(
 MAX_BUDGET = re.compile(r"(?:до|не дороже|не больше|не более|в пределах)\s*(\d[\d\s]*)\s*(?:₽|руб\w*|р\.?(?=\s|$|[,.!?]))", re.I)
 
 def constraints(goal):
+    from app.recommender.engine import _normalize_text
+
     norm = _normalize_text(goal or "")
     match = FORMAT_REQUEST.search(norm)
     requested_format = None
@@ -56,13 +67,18 @@ def acceptable(material, filters):
     requested_format, budget, access = filters
     if requested_format and material_format(material) != requested_format:
         return False
-    if access and material.access != access:
+    category = access_category(material)
+    if access == "free" and category != "free":
         return False
-    if budget is not None and material.access != "free":
+    if access == "paid" and category not in {"paid", "subscription"}:
+        return False
+    if budget is not None and category != "free":
         return material.cost is not None and material.cost <= budget
     return True
 
 def tokens(text):
+    from app.recommender.engine import STOPWORDS, _normalize_text, _stem_ru
+
     normalized = _normalize_text(re.sub("<[^>]*>", " ", text))
     return [_stem_ru(word) for word in normalized.split() if word not in STOPWORDS and len(word) >= 2]
 
@@ -82,7 +98,7 @@ def make_bm25(catalog):
                 index[term].append((material.id, score * weight))
         indexes.append(index)
 
-    @cache
+    @lru_cache(maxsize=256)
     def order(goal):
         scores = defaultdict(float)
         for term in sorted(set(tokens(goal or ""))):
@@ -93,14 +109,19 @@ def make_bm25(catalog):
 
     return order
 
-def make_result(ids, limit, note):
-    return RecommendationResult(tuple(Recommendation(mid, note, "Откройте карточку.") for mid in ids[:limit]), note)
 
-def merge_orders(orders):
+@lru_cache(maxsize=12)
+def cached_bm25(catalog: tuple[Material, ...]):
+    return make_bm25(catalog)
+
+def merge_orders(orders, *, weights=None):
     scores = defaultdict(float)
     best_rank = {}
-    for order in orders:
+    weighted_orders = ((order, 1.0) for order in orders) if weights is None else zip(orders, weights, strict=True)
+    for order, weight in weighted_orders:
+        if not weight:
+            continue
         for rank, mid in enumerate(order[:FUSION_DEPTH], 1):
-            scores[mid] += 1 / (RRF_OFFSET + rank)
+            scores[mid] += weight / (RRF_OFFSET + rank)
             best_rank[mid] = min(best_rank.get(mid, rank), rank)
     return sorted(scores, key=lambda mid: (-scores[mid], best_rank[mid], mid))

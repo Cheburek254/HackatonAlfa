@@ -7,14 +7,16 @@ from flask import Blueprint, abort, current_app, flash, g, redirect, render_temp
 
 from app.ctr_report import LEGACY_ALGORITHMS, ORDER_LABELS, Metrics, read_daily_activity, read_report, read_top_cards
 from app.live_data import live_payload
+from app.recommender import RANKING_MODES
 from app.ui.accounts import (
     DEMO_USERNAME, LOGIN_PATTERN, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, admin_usernames, check_csrf,
-    clear_interactions, create_admin_account, current_account, grant_admin, reset_admin_password, set_course_plus,
+    clear_interactions, create_admin_account, current_account, grant_admin, recommendation_mode, reset_admin_password,
+    set_course_plus, set_recommendation_mode,
 )
 from app.ui.admin_summary import build_assessments
 from evaluation.catalog_quality import read_report as read_catalog_quality
 from evaluation.learning_report import read_report as read_learning_report
-from evaluation.runner import EvaluationDataError, SUITE_LABELS, evaluation_scenario_counts, run_evaluation
+from evaluation.runner import EvaluationDataError, SUITE_LABELS, evaluation_scenario_counts, read_summary, run_evaluation
 from evaluation.stress_report import check_subscriptions, read_report as read_stress_report
 
 admin = Blueprint("admin", __name__, url_prefix="/admin")
@@ -41,11 +43,20 @@ def require_admin():
 def _test_reports():
     config = current_app.config
     fingerprint = config["CATALOG_QUALITY_FINGERPRINT"]
+    weight = config["BM25_WEIGHT"]
     return {
-        "catalog_quality": read_catalog_quality(config["CATALOG_QUALITY_PATH"], fingerprint),
-        "stress_report": read_stress_report(config["STRESS_REPORT_PATH"], fingerprint),
-        "learning_report": read_learning_report(config["LEARNING_REPORT_PATH"], fingerprint),
+        "catalog_quality": read_catalog_quality(config["CATALOG_QUALITY_PATH"], fingerprint, weight),
+        "stress_report": read_stress_report(config["STRESS_REPORT_PATH"], fingerprint, weight),
+        "learning_report": read_learning_report(config["LEARNING_REPORT_PATH"], fingerprint, weight),
     }
+
+
+def _ranking_summary(suite):
+    directory = current_app.config["EVALUATION_SUMMARY_DIR"]
+    if directory is None:
+        return None
+    fingerprint = current_app.config["CATALOG_QUALITY_FINGERPRINT"] if suite == "real" else None
+    return read_summary(directory / f"ranking-{suite}.json", suite, current_app.config["BM25_WEIGHT"], fingerprint)
 
 
 @admin.route("", methods=["GET", "POST"])
@@ -60,9 +71,23 @@ def dashboard():
     return render_template(
         "admin.html", heading="Сводка рекомендаций", intro="Основные показатели и оценка последних офлайн-прогонов.",
         overview=overview,
-        assessments=build_assessments(reports["catalog_quality"], reports["stress_report"], reports["learning_report"]),
+        ranking_mode=recommendation_mode(), ranking_modes=RANKING_MODES,
+        assessments=build_assessments(
+            reports["catalog_quality"], reports["stress_report"], reports["learning_report"], _ranking_summary("real"),
+        ),
         report_date=max((report["generated_at"][:10] for report in reports.values() if report), default=None),
     )
+
+
+@admin.post("/recommendation-mode")
+def change_recommendation_mode():
+    check_csrf()
+    mode = request.form.get("mode")
+    if mode not in RANKING_MODES:
+        abort(400)
+    set_recommendation_mode(mode)
+    flash(f"Режим «{RANKING_MODES[mode]}» включён для всех пользователей.", "ranking_success")
+    return redirect(url_for("admin.dashboard", _anchor="admin-ranking-mode"), code=303)
 
 
 @admin.route("/tests", methods=["GET", "POST"])
@@ -77,17 +102,22 @@ def tests():
         try:
             comparison = run_evaluation(
                 current_app.config["EVALUATION_RECOMMENDERS"][evaluation_suite],
+                current_app.config["EVALUATION_HYBRIDS"][evaluation_suite],
                 suite=evaluation_suite, real_catalog=real_catalog,
             )
         except EvaluationDataError as error:
             evaluation_error = str(error)
+    weight = current_app.config["BM25_WEIGHT"]
+    summaries = {suite: snapshot for suite in SUITE_LABELS
+                 if suite != evaluation_suite and (snapshot := _ranking_summary(suite))}
     return render_template(
         "admin_tests.html", heading="Тесты рекомендаций",
         intro="Прогоны, метрики по наборам, примеры сценариев и проверка прав доступа.",
         comparison=comparison, titles=current_app.config["CATALOG_TITLES"],
         evaluation_suites=SUITE_LABELS, evaluation_suite=evaluation_suite, evaluation_error=evaluation_error,
         evaluation_counts=evaluation_scenario_counts(),
-        subscription_check=check_subscriptions(real_catalog) if real_catalog else None,
+        bm25_weight=weight, comparison_summaries=summaries,
+        subscription_check=check_subscriptions(real_catalog, weight) if real_catalog else None,
         real_catalog_available=bool(real_catalog), **_test_reports(),
     )
 

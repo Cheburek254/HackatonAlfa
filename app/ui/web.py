@@ -22,7 +22,7 @@ from app.live_data import LiveDataProvider
 from app.database import account_database_path
 from app.ui.accounts import (
     DEMO_PASSWORD_CODE, DEMO_USERNAME, PROFILE_FIELDS, account_avatar, check_csrf, configure_accounts, csrf_token,
-    current_account, password_code_pending, profile_values, recent_interactions, record_interaction, saved_profile,
+    current_account, password_code_pending, profile_values, recent_interactions, recommendation_mode, record_interaction, saved_profile,
     update_profile,
 )
 from app.ui.admin import admin
@@ -31,6 +31,8 @@ from app.ui.avatars import AVATAR_MAX_BYTES, AVATAR_MAX_MB, prepare_avatar
 from app.ui.descriptions import format_description_html
 from app.ui.impressions import issue_impression_tickets, record_impressions
 from app.recommender import recommend
+from app.recommender.baseline import recommend_popular_courses
+from app.recommender.hybrid import configured_bm25_weight
 from evaluation.catalog_quality import REPORT_NAME, catalog_fingerprint
 from evaluation.learning_report import REPORT_NAME as LEARNING_REPORT_NAME
 from evaluation.stress_report import REPORT_NAME as STRESS_REPORT_NAME
@@ -197,6 +199,8 @@ def create_app(
     app.config["PASSWORD_CODE_SENDER"] = password_code_sender
     app.config["COURSE_PLUS_ACTIVATOR"] = course_plus_activator
     app.config["LIVE_DATA_PROVIDER"] = live_data_provider
+    bm25_weight = configured_bm25_weight()
+    app.config["BM25_WEIGHT"] = bm25_weight
     source = catalog_source()
     is_demo_catalog = source == DEMO_CATALOG_PATH
     catalog = load_catalog(source)
@@ -208,6 +212,7 @@ def create_app(
     covers = {} if is_demo_catalog else json.loads(COVER_METADATA.read_text(encoding="utf-8"))
     app.config["CATALOG_TITLES"] = {material.id: material.title for material in catalog}
     app.config["EVALUATION_REAL_CATALOG"] = None if is_demo_catalog else catalog
+    app.config["EVALUATION_SUMMARY_DIR"] = None if is_demo_catalog else source.parent
     app.config["CATALOG_QUALITY_PATH"] = None if is_demo_catalog else source.parent / REPORT_NAME
     app.config["STRESS_REPORT_PATH"] = None if is_demo_catalog else source.parent / STRESS_REPORT_NAME
     app.config["LEARNING_REPORT_PATH"] = None if is_demo_catalog else source.parent / LEARNING_REPORT_NAME
@@ -219,6 +224,10 @@ def create_app(
         if recommender is recommend else recommender
         for suite, directory in (("demo", FIXTURES), ("real", source.parent))
     }
+    app.config["EVALUATION_HYBRIDS"] = {
+        suite: partial(rank, bm25_weight=bm25_weight) if recommender is recommend else rank
+        for suite, rank in app.config["EVALUATION_RECOMMENDERS"].items()
+    }
     sample_history = load_history(FIXTURES / "history.demo.json") if is_demo_catalog else ()
     configure_accounts(app, database_path or account_database_path())
     app.register_blueprint(admin)
@@ -229,7 +238,7 @@ def create_app(
         f"{getattr(recommender, '__qualname__', recommender_type.__qualname__)}"
     )
     if algorithm_name is None and recommender is recommend:
-        algorithm += ":demo-catalog" if is_demo_catalog else ":access-pacing-v1"
+        algorithm += ":access-pacing-v1"
     app.jinja_env.globals["signed_in"] = lambda: current_account() is not None
     app.jinja_env.globals["current_account"] = current_account
     app.jinja_env.globals["chat_pages"] = CHAT_PAGES
@@ -440,14 +449,26 @@ def create_app(
         format_filter = form.get("selected_format") or form.get("format_filter", request.args.get("format", "all"))
         if format_filter not in FORMAT_LABELS:
             format_filter = "all"
-        rank = recommender
-        if recommender is recommend:
-            rank = partial(
-                recommend, links_directory=source.parent,
+        mode = recommendation_mode() if recommender is recommend else "recommend"
+        effective_algorithm = algorithm
+        if mode == "popular":
+            effective_algorithm = "app.recommender.baseline.recommend_popular_courses"
+            result = recommend_popular_courses(candidates, len(candidates))
+        elif recommender is recommend and candidates:
+            active_weight = bm25_weight if mode == "hybrid" else 0.0
+            if mode == "hybrid":
+                effective_algorithm += f":bm25-{active_weight:.12g}"
+            result = recommend(
+                candidates, profile, history, len(candidates),
+                links_directory=source.parent,
                 history_as_of=None if is_demo_catalog else datetime.now(UTC),
                 balance_access=(access_filters == all_access_filters and format_filter == "all" and result_order == "recommended"),
+                bm25_weight=active_weight,
             )
-        result = rank(candidates, profile, history, len(candidates)) if candidates else RecommendationResult((), "")
+        else:
+            result = recommender(candidates, profile, history, len(candidates)) if candidates else RecommendationResult((), "")
+        if algorithm_name is None and recommender is recommend and is_demo_catalog:
+            effective_algorithm += ":demo-catalog"
 
         candidate_ids = {material.id for material in candidates}
         all_candidate_cards = [(materials_by_id[item.material_id], item) for item in result.items if item.material_id in candidate_ids]
@@ -472,7 +493,9 @@ def create_app(
         first_cards = cards[:RESULTS_PER_PAGE]
         access_counts = Counter(access_category(material) for material, _ in first_cards)
         impression_batch, impression_batch_id, impression_tickets = issue_impression_tickets(
-            [material.id for material, _ in visible_cards], algorithm, result_order, f"{format_filter}:{page_size}:{','.join(access_filters)}",
+            [material.id for material, _ in visible_cards],
+            effective_algorithm, result_order,
+            f"{format_filter}:{page_size}:{','.join(access_filters)}",
             form.get("impression_batch") if page > 1 else None,
         )
         return render_template(

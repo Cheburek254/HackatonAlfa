@@ -19,13 +19,13 @@ from app.catalog.subscriptions import entitled_catalog
 from app.contracts import InteractionEvent, Material, Profile
 from app.recommender import recommend
 from app.recommender.engine import _tokenize_stems
+from app.recommender.hybrid import configured_bm25_weight, constraints
 from app.recommender.onboarding import ONBOARDING_ITEMS
 from evaluation.quality_data import read_quality_data
-from evaluation.hybrid import constraints
 from evaluation.runner import TOP_K, _load_cases, run_evaluation
 
 REPORT_NAME = "catalog-quality.json"
-REPORT_VERSION = 1
+REPORT_VERSION = 2
 TYPE_LABELS = {
     "article": "Статьи", "course": "Курсы", "lesson": "Уроки", "webinar": "Вебинары",
     "document": "Документы", "podcast": "Подкасты", "calculator": "Калькуляторы",
@@ -41,7 +41,7 @@ def catalog_fingerprint(catalog: tuple[Material, ...]) -> str:
     return sha256(json.dumps(payload, ensure_ascii=False).encode()).hexdigest()
 
 
-def read_report(path: Path | None, fingerprint: str | None) -> dict | None:
+def read_report(path: Path | None, fingerprint: str | None, bm25_weight: float | None = None) -> dict | None:
     if path is None or fingerprint is None:
         return None
     try:
@@ -50,6 +50,7 @@ def read_report(path: Path | None, fingerprint: str | None) -> dict | None:
         return None
     if (isinstance(report, dict) and report.get("version") == REPORT_VERSION
             and report.get("catalog_fingerprint") == fingerprint and isinstance(report.get("generated_at"), str)
+            and (bm25_weight is None or report.get("bm25_weight") == bm25_weight)
             and all(isinstance(report.get(key), dict) for key in ("catalog", "history", "cold_start", "expert"))):
         return report
     return None
@@ -165,7 +166,9 @@ def synthetic_paywall(catalog, rank):
 def build_quality_report(backup: Path, catalog_path: Path, sample_size: int) -> dict:
     catalog = load_catalog(catalog_path)
     data = read_quality_data(backup, catalog, sample_size)
-    current = partial(recommend, links_directory=catalog_path.parent, explain_with_llm=False)
+    bm25_weight = configured_bm25_weight()
+    current = partial(recommend, links_directory=catalog_path.parent, explain_with_llm=False,
+                      balance_access=True, bm25_weight=bm25_weight)
     materials = {item.id: item for item in catalog}
 
     def top(profile, history=(), algorithm=current):
@@ -221,6 +224,7 @@ def build_quality_report(backup: Path, catalog_path: Path, sample_size: int) -> 
 
     return {
         "version": REPORT_VERSION, "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "bm25_weight": bm25_weight,
         "catalog_fingerprint": catalog_fingerprint(catalog),
         "catalog": {
             "size": len(catalog), "scenario_count": len(authored), "slots": shown.total(),

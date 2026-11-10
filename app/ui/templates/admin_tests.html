@@ -1,4 +1,24 @@
 {% extends "admin_shell.html" %}
+{% macro ranking_table(report, label) %}
+<div class="admin-table-wrap" tabindex="0" role="region" aria-label="Итоги тестов · {{ label }}">
+    <table class="admin-table">
+        <thead><tr><th scope="col">Метод</th><th scope="col">Hit@3</th><th scope="col">MRR@3</th><th scope="col">Precision@3</th><th scope="col">nDCG@3</th><th scope="col">MAP@3</th></tr></thead>
+        <tbody>
+            {% for row in report.summaries %}
+            <tr><th scope="row">{{ row.method }}</th>
+                <td>{% if row.hit_rate is not none %}{{ '%.1f' | format(100 * row.hit_rate) }}% ({{ row.hits }}/{{ row.eligible }}){% else %}—{% endif %}</td>
+                {% for value in (row.mrr, row.precision, row.ndcg, row.map_at_k) %}
+                <td>{{ '%.3f' | format(value) if value is not none else '—' }}</td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% if report.summaries[0].eligible == 0 %}
+<p class="account-muted">Для расчёта бейзлайна нужны курсы с данными о популярности и сценарии с размеченными попаданиями.</p>
+{% endif %}
+{% endmacro %}
 {% block admin_content %}
 <nav class="admin-section-links" aria-label="Наборы тестов">
     <a href="#admin-evaluation">Сравнение ранжирования</a>
@@ -9,7 +29,7 @@
 </nav>
 <section class="account-card" id="admin-evaluation" aria-labelledby="admin-evaluation-title">
     <h2 id="admin-evaluation-title" class="account-section-title">Тесты рекомендаций</h2>
-    <p class="account-muted">Сравниваем персональную выдачу, тематический бейзлайн и один и тот же топ популярных курсов для всех профилей.</p>
+    <p class="account-muted">Сравниваем топ популярных курсов, персональный recommend и смешанный режим. Вес BM25 — {{ '%g' | format(100 * bm25_weight) }}%, вес recommend — {{ '%g' | format(100 * (1 - bm25_weight)) }}%.</p>
     <p class="account-muted">Hit@3 и MRR@3 оценивают первое попадание. Precision@3 показывает долю подходящих карточек в тройке, nDCG@3 учитывает их позиции, MAP@3 усредняет точность на позициях попаданий.</p>
     <div class="admin-forms">
         {% for suite, label in evaluation_suites.items() %}
@@ -24,29 +44,17 @@
         </form>
         {% endfor %}
     </div>
+    {% for suite, report in comparison_summaries.items() %}
+    <h3>{{ evaluation_suites[suite] }} · сохранённый прогон</h3>
+    <p class="account-muted">Сценариев в наборе · {{ report.scenario_count }}</p>
+    {{ ranking_table(report, evaluation_suites[suite]) }}
+    {% endfor %}
     {% if evaluation_error %}
     <p class="account-error admin-message" role="alert">{{ evaluation_suites[evaluation_suite] }}. {{ evaluation_error }}</p>
     {% elif comparison %}
     <h3>{{ evaluation_suites[evaluation_suite] }} · результаты</h3>
     <p class="account-muted" role="status">Проверено сценариев: {{ comparison.scenario_count }}.{% if evaluation_suite == 'demo' %} Сценарии без релевантной карточки показаны отдельно.{% endif %}</p>
-    <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Итоги тестов · {{ evaluation_suites[evaluation_suite] }}">
-        <table class="admin-table">
-            <thead><tr><th scope="col">Метод</th><th scope="col">Hit@3</th><th scope="col">MRR@3</th><th scope="col">Precision@3</th><th scope="col">nDCG@3</th><th scope="col">MAP@3</th></tr></thead>
-            <tbody>
-                {% for row in comparison.summaries %}
-                <tr><th scope="row">{{ row.method }}</th>
-                    <td>{% if row.hit_rate is not none %}{{ '%.1f' | format(100 * row.hit_rate) }}% ({{ row.hits }}/{{ row.eligible }}){% else %}—{% endif %}</td>
-                    {% for value in (row.mrr, row.precision, row.ndcg, row.map_at_k) %}
-                    <td>{{ '%.3f' | format(value) if value is not none else '—' }}</td>
-                    {% endfor %}
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    {% if comparison.summaries[0].eligible == 0 %}
-    <p class="account-muted">Для расчёта бейзлайна нужны курсы с данными о популярности и сценарии с размеченными попаданиями.</p>
-    {% endif %}
+    {{ ranking_table(comparison, evaluation_suites[evaluation_suite]) }}
     <details class="admin-evaluation-details">
         <summary>Результаты по сценариям</summary>
         <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Результаты по сценариям">

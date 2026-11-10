@@ -22,7 +22,7 @@
     <h2 id="admin-stress-title" class="account-section-title">Офлайн-проверки рекомендаций</h2>
     {% if stress_report %}
     <p class="account-muted">250 сценариев в пяти наборах. Дополнительно проверены 50 экспертных связей. Дата расчёта {{ stress_report.generated_at[:10] }} (UTC).</p>
-    <p class="account-muted">В новых наборах без текстового запроса BM25 получает тему и отрасль из профиля и названия до двух последних материалов из истории. Гибрид объединяет ранги и учитывает явно заданные формат, доступ и бюджет.</p>
+    <p class="account-muted">Диагностика recommend и смешанного режима с текущим весом BM25.</p>
     {% for suite in stress_report.suites %}
     <details class="admin-evaluation-details" {% if loop.first %}open{% endif %}>
         <summary>{{ suite.title }} · {{ suite.overall.count }} сценариев</summary>
@@ -47,14 +47,6 @@
         {% endif %}
     </details>
     {% endfor %}
-    <details class="admin-evaluation-details">
-        <summary>Сравнение на прежних 400 сценариях</summary>
-        {% for row in stress_report.previous %}
-        <h3>{{ row.label }} · {{ row.count }} сценариев</h3>
-        {% if row.labeled < row.count %}<p>Метрики рассчитаны на {{ row.labeled }} сценариях с размеченным ответом.</p>{% endif %}
-        {{ comparison(["Hit@3", "MRR@3"], row.methods) }}
-        {% endfor %}
-    </details>
     {% else %}
     <p class="account-muted">Для текущего каталога нет результатов офлайн-прогона.</p>
     {% endif %}

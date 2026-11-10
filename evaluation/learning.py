@@ -14,6 +14,7 @@ from tempfile import TemporaryDirectory
 from app.catalog import load_catalog
 from app.catalog.normalizer import PgDumpReader
 from app.contracts import Profile
+from app.recommender.hybrid import configured_bm25_weight
 from evaluation.catalog_quality import _semantic_vectors, catalog_fingerprint
 from evaluation.learning_cases import (
     ADVANCED, BASIC, INTERMEDIATE, Scenario, bridge_cases, classify, freshness_cases, glossary_materials,
@@ -184,6 +185,7 @@ def freshness_measure(rows):
 
 
 def build_report(backup, catalog_path):
+    bm25_weight = configured_bm25_weight()
     catalog = load_catalog(catalog_path)
     reader = PgDumpReader(backup)
     quality = read_quality_data(backup, catalog, 0)
@@ -193,10 +195,10 @@ def build_report(backup, catalog_path):
     levels = {m.id: classify(m) for m in all_materials}
     groups = theme_groups(catalog)
     vectors = semantic_corpus(reader, quality, all_materials)
-    current = make_ranker(catalog, catalog_path.parent)
-    with_glossary = make_ranker(all_materials, catalog_path.parent)
+    current = make_ranker(catalog, catalog_path.parent, bm25_weight=bm25_weight)
+    with_glossary = make_ranker(all_materials, catalog_path.parent, bm25_weight=bm25_weight)
     balanced = make_ranker(tuple(replace(m, popularity=None, rating=None) for m in sorted(catalog, key=lambda m: m.id)),
-                           catalog_path.parent)
+                           catalog_path.parent, bm25_weight=bm25_weight)
 
     def top(ranker, case):
         orders = ranker(case.profile, case.history)
@@ -241,7 +243,7 @@ def build_report(backup, catalog_path):
     ]
     return {
         "version": REPORT_VERSION, "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
-        "catalog_fingerprint": catalog_fingerprint(catalog), "suites": suites,
+        "catalog_fingerprint": catalog_fingerprint(catalog), "suites": suites, "bm25_weight": bm25_weight,
     }
 
 

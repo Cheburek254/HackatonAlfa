@@ -18,6 +18,7 @@ from app.contracts import (
     Recommendation,
     RecommendationResult,
 )
+from app.recommender.hybrid import acceptable, cached_bm25, constraints as hybrid_constraints, merge_orders
 from app.recommender.llm import refine_with_llm_if_configured
 from app.recommender.onboarding import onboarding
 from app.recommender.pacing import balance_first_page
@@ -629,8 +630,11 @@ def recommend(
     expert_links: dict[str, list[str]] | None = None,
     history_as_of: datetime | None = None,
     balance_access: bool = False,
+    bm25_weight: float = 0.0,
 ) -> RecommendationResult:
     """Ранжирует материалы каталога с учётом задачи, профиля, истории и популярности."""
+    if not 0 <= bm25_weight <= 1:
+        raise ValueError("bm25_weight must be between 0 and 1")
     if not catalog or limit <= 0:
         return RecommendationResult((), "")
 
@@ -942,6 +946,18 @@ def recommend(
     # Выбираем топ-limit материалов
     selected_ids = {mat.id for _, mat, _ in context_items}
     ordered = context_items + [row for row in scored_items if row[1].id not in selected_ids]
+    used_hybrid = False
+    if bm25_weight and goal_norm and not is_weak_match and not context_items:
+        filters = hybrid_constraints(goal_raw)
+        rankable = {row[1].id: row for row in ordered if acceptable(row[1], filters)}
+        core_ids = tuple(rankable)
+        text_ids = tuple(mid for mid in cached_bm25(tuple(catalog))(goal_raw) if mid in rankable)
+        if text_ids:
+            ranked_ids = merge_orders((core_ids, text_ids), weights=(1 - bm25_weight, bm25_weight))
+            fused_ids = set(ranked_ids)
+            replacement = iter(ranked_ids + [mid for mid in core_ids if mid not in fused_ids])
+            ordered = [rankable[next(replacement)] if row[1].id in rankable else row for row in ordered]
+            used_hybrid = True
     if balance_access and not browse_from_seed and not is_weak_match and not any(
         (constraints["only_free"], constraints["max_budget"] is not None, constraints["only_format"])
     ):
@@ -972,6 +988,8 @@ def recommend(
     first_mat = selected_materials[0]
     if context_items:
         ordering_reason = "Первые материалы продолжают тему двух ваших недавних переходов. Остальная подборка учитывает запрос и профиль."
+    elif used_hybrid:
+        ordering_reason = "Подборка учитывает совпадения запроса с заголовками, описаниями и темами, а также ваш профиль и историю."
     elif is_weak_match:
         ordering_reason = (
             f"Поскольку точного совпадения по запросу «{goal_raw}» в каталоге нет, "

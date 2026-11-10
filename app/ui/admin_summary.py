@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 
+from app.recommender import RANKING_MODES
+
 
 @dataclass(frozen=True)
 class Rule:
@@ -36,8 +38,9 @@ def _percent(value):
     return f"{100 * value:.1f}%".replace(".", ",")
 
 
-def build_assessments(quality, stress, learning):
+def build_assessments(quality, stress, learning, ranking_summary=None):
     weak, strong, observations = [], [], []
+    diagnostic_method = RANKING_MODES["hybrid"]
     for report, rules, anchor in ((stress, STRESS_RULES, "admin-stress"), (learning, LEARNING_RULES, "admin-learning")):
         if not report:
             continue
@@ -51,7 +54,7 @@ def build_assessments(quality, stress, learning):
             )
             if result is None:
                 continue
-            scores = dict(zip(suite["columns"], _scores(result["methods"], "recommend")))
+            scores = dict(zip(suite["columns"], _scores(result["methods"], diagnostic_method)))
             value = scores.get(rule.metric)
             if value is None:
                 continue
@@ -60,7 +63,7 @@ def build_assessments(quality, stress, learning):
             count = result["count"]
             (strong if passes else weak).append({
                 "label": rule.label, "value": _percent(value), "anchor": anchor,
-                "explanation": f"Метрика {rule.metric.rstrip(' ↑↓')} для recommend. Ориентир {target} {_percent(rule.threshold)}. "
+                "explanation": f"Метрика {rule.metric.rstrip(' ↑↓')} для смешанного режима. Ориентир {target} {_percent(rule.threshold)}. "
                                f"Проверено сценариев — {count}.",
             })
 
@@ -76,7 +79,7 @@ def build_assessments(quality, stress, learning):
             })
 
     if stress:
-        graph = _scores(stress["graph"]["methods"], "recommend")
+        graph = _scores(stress["graph"]["methods"], diagnostic_method)
         if graph and graph[0] is not None:
             (weak if graph[0] < .20 else strong).append({
                 "label": "Обобщение экспертных связей", "value": _percent(graph[0]),
@@ -84,22 +87,21 @@ def build_assessments(quality, stress, learning):
                 "explanation": f"Hit@3 по всему каталогу на скрытых связях. Ориентир не ниже 20%. "
                                f"Среди десяти отвлекающих статей целевой материал занял первое место в {_percent(graph[2])} кейсов.",
             })
-        real = next((row for row in stress["previous"] if row["label"] == "Реальный каталог"), None)
-        if real:
-            current = _scores(real["methods"], "recommend")
-            hybrid = _scores(real["methods"], "BM25 + recommend")
-            if current and hybrid and current[0] is not None and hybrid[0] is not None:
-                observations.append({
-                    "label": "Точность на авторских запросах", "value": _percent(current[0]),
-                    "anchor": "admin-stress",
-                    "explanation": f"Hit@3 на {real['labeled']} запросах, MRR@3 — {current[1]:.3f}. "
-                                   f"Офлайн-гибрид набрал {_percent(hybrid[0])} по Hit@3.",
-                })
+    if ranking_summary:
+        by_method = {row["method"]: row for row in ranking_summary["summaries"]}
+        core, hybrid = by_method[RANKING_MODES["recommend"]], by_method[diagnostic_method]
+        if core["hit_rate"] is not None and hybrid["hit_rate"] is not None:
+            observations.append({
+                "label": "Hit@3 смешанного режима", "value": _percent(hybrid["hit_rate"]),
+                "anchor": "admin-evaluation",
+                "explanation": f"На {hybrid['eligible']} размеченных запросах. "
+                               f"У recommend — {_percent(core['hit_rate'])}. MRR@3 гибрида — {hybrid['mrr']:.3f}.",
+            })
 
     if learning:
         fresh = next((row for row in learning["suites"] if row["title"] == "Свежесть и новые эксперты"), None)
         if fresh:
-            scores = _scores(fresh["overall"]["methods"], "recommend")
+            scores = _scores(fresh["overall"]["methods"], diagnostic_method)
             if scores and scores[0] is not None:
                 observations.append({
                     "label": "Свежие материалы и новые эксперты", "value": _percent(scores[0]),

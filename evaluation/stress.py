@@ -1,4 +1,4 @@
-"""Офлайн-сравнение BM25, recommend и гибрида на пяти наборах и экспертном графе."""
+"""Офлайн-сравнение recommend и рабочего гибрида на пяти наборах и экспертном графе."""
 
 import argparse
 import json
@@ -10,47 +10,38 @@ from pathlib import Path
 from statistics import mean
 from tempfile import TemporaryDirectory
 
-from app.catalog import DEMO_CATALOG_PATH, load_catalog
+from app.catalog import load_catalog
 from app.catalog.normalizer import PgDumpReader
 from app.contracts import InteractionEvent, Profile
-from app.recommender import recommend
+from app.recommender import RANKING_MODES, recommend
+from app.recommender.hybrid import configured_bm25_weight
 from app.recommender.onboarding import ONBOARDING_ITEMS
 from evaluation.catalog_quality import catalog_fingerprint
-from evaluation.hybrid import acceptable, constraints, make_bm25, make_result, merge_orders
 from evaluation.quality_data import read_quality_data
-from evaluation.runner import EVALUATION_DIR, FIXTURES_DIR, TOP_K, _load_cases, run_evaluation
+from evaluation.runner import TOP_K, _load_cases
 from evaluation.stress_cases import (
     SUITE_SIZE, behavioral_cases, cold_cases, context_cases, publication_dates, rare_cases, read_authors, sample_key,
 )
 from evaluation.stress_report import REPORT_VERSION
 
-METHODS = ("recommend", "BM25", "BM25 + recommend")
+METHODS = (RANKING_MODES["recommend"], RANKING_MODES["hybrid"])
 
 
-def make_ranker(catalog, links_directory, *, contextual=True, graph=None, exclude_sources=False):
-    text_order = make_bm25(catalog)
-    materials = {m.id: m for m in catalog}
-
+def make_ranker(catalog, links_directory, *, bm25_weight, graph=None, exclude_sources=False):
     @cache
     def ranks(profile, history, candidate_ids=None):
-        seen = {event.material_id for event in history}
-        query = profile.goal
-        if contextual and not query:
-            query = " ".join(
-                part for part in (profile.industry, profile.learning_topic,
-                                  *(materials[e.material_id].title for e in history[-2:] if e.material_id in materials))
-                if part
-            )
+        seen = {event.material_id for event in history} if exclude_sources else set()
         candidates = catalog if candidate_ids is None else tuple(m for m in catalog if m.id in candidate_ids)
-        result = recommend(candidates, profile, history, len(candidates), explain_with_llm=False,
-                           links_directory=links_directory, expert_links=graph)
-        current = tuple(r.material_id for r in result.items if not exclude_sources or r.material_id not in seen)
-        bm25 = tuple(mid for mid in text_order(query) if (candidate_ids is None or mid in candidate_ids)
-                     and (not contextual or mid not in seen))
-        filters = constraints(profile.goal)
-        inputs = (tuple(mid for mid in order if acceptable(materials[mid], filters)) for order in (bm25, current))
-        hybrid = tuple(merge_orders(inputs))
-        return dict(zip(METHODS, (current, bm25, hybrid)))
+        limit = len(candidates) if exclude_sources else TOP_K
+
+        def order(weight):
+            result = recommend(candidates, profile, history, limit, explain_with_llm=False, balance_access=True,
+                               links_directory=links_directory, expert_links=graph, bm25_weight=weight)
+            return tuple(item.material_id for item in result.items if item.material_id not in seen)
+
+        current = order(0.0)
+        hybrid = order(bm25_weight) if profile.goal and bm25_weight else current
+        return dict(zip(METHODS, (current, hybrid)))
 
     return ranks
 
@@ -124,27 +115,6 @@ def cold_measure(catalog, topics):
     return lambda rows: [sum(passed(case, ids) for case, ids in rows) / len(rows)]
 
 
-def compare_previous(catalog, directory):
-    demo = load_catalog(DEMO_CATALOG_PATH) + load_catalog(EVALUATION_DIR / "catalog.extra.json")
-    rows = []
-    for suite, name, materials, links in (
-        ("demo", "Синтетический каталог", demo, FIXTURES_DIR), ("real", "Реальный каталог", catalog, directory),
-    ):
-        ranks = make_ranker(materials, links, contextual=False)
-        row = {"label": name, "methods": []}
-        for method in METHODS:
-            def evaluate(_, profile, history, limit):
-                return make_result(ranks(profile, tuple(history))[method], limit, method)
-
-            report = run_evaluation(evaluate, suite=suite, real_catalog=catalog)
-            result = report.summaries[1]
-            row["count"] = report.scenario_count
-            row["labeled"] = result.eligible
-            row["methods"].append({"label": method, "values": [result.hit_rate, result.mrr]})
-        rows.append(row)
-    return rows
-
-
 def split_graph(expert):
     pairs = sorted({tuple(sorted((src, dst))) for src, targets in expert.items() for dst in targets},
                    key=lambda pair: sample_key(*pair))
@@ -161,13 +131,13 @@ def split_graph(expert):
     return {src: sorted(targets) for src, targets in train.items()}, hidden, cutoff, len(pairs) - cutoff
 
 
-def compare_graph(catalog, data, directory):
+def compare_graph(catalog, data, directory, bm25_weight):
     train, hidden, train_count, test_count = split_graph(data.expert)
     incoming = Counter(target for src, targets in data.expert.items() for target in targets if target in train.get(src, ()))
     articles = sorted((m for m in catalog if m.entity_type == "article"),
                       key=lambda m: (-(m.popularity or 0), -incoming[m.id], m.id))
     materials = {m.id: m for m in catalog}
-    rank = make_ranker(catalog, directory, graph=train, exclude_sources=True)
+    rank = make_ranker(catalog, directory, bm25_weight=bm25_weight, graph=train, exclude_sources=True)
     probes = []
     for src in sorted(hidden, key=sample_key):
         if not train.get(src):
@@ -201,6 +171,7 @@ def compare_graph(catalog, data, directory):
 
 
 def build_report(backup, catalog_path):
+    bm25_weight = configured_bm25_weight()
     catalog = load_catalog(catalog_path)
     data = read_quality_data(backup, catalog, 0)
     directory = catalog_path.parent
@@ -212,12 +183,12 @@ def build_report(backup, catalog_path):
     cold = cold_cases(catalog, data.topics)
     # Наблюдения после границы могут влиять на агрегаты популярности и связи. Убираем их и порядок экспорта.
     historical_catalog = tuple(replace(m, popularity=None, rating=None) for m in sorted(catalog, key=lambda m: m.id))
-    current_rank = make_ranker(catalog, directory)
-    rare_rank = make_ranker(catalog + glossary, directory)
+    current_rank = make_ranker(catalog, directory, bm25_weight=bm25_weight)
+    rare_rank = make_ranker(catalog + glossary, directory, bm25_weight=bm25_weight)
 
     @cache
     def historical_ranker(available):
-        return make_ranker(tuple(m for m in historical_catalog if m.id in available), directory, graph={})
+        return make_ranker(tuple(m for m in historical_catalog if m.id in available), directory, bm25_weight=bm25_weight, graph={})
 
     def temporal_orders(case):
         available = frozenset(m.id for m in historical_catalog if m.id in published and published[m.id] < case.cutoff)
@@ -258,8 +229,8 @@ def build_report(backup, catalog_path):
     ]
     return {
         "version": REPORT_VERSION, "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
-        "catalog_fingerprint": catalog_fingerprint(catalog), "suites": suites,
-        "previous": compare_previous(catalog, directory), "graph": compare_graph(catalog, data, directory),
+        "catalog_fingerprint": catalog_fingerprint(catalog), "suites": suites, "bm25_weight": bm25_weight,
+        "graph": compare_graph(catalog, data, directory, bm25_weight),
     }
 
 
