@@ -561,9 +561,7 @@ h2 {
     align-items: center;
     gap: 6px;
 }
-.access-filters label:has(input:disabled) {
-    color: var(--muted);
-}
+.access-filters input { accent-color: var(--brand); }
 .access-filters .result-metrics-note {
     flex-basis: 100%;
     margin: 0;

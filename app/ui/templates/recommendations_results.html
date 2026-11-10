@@ -41,12 +41,12 @@
                         <legend>Доступ к материалам</legend>
                         {% for category, label in access_labels.items() %}
                         <label>
-                            <input type="checkbox" name="access_filter" value="{{ category }}"{% if category in access_filters %} checked{% endif %}{% if category not in available_access %} disabled{% endif %}>
+                            <input type="checkbox" name="access_filter" value="{{ category }}"{% if category in access_filters %} checked{% endif %}>
                             {{ label }}
                         </label>
                         {% endfor %}
                         <button class="result-order" type="submit" name="apply_access" value="1">Применить</button>
-                        <p class="result-metrics-note">Платные материалы требуют отдельной покупки. {% if 'subscription' not in available_access %}Для подписочных материалов нужен Курс+.{% endif %}</p>
+                        <p class="result-metrics-note">Выберите типы, чтобы сузить поиск. Покупка и подписка проверяются на Альфа-Курсе.</p>
                     </fieldset>
                     {% endif %}
                     {% for order, label in result_orders.items() %}
@@ -81,6 +81,7 @@
                 {% if cards %}
                 <div class="card-grid" data-impression-url="{{ url_for('recommendation_impressions') }}" data-impression-csrf="{{ csrf_token() }}">
                     {% for material, item in cards %}
+                    {% set requires_access = not is_demo_catalog and material_access_category(material) not in available_access %}
                     <article class="card" id="result-card-{{ loop.index }}" data-material-id="{{ material.id }}" tabindex="-1">
                         <div class="card-cover cover-{{ loop.cycle(1, 2, 3) }}">
                             <div class="cover-labels">
@@ -98,7 +99,7 @@
                             <div class="card-meta">
                                 {% set card_format = material_format(material) %}
                                 <span>{{ card_format | capitalize if card_format else 'Материал' }}</span>
-                                {% if loop.first and result_order == 'recommended' %}<span class="first-pick">Начните с этого</span>{% endif %}
+                                {% if loop.first and result_order == 'recommended' and not requires_access %}<span class="first-pick">Начните с этого</span>{% endif %}
                             </div>
                             <h3>{{ material.title }}</h3>
                             {% if material.authors %}
@@ -153,7 +154,7 @@
                 {% endif %}
                 {% elif not result.follow_up_question %}
                 {% if not is_demo_catalog and not access_filters %}
-                <p class="empty-state">Выберите хотя бы один доступный тип материалов.</p>
+                <p class="empty-state">Выберите хотя бы один тип материалов.</p>
                 {% else %}
                 <p class="empty-state">Подборка пока пуста. <a href="#goal">Попробуйте уточнить задачу.</a></p>
                 {% endif %}

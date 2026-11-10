@@ -309,13 +309,18 @@ class WebFlowTest(unittest.TestCase):
             self.assertEqual(client.get("/health").json, {"status": "ok", "catalog": "real", "materials": 3})
             response = client.post("/", data={"goal": "налоги для ИП до 1000 ₽", "result_order": "rating"})
             page = response.get_data(as_text=True)
-            self.assertEqual(re.findall(r'href="/materials/([^"/?]+)\?', page), ["free-tax"])
-            self.assertIn('value="subscription" disabled', page)
-            self.assertIn('value="paid" disabled', page)
-            self.assertEqual(client.get("/materials/paid-low").status_code, 404)
-            self.assertEqual(client.post("/", data={"access_filters_set": "1", "access_filter": "subscription"}).status_code, 200)
-            forged = client.post("/", data={"access_filters_set": "1", "access_filter": "subscription"}).get_data(as_text=True)
-            self.assertNotIn('href="/materials/paid-low', forged)
+            self.assertEqual(re.findall(r'href="/materials/([^"/?]+)\?', page), ["paid-low", "free-tax"])
+            for category, mid in (("free", "free-tax"), ("paid", "paid-high"), ("subscription", "paid-low")):
+                self.assertIn(f'name="access_filter" value="{category}" checked>', page)
+                filtered = client.post("/", data={"access_filters_set": "1", "access_filter": category}).get_data(as_text=True)
+                self.assertEqual(re.findall(r'href="/materials/([^"/?]+)\?', filtered), [mid])
+            empty = client.post("/", data={"access_filters_set": "1"}).get_data(as_text=True)
+            self.assertIn("Выберите хотя бы один тип материалов.", empty)
+            preview = client.get("/materials/paid-low", headers={"Accept": "application/json"}).json
+            self.assertTrue(preview["access_required"])
+            self.assertEqual(preview["url"], "https://example.com/low")
+            transition = client.post(preview["open_url"], data={"csrf_token": preview["csrf_token"]})
+            self.assertEqual(transition.location, "https://example.com/low")
 
             runner = app.test_cli_runner()
             self.assertEqual(runner.invoke(args=["admin", "course-plus", "demo"]).exit_code, 0)
@@ -333,8 +338,9 @@ class WebFlowTest(unittest.TestCase):
             self.assertEqual(re.findall(r'href="/materials/([^"/?]+)\?', only_subscription), ["paid-low"])
             preview = client.get("/materials/paid-low", headers={"Accept": "application/json"}).json
             self.assertEqual(preview["url"], "https://example.com/low")
+            self.assertFalse(preview["access_required"])
             self.assertEqual(runner.invoke(args=["admin", "course-plus", "demo", "--revoke"]).exit_code, 0)
-            self.assertEqual(client.get("/materials/paid-low").status_code, 404)
+            self.assertTrue(client.get("/materials/paid-low", headers={"Accept": "application/json"}).json["access_required"])
 
     def test_show_more_appends_six_sorted_cards_until_the_selection_ends(self):
         catalog = tuple(

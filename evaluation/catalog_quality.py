@@ -137,7 +137,7 @@ def synthetic_paywall(catalog, rank):
         candidates = entitled_catalog(catalog, subscribed)
         allowed = {material.id for material in candidates}
         filtered = {profile: top(candidates, profile) for profile in unfiltered}
-        for mode, orders in (("Рабочий фильтр выдачи", filtered), ("Сравнение без фильтра", unfiltered)):
+        for mode, orders in (("Подборка с учётом прав", filtered), ("Поиск по всем типам", unfiltered)):
             def summarize(cases):
                 nonempty = []
                 target_checks = []

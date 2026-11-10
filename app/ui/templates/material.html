@@ -8,6 +8,7 @@
                 <h1 id="material-title" class="material-card-title">{{ material.title }}</h1>
                 {% if material.authors %}<p class="material-authors">Авторы · {{ material.authors | join(', ') }}</p>{% endif %}
                 {% if material.subscriptions %}<p class="tag paid">По подписке {{ material.subscriptions | join(', ') }}</p>{% endif %}
+                {% if access_required %}<p class="account-muted">Условия покупки или подписки можно проверить на Альфа-Курсе.</p>{% endif %}
                 {% if description_html %}
                 <div class="preview-description">{{ description_html | safe }}</div>
                 {% elif material.description %}

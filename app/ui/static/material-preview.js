@@ -116,7 +116,7 @@ document.addEventListener("submit", async (event) => {
         const queryAccess = query.querySelector("#query-access-filters");
         if (queryAccess) {
             queryAccess.querySelectorAll('input[name="access_filter"]').forEach(input => input.remove());
-            for (const checkbox of controls.querySelectorAll('input[name="access_filter"]:checked:not(:disabled)')) {
+            for (const checkbox of controls.querySelectorAll('input[name="access_filter"]:checked')) {
                 const input = document.createElement("input");
                 input.type = "hidden";
                 input.name = "access_filter";
@@ -169,6 +169,7 @@ if (typeof materialPreview?.showModal === "function") {
     const previewTitle = materialPreview.querySelector("#preview-title");
     const previewAuthors = materialPreview.querySelector("#preview-authors");
     const previewSubscription = materialPreview.querySelector("#preview-subscription");
+    const previewAccess = materialPreview.querySelector("#preview-access-note");
     const previewDescription = materialPreview.querySelector("#preview-description");
     const previewProgram = materialPreview.querySelector("#preview-program");
     const materialLink = materialPreview.querySelector(".material-preview-link");
@@ -229,6 +230,7 @@ if (typeof materialPreview?.showModal === "function") {
             const subscriptions = currentPreview.subscriptions ?? [];
             previewSubscription.hidden = subscriptions.length === 0;
             previewSubscription.textContent = subscriptions.length ? `По подписке ${subscriptions.join(", ")}` : "";
+            previewAccess.hidden = !currentPreview.access_required;
             previewDescription.innerHTML = currentPreview.description_html;
             renderProgram(currentPreview.lessons ?? []);
             materialLink.href = currentPreview.url;

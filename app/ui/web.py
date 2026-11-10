@@ -14,7 +14,7 @@ from flask import Flask, Response, abort, redirect, render_template, request, ur
 from app.catalog import DEMO_CATALOG_PATH, catalog_source, load_catalog, load_history
 from app.catalog import material_format as _format_key
 from app.catalog.lessons import read_programs
-from app.catalog.subscriptions import ACCESS_LABELS, access_category, available_access, entitled_catalog
+from app.catalog.subscriptions import ACCESS_LABELS, access_category, available_access
 from app.contracts import Material, Profile, RecommendationResult, Recommender
 from app.ctr_report import ORDER_LABELS
 from app.live_data import LiveDataProvider
@@ -216,6 +216,7 @@ def create_app(
     app.jinja_env.globals["current_account"] = current_account
     app.jinja_env.globals["chat_pages"] = CHAT_PAGES
     app.jinja_env.globals["material_format"] = _format_key
+    app.jinja_env.globals["material_access_category"] = access_category
 
     @app.get("/health")
     def health():
@@ -324,8 +325,6 @@ def create_app(
         if material is None:
             abort(404)
         account = current_account()
-        if not is_demo_catalog and access_category(material) not in available_access(account and account["has_course_plus"]):
-            abort(404)
         if request.method == "GET" and not any(
             "prefetch" in request.headers.get(header, "").lower() for header in ("Sec-Purpose", "Purpose")
         ):
@@ -335,6 +334,8 @@ def create_app(
         description_html = format_description_html(material.description)
         lessons = programs.get(material_id, ())
         allowed_access = available_access(account and account["has_course_plus"]) if not is_demo_catalog else None
+        category = access_category(material)
+        access_required = allowed_access is not None and category in {"paid", "subscription"} and category not in allowed_access
         next_materials = _find_next_materials(material, catalog, allowed_access=allowed_access, limit=3)
         if request.accept_mimetypes.best == "application/json":
             return {
@@ -342,6 +343,7 @@ def create_app(
                 "description": material.description,
                 "description_html": description_html,
                 "subscriptions": material.subscriptions,
+                "access_required": access_required,
                 "lessons": lessons,
                 "authors": material.authors,
                 "url": _material_destination(material.url),
@@ -364,6 +366,7 @@ def create_app(
             open_url=open_url,
             lessons=lessons,
             next_materials=next_materials,
+            access_required=access_required,
         )
 
     @app.post("/materials/<material_id>/open")
@@ -372,8 +375,6 @@ def create_app(
         if material is None:
             abort(404)
         account = current_account()
-        if not is_demo_catalog and access_category(material) not in available_access(account and account["has_course_plus"]):
-            abort(404)
         target = _material_destination(material.url)
         check_csrf()
         record_interaction(account, material_id, "click")
@@ -406,13 +407,15 @@ def create_app(
             history = recent_interactions(account)[::-1]
         has_course_plus = bool(account and account["has_course_plus"])
         available = available_access(has_course_plus)
-        access_filters = available
+        all_access_filters = tuple(ACCESS_LABELS)
+        access_filters = all_access_filters
         candidates = catalog
         if not is_demo_catalog:
             if form.get("access_filters_set") == "1":
                 requested = set(form.getlist("access_filter"))
-                access_filters = tuple(category for category in available if category in requested)
-            candidates = tuple(m for m in entitled_catalog(catalog, has_course_plus) if access_category(m) in access_filters)
+                access_filters = tuple(category for category in all_access_filters if category in requested)
+            if access_filters != all_access_filters:
+                candidates = tuple(m for m in catalog if access_category(m) in access_filters)
         rank = partial(recommend, history_as_of=datetime.now(UTC)) if recommender is recommend and not is_demo_catalog else recommender
         result = rank(candidates, profile, history, len(candidates)) if candidates else RecommendationResult((), "")
         result_order = form.get("result_order", form.get("current_order", "recommended"))

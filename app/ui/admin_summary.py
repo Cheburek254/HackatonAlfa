@@ -65,14 +65,14 @@ def build_assessments(quality, stress, learning):
             })
 
     if quality and (paywall := quality.get("synthetic_paywall")):
-        rows = [row for row in paywall["rows"] if row["mode"] == "Рабочий фильтр выдачи"]
+        rows = [row for row in paywall["rows"] if row["mode"] in {"Рабочий фильтр выдачи", "Подборка с учётом прав"}]
         if rows:
             blocked = sum(row["any_restricted"]["numerator"] for row in rows)
             count = sum(row["any_restricted"]["denominator"] for row in rows)
             (weak if blocked else strong).append({
-                "label": "Соблюдение прав доступа", "value": f"{blocked} / {count} недоступных выдач",
+                "label": "Подборка с учётом прав", "value": f"{blocked} / {count} выдач с ограничениями",
                 "anchor": "admin-paywall",
-                "explanation": "Ориентир — ни одной выдачи с недоступной карточкой. Проверены синтетические профили с Курс+ и без него.",
+                "explanation": "Контрольный прогон на доступных материалах. Поиск по всем типам показывает карточки с условиями оплаты и подписки.",
             })
 
     if stress:
