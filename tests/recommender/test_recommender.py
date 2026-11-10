@@ -88,7 +88,8 @@ class RecommenderTest(unittest.TestCase):
             Material(f"{topic}-{n}", f"{topic} {n}", f"https://example.com/{topic}/{n}", topics=(topic,))
             for topic in ("Налоги", "Поставки") for n in range(4)
         )
-        profile = Profile(goal="Что мне лучше проверить перед следующим шагом?")
+        profile = Profile(goal="Что мне лучше проверить перед следующим шагом?", stage="рост", industry="розница",
+                          experience="начинающий", preferred_format="статья", learning_topic="финансы")
 
         def top(*materials):
             history = tuple(InteractionEvent(mid, "click") for mid in materials)

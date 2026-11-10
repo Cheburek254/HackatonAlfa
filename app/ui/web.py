@@ -134,7 +134,7 @@ def create_app(
         f"{getattr(recommender, '__qualname__', recommender_type.__qualname__)}"
     )
     if algorithm_name is None and recommender is recommend:
-        algorithm += ":demo-catalog" if is_demo_catalog else ":history-v3"
+        algorithm += ":demo-catalog" if is_demo_catalog else ":history-v3.1"
     app.jinja_env.globals["signed_in"] = lambda: current_account() is not None
     app.jinja_env.globals["material_format"] = _format_key
 

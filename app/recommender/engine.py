@@ -807,6 +807,7 @@ def recommend(
         signals["stage_matched"] = st_matched
         signals["industry_matched"] = ind_matched
         signals["exp_matched"] = exp_matched
+        signals["experience_score"] = exp_score
         signals["fmt_matched"] = fmt_matched
 
         team_score = 0.0
@@ -910,12 +911,18 @@ def recommend(
     # Недавняя подтверждённая тема получает отдельные места при расплывчатом запросе.
     # Кандидаты уже прошли ограничения формата, цены и доступа.
     context_items = []
-    hard_goal = constraints["only_free"] or constraints["only_format"] or constraints["max_budget"] is not None
-    explicit_format = _normalize_text(profile.preferred_format or "") not in {"", "любой формат"}
-    profile_focus = profile.experience or learning_topic_norm or explicit_format
-    if len(affinity_sources) == 2 and exploratory_goal and not has_concrete_goal and not hard_goal and not profile_focus:
-        ranked_context = sorted((row for row in scored_items if row[1].id in affinity),
-                                key=lambda row: (-affinity[row[1].id], -row[0]))
+    hard_goal = constraints["max_budget"] is not None or any(
+        constraints[key] for key in ("only_free", "only_format", "strict_ip", "strict_ooo")
+    )
+    if len(affinity_sources) == 2 and exploratory_goal and not has_concrete_goal and not hard_goal:
+        ranked_context = sorted(
+            (row for row in scored_items
+             if row[1].id in affinity and row[2]["experience_score"] >= 0),
+            key=lambda row: (
+                -(affinity[row[1].id] + .1 * row[2]["experience_score"]
+                  + .2 * row[2]["fmt_matched"]), -row[0],
+            ),
+        )
         if len(ranked_context) >= 2:
             context_items = ranked_context[:min(2, limit)]
 
