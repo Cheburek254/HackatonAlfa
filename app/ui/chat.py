@@ -204,13 +204,20 @@ def _build_system_prompt(
         )
 
     if candidates:
+        cand_lines = []
+        for i, m in enumerate(candidates, 1):
+            title = getattr(m, "title", "")
+            mid = getattr(m, "id", "")
+            fmt = getattr(m, "format", "материал")
+            desc = (getattr(m, "description", "") or "").strip()
+            if desc:
+                cand_lines.append(f"{i}. [{title}](/materials/{mid}) ({fmt}): {desc[:160]}")
+            else:
+                cand_lines.append(f"{i}. [{title}](/materials/{mid}) ({fmt})")
         prompt += (
             "\n[Рекомендуемые материалы платформы «Альфа-Курс» для ссылки в ответе]:\n"
-            + "\n".join(
-                f"- [{getattr(m, 'title', '')}](/materials/{getattr(m, 'id', '')}) ({getattr(m, 'format', 'материал')})"
-                for m in candidates
-            )
-            + "\nИспользуй только ссылки из этого списка.\n"
+            + "\n".join(cand_lines)
+            + "\nИспользуй только ссылки из этого списка. Если пользователь просит рассказать о конкретном материале или номере (например «расскажи о 1 статье»), кратко объясни его суть и дай ссылку.\n"
         )
 
     return prompt
@@ -324,6 +331,7 @@ def _call_openrouter(
         "messages": messages,
         "temperature": 0.7,
         "max_tokens": 700,
+        "reasoning": {"effort": "none"},
     }
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
@@ -342,7 +350,7 @@ def _call_openrouter(
             choices = res_data.get("choices") or []
             if choices:
                 msg_obj = choices[0].get("message", {})
-                content = msg_obj.get("content") or ""
+                content = msg_obj.get("content") or msg_obj.get("reasoning") or ""
                 if content:
                     return content.strip()
     except Exception as exc:
