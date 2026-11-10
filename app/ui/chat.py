@@ -328,12 +328,13 @@ def _call_openrouter(
     messages.append({"role": "user", "content": message})
 
     payload = {
-        "model": model or "nvidia/nemotron-3.5-super-vl:free",
+        "model": model or "google/gemini-3.5-flash-lite",
         "messages": messages,
         "temperature": 0.7,
         "max_tokens": 700,
-        "reasoning": {"effort": "none"},
     }
+    if "nemotron" in (model or "").lower():
+        payload["reasoning"] = {"effort": "none"}
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url,
@@ -354,6 +355,13 @@ def _call_openrouter(
                 content = msg_obj.get("content") or msg_obj.get("reasoning") or ""
                 if content:
                     return content.strip()
+    except urllib.error.HTTPError as exc:
+        err_body = ""
+        try:
+            err_body = exc.read().decode("utf-8")
+        except Exception:
+            pass
+        logger.warning("HTTP ошибка OpenRouter API (%s, code %s): %s", model, exc.code, err_body[:200])
     except Exception as exc:
         logger.warning("Ошибка при обращении к OpenRouter API (%s): %s", model, exc)
     return None
