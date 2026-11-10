@@ -3,13 +3,16 @@ const seenCards = new WeakSet();
 const dailyTrack = document.querySelector("#daily-track");
 
 if (dailyTrack) {
-    const arrows = [...document.querySelectorAll("[data-daily-scroll]")];
+    const dragHint = document.querySelector("#daily-drag-hint");
     const originals = [...dailyTrack.children];
     let clones = [];
     let cycle = 0;
     let scrollTimer;
+    let drag;
+    let suppressClick = false;
     const modulo = (value, width) => ((value % width) + width) % width;
     const jump = (left) => dailyTrack.scrollTo({ left, behavior: "instant" });
+    const inMainCycle = (left) => cycle + modulo(left - cycle, cycle);
     const cloneCards = () => originals.map((card) => {
         const copy = card.cloneNode(true);
         copy.setAttribute("aria-hidden", "true");
@@ -23,9 +26,8 @@ if (dailyTrack) {
         const first = originals[0];
         const last = originals.at(-1);
         const overflow = last.offsetLeft + last.offsetWidth - first.offsetLeft > dailyTrack.clientWidth - 6;
-        for (const arrow of arrows) {
-            arrow.hidden = !overflow;
-        }
+        dragHint.hidden = !overflow;
+        dailyTrack.classList.toggle("daily-interactive", overflow);
         if (!overflow) {
             clones.forEach((card) => card.remove());
             clones = [];
@@ -46,16 +48,75 @@ if (dailyTrack) {
     };
     const recenter = () => {
         const left = dailyTrack.scrollLeft;
-        if (cycle && (left < cycle - 1 || left >= 2 * cycle - 1)) {
-            jump(cycle + modulo(left - cycle, cycle));
+        if (cycle && !drag?.active && (left < cycle - 1 || left >= 2 * cycle)) {
+            jump(inMainCycle(left));
         }
     };
-    for (const arrow of arrows) {
-        arrow.addEventListener("click", () => {
-            recenter();
-            dailyTrack.scrollBy({ left: Number(arrow.dataset.dailyScroll) * dailyTrack.clientWidth * 0.82 });
-        });
-    }
+
+    dailyTrack.addEventListener("pointerdown", (event) => {
+        if (!cycle || !event.isPrimary || event.button !== 0 || !event.target.closest(".daily-card")) {
+            return;
+        }
+        suppressClick = false;
+        drag = {
+            id: event.pointerId, x: event.clientX, y: event.clientY, left: dailyTrack.scrollLeft,
+            started: performance.now(), touch: event.pointerType === "touch", active: false,
+        };
+    });
+    dailyTrack.addEventListener("pointermove", (event) => {
+        if (!drag || drag.id !== event.pointerId) {
+            return;
+        }
+        const distance = event.clientX - drag.x;
+        if (!drag.active) {
+            if (Math.abs(event.clientY - drag.y) > 8) {
+                drag = undefined;
+                return;
+            }
+            if (Math.abs(distance) < 6) {
+                return;
+            }
+            if (drag.touch && performance.now() - drag.started < 180) {
+                drag = undefined;
+                return;
+            }
+            drag.active = true;
+            dailyTrack.setPointerCapture(event.pointerId);
+            dailyTrack.classList.add("daily-dragging");
+        }
+        jump(inMainCycle(drag.left - distance));
+    });
+    const finishDrag = (event) => {
+        if (!drag || drag.id !== event.pointerId) {
+            return;
+        }
+        suppressClick = drag.active;
+        drag = undefined;
+        dailyTrack.classList.remove("daily-dragging");
+        recenter();
+    };
+    dailyTrack.addEventListener("pointerup", finishDrag);
+    dailyTrack.addEventListener("pointercancel", finishDrag);
+    dailyTrack.addEventListener("lostpointercapture", finishDrag);
+    dailyTrack.addEventListener("pointerleave", () => {
+        if (!drag?.active) {
+            drag = undefined;
+        }
+    });
+    dailyTrack.addEventListener("click", (event) => {
+        if (suppressClick && event.detail) {
+            event.preventDefault();
+            event.stopPropagation();
+            suppressClick = false;
+        }
+    }, { capture: true });
+    dailyTrack.addEventListener("keydown", (event) => {
+        if (cycle && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+            const step = originals[1].offsetLeft - originals[0].offsetLeft;
+            event.preventDefault();
+            jump(inMainCycle(dailyTrack.scrollLeft + (event.key === "ArrowLeft" ? -step : step)));
+        }
+    });
     dailyTrack.addEventListener("scroll", () => {
         clearTimeout(scrollTimer);
         scrollTimer = setTimeout(recenter, 120);
