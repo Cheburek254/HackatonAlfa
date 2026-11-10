@@ -433,6 +433,20 @@ h2 {
     gap: 8px;
     margin: 16px 0 16px;
     align-items: center;
+    transition: opacity 0.12s ease;
+}
+.recommendations-results[aria-busy="true"] .card-grid {
+    opacity: 0.5;
+    pointer-events: none;
+    transition: opacity 0.12s ease;
+}
+.recommendations-results[aria-busy="true"] .format-filters-bar {
+    opacity: 0.8;
+}
+button[name="show_page"]:disabled,
+button.is-loading {
+    opacity: 0.6;
+    cursor: wait !important;
 }
 .format-chip {
     display: inline-flex;

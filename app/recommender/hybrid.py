@@ -3,6 +3,7 @@
 import os
 import re
 from collections import Counter, defaultdict
+from collections.abc import Sequence
 from functools import lru_cache
 from math import log1p
 
@@ -110,9 +111,15 @@ def make_bm25(catalog):
     return order
 
 
-@lru_cache(maxsize=12)
-def cached_bm25(catalog: tuple[Material, ...]):
-    return make_bm25(catalog)
+_BM25_CACHE = {}
+
+
+def cached_bm25(catalog: Sequence[Material]):
+    cat_tuple = tuple(catalog) if not isinstance(catalog, tuple) else catalog
+    cat_key = (len(cat_tuple), getattr(cat_tuple[0], "id", None) if cat_tuple else None)
+    if cat_key not in _BM25_CACHE:
+        _BM25_CACHE[cat_key] = make_bm25(cat_tuple)
+    return _BM25_CACHE[cat_key]
 
 def merge_orders(orders, *, weights=None):
     scores = defaultdict(float)

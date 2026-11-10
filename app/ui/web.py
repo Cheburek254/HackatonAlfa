@@ -34,7 +34,7 @@ from app.ui.impressions import issue_impression_tickets, record_impressions
 from app.recommender import recommend
 from app.recommender.baseline import recommend_popular_courses
 from app.recommender.daily import daily_picks
-from app.recommender.hybrid import configured_bm25_weight
+from app.recommender.hybrid import cached_bm25, configured_bm25_weight
 from evaluation.catalog_quality import REPORT_NAME, catalog_fingerprint
 from evaluation.learning_report import REPORT_NAME as LEARNING_REPORT_NAME
 from evaluation.stress_report import REPORT_NAME as STRESS_REPORT_NAME
@@ -47,6 +47,7 @@ PAGE_SIZES = (6, 12, 24)
 COVER_ORIGIN = "https://s19060.cdn.ngenix.net"
 COVER_METADATA = Path(__file__).with_name("public-covers.json")
 CHAT_PAGES = frozenset({"index", "material_page", "profile_page", "profile_settings", "accounts.login", "accounts.register"})
+_MAX_RECOMMEND_CACHE = 128
 
 FORMAT_LABELS = {
     "all": "Все форматы",
@@ -221,7 +222,13 @@ def create_app(
     app.config["CATALOG_QUALITY_FINGERPRINT"] = None if is_demo_catalog else catalog_fingerprint(catalog)
     app.config["CATALOG_FORMATS"] = {} if is_demo_catalog else {material.id: _format_key(material) for material in catalog}
     app.config["CATALOG_FORMAT_LABELS"] = FORMAT_LABELS
+    if not is_demo_catalog and catalog:
+        try:
+            cached_bm25(catalog)
+        except Exception:
+            pass
     sample_history = load_history(FIXTURES / "history.demo.json") if is_demo_catalog else ()
+    recommend_cache: dict[tuple, RecommendationResult] = {}
     configure_accounts(app, database_path or account_database_path())
     app.register_blueprint(admin)
     app.register_blueprint(chat_bp)
@@ -449,31 +456,48 @@ def create_app(
         variant = experiment_variant(account) if recommender is recommend else None
         mode = variant.mode if variant else recommendation_mode() if recommender is recommend else "recommend"
         effective_algorithm = algorithm
+        balance_access = (access_filters == all_access_filters and format_filter == "all" and result_order == "recommended")
+        active_weight = (variant.bm25_weight if variant else bm25_weight) if mode == "hybrid" else 0.0
+
         if mode == "popular":
             effective_algorithm = "app.recommender.baseline.recommend_popular_courses"
             result = recommend_popular_courses(candidates, len(candidates))
         elif recommender is recommend and candidates:
-            active_weight = (variant.bm25_weight if variant else bm25_weight) if mode == "hybrid" else 0.0
             if mode == "hybrid":
                 effective_algorithm += f":bm25-{active_weight:.12g}"
-            result = recommend(
-                candidates, profile, history, len(candidates),
-                links_directory=source.parent,
-                history_as_of=None if is_demo_catalog else now,
-                balance_access=(access_filters == all_access_filters and format_filter == "all" and result_order == "recommended"),
-                bm25_weight=active_weight,
+            cache_key = (
+                profile.goal or "",
+                tuple(sorted(values.items())),
+                len(candidates),
+                access_filters,
+                balance_access,
+                mode,
+                active_weight,
+                tuple((h.material_id, h.kind) for h in history),
             )
+            if cache_key in recommend_cache:
+                result = recommend_cache[cache_key]
+            else:
+                result = recommend(
+                    candidates, profile, history, len(candidates),
+                    links_directory=source.parent,
+                    history_as_of=None if is_demo_catalog else now,
+                    balance_access=balance_access,
+                    bm25_weight=active_weight,
+                )
+                if len(recommend_cache) >= _MAX_RECOMMEND_CACHE:
+                    recommend_cache.clear()
+                recommend_cache[cache_key] = result
         else:
             result = recommender(candidates, profile, history, len(candidates)) if candidates else RecommendationResult((), "")
+
         if algorithm_name is None and recommender is recommend and is_demo_catalog:
             effective_algorithm += ":demo-catalog"
 
         candidate_ids = {material.id for material in candidates}
         all_candidate_cards = [(materials_by_id[item.material_id], item) for item in result.items if item.material_id in candidate_ids]
-        format_counts = {
-            fmt: sum(1 for card, _ in all_candidate_cards if _format_key(card) == fmt)
-            for fmt in FORMAT_LABELS if fmt != "all"
-        }
+        counts = Counter(_format_key(card) for card, _ in all_candidate_cards)
+        format_counts = {fmt: counts.get(fmt, 0) for fmt in FORMAT_LABELS if fmt != "all"}
         format_counts["all"] = len(all_candidate_cards)
 
         cards = all_candidate_cards

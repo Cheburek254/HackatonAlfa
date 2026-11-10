@@ -194,6 +194,20 @@ document.addEventListener("submit", async (event) => {
     }
     status.textContent = "";
     section.setAttribute("aria-busy", "true");
+    if (submitter?.classList?.contains("format-chip")) {
+        const bar = submitter.closest(".format-filters-bar");
+        if (bar) {
+            bar.querySelectorAll(".format-chip").forEach(btn => {
+                btn.classList.remove("active");
+                btn.setAttribute("aria-pressed", "false");
+            });
+            submitter.classList.add("active");
+            submitter.setAttribute("aria-pressed", "true");
+        }
+    } else if (loadMore) {
+        submitter.disabled = true;
+        submitter.textContent = "Загрузка...";
+    }
     try {
         const action = submitter?.getAttribute("formaction") ?? form.getAttribute("action");
         const response = await fetch(action || window.location.href, {
