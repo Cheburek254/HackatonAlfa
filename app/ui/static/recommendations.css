@@ -11,7 +11,17 @@
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; }
+body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+main {
+    flex: 1 0 auto;
+    display: flex;
+    flex-direction: column;
+}
 button, input, select { font: inherit; }
 button { cursor: pointer; }
 a { color: inherit; }
@@ -635,6 +645,158 @@ h2 {
     margin: 0;
     pointer-events: none;
 }
+
+/* Отдельная страница материала (/materials/<id>) */
+.material-page {
+    color-scheme: light;
+    background: var(--paper);
+    color: var(--ink);
+    flex: 1 0 auto;
+    display: flex;
+    flex-direction: column;
+    padding-block: 36px 54px;
+}
+
+.material-card {
+    background: #ffffff;
+    border-radius: 24px;
+    padding: clamp(24px, 4.5vw, 48px);
+    box-shadow: 0 4px 24px rgba(17, 17, 26, 0.06);
+    border: 1px solid #e2e8f0;
+    max-width: 860px;
+    width: 100%;
+    margin-inline: auto;
+    color: var(--ink);
+    box-sizing: border-box;
+}
+
+.material-card-eyebrow {
+    margin: 0 0 10px;
+    font-size: 12px;
+    font-weight: 750;
+    letter-spacing: .08em;
+    color: var(--muted);
+}
+
+.material-card-title {
+    margin: 0 0 14px;
+    font-size: clamp(26px, 4vw, 42px);
+    font-weight: 800;
+    line-height: 1.15;
+    letter-spacing: -.035em;
+    color: var(--ink);
+}
+
+.material-card .material-authors {
+    margin: 0 0 16px;
+    font-size: 14.5px;
+    color: #64748b;
+    opacity: 1;
+}
+
+.material-card .tag.paid {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 6px;
+    background: #fef2f2;
+    color: #ef3124;
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 16px;
+}
+
+.material-card .preview-description {
+    margin: 18px 0 28px;
+    color: #334155;
+    font-size: 16px;
+    line-height: 1.65;
+}
+
+.material-card .preview-description p {
+    margin: 0 0 14px;
+    color: #334155;
+}
+
+.material-card .course-program {
+    margin-block: 24px;
+    padding-top: 20px;
+    border-top: 1px solid #f1f5f9;
+    max-width: 100%;
+}
+
+.material-card .course-program summary {
+    font-size: 17.5px;
+    font-weight: 750;
+    color: var(--ink);
+    cursor: pointer;
+    user-select: none;
+}
+
+.material-card .course-program ol {
+    margin-top: 16px;
+    padding-inline-start: 24px;
+    color: #334155;
+}
+
+.material-card .course-program li {
+    padding-block: 5px;
+    line-height: 1.55;
+}
+
+.material-card .course-program li + li {
+    margin-top: 6px;
+}
+
+.material-card .lesson-section {
+    color: var(--ink);
+    font-weight: 750;
+    font-size: 15px;
+    margin-block: 16px 6px;
+}
+
+.material-card .lesson-title {
+    font-weight: 550;
+}
+
+.material-card .lesson-meta,
+.material-card .lesson-trial {
+    color: #64748b;
+    font-size: 13px;
+}
+
+.material-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 16px;
+    margin-top: 32px;
+    padding-top: 22px;
+    border-top: 1px solid #f1f5f9;
+}
+
+.material-card-actions form {
+    margin: 0;
+}
+
+.button-secondary.material-back-btn {
+    display: inline-flex;
+    align-items: center;
+    min-height: 42px;
+    padding: 10px 18px;
+    border-radius: 8px;
+    background: #f1f5f9;
+    color: var(--ink);
+    border: 1px solid #cbd5e1;
+    font-size: 14px;
+    font-weight: 700;
+    text-decoration: none;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.button-secondary.material-back-btn:hover {
+    background: #e2e8f0;
+    border-color: #94a3b8;
+}
 .follow-up, .empty-state {
     margin: 0 0 18px;
     padding: 14px 18px;
@@ -720,7 +882,12 @@ h2 {
     text-decoration: none;
 }
 .material-link:hover { background: #e6e6ea; }
-.site-footer { background: var(--paper); color: #55555c; font-size: 13px; }
+.site-footer {
+    margin-top: auto;
+    background: var(--paper);
+    color: #55555c;
+    font-size: 13px;
+}
 .footer-content { min-height: 62px; border-top: 1px solid #d8d8dc; }
 .footer-dot { color: #bf2c22; }
 .sr-only {
@@ -944,23 +1111,6 @@ h2 {
     color: #ffffff;
     background: rgba(255, 255, 255, 0.15);
     transform: rotate(90deg);
-}
-
-.chat-header-badge {
-    width: 14px;
-    height: 14px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-}
-
-.badge-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #22c55e;
-    box-shadow: none;
 }
 
 .alfa-chat-messages {
