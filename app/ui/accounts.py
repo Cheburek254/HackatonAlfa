@@ -8,6 +8,7 @@ import sqlite3
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
+from hmac import digest
 from pathlib import Path
 from time import time
 from typing import Literal
@@ -45,6 +46,8 @@ SESSION_LIFETIME = timedelta(days=7)
 HISTORY_WINDOW = timedelta(days=90)
 HISTORY_LIMIT = 100
 DEMO_USERNAME = "demo"
+DEMO_PASSWORD_CODE = "000000"
+PASSWORD_CODE_LIFETIME = 600
 auth = Blueprint("accounts", __name__)
 
 SCHEMA = """
@@ -81,6 +84,19 @@ CREATE TABLE IF NOT EXISTS account_sessions (
 );
 CREATE TABLE IF NOT EXISTS admin_accounts (
     user_id INTEGER PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS course_plus_accounts (
+    user_id INTEGER PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS password_change_codes (
+    user_id INTEGER PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL,
+    email TEXT NOT NULL,
+    expires INTEGER NOT NULL,
+    nonce TEXT NOT NULL,
+    code_digest TEXT NOT NULL,
+    old_password_hash TEXT NOT NULL,
+    new_password_hash TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS account_sessions_expires ON account_sessions (expires);
 CREATE TABLE IF NOT EXISTS interaction_events (
@@ -209,7 +225,8 @@ def current_account() -> sqlite3.Row | None:
     account = _db().execute(
         """SELECT users.id, username, stage, industry, experience, team_size, learning_topic, preferred_format,
                   first_name, last_name, company, email, phone, avatar IS NOT NULL AS has_avatar,
-                  EXISTS (SELECT 1 FROM admin_accounts WHERE user_id = users.id) AS is_admin
+                  EXISTS (SELECT 1 FROM admin_accounts WHERE user_id = users.id) AS is_admin,
+                  EXISTS (SELECT 1 FROM course_plus_accounts WHERE user_id = users.id) AS has_course_plus
            FROM account_sessions
            JOIN users ON users.id = account_sessions.user_id
            LEFT JOIN account_details ON account_details.user_id = users.id
@@ -226,6 +243,19 @@ def admin_usernames() -> tuple[str, ...]:
         "SELECT username FROM admin_accounts JOIN users ON users.id = user_id ORDER BY username"
     )
     return tuple(row["username"] for row in rows)
+
+
+def set_course_plus(username: str, active: bool) -> bool:
+    connection = _db()
+    with connection:
+        row = connection.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+        if row is None:
+            return False
+        if active:
+            connection.execute("INSERT OR IGNORE INTO course_plus_accounts (user_id) VALUES (?)", (row["id"],))
+        else:
+            connection.execute("DELETE FROM course_plus_accounts WHERE user_id = ?", (row["id"],))
+    return True
 
 
 def grant_admin(username: str) -> bool:
@@ -514,22 +544,38 @@ def demo_login():
     return _start_session(account["id"])
 
 
-@auth.post("/profile/password")
-def change_password():
+def _password_code_digest(nonce: str, code: str) -> str:
+    mode = "demo" if current_app.config["PASSWORD_CODE_SENDER"] is None else "email"
+    return digest(current_app.secret_key.encode(), f"{mode}:{nonce}:{code}".encode(), "sha256").hex()
+
+
+def password_code_pending(account: sqlite3.Row) -> bool:
+    return _db().execute(
+        """SELECT 1 FROM password_change_codes
+           WHERE user_id = ? AND token_hash = ? AND email = ? AND expires > ?""",
+        (account["id"], _session_hash(), account["email"], int(time())),
+    ).fetchone() is not None
+
+
+@auth.post("/profile/password/request-code")
+def request_password_code():
     account = current_account()
     if account is None:
         return redirect(url_for("accounts.login"), code=303)
     if account["username"] == DEMO_USERNAME:
         abort(403)
     check_csrf()
+    destination = url_for("profile_settings", _anchor="password-settings")
+    email = account["email"]
+    if not email:
+        flash("Укажите и сохраните электронную почту в настройках профиля.", "error")
+        return redirect(destination, code=303)
     current = request.form.get("current_password", "")
     new = request.form.get("new_password", "")
-    destination = url_for("profile_settings", _anchor="password-settings")
     if not PASSWORD_MIN_LENGTH <= len(new) <= PASSWORD_MAX_LENGTH or new != request.form.get("confirm_password"):
         flash(f"Введите одинаковый новый пароль длиной от {PASSWORD_MIN_LENGTH} до {PASSWORD_MAX_LENGTH} символов.", "error")
         return redirect(destination, code=303)
-    attempt_scope = f"password:user:{account['id']}"
-    if not _consume_attempts(((attempt_scope, 8),)):
+    if not _consume_attempts(((f"password:user:{account['id']}", 8),)):
         flash("Слишком много попыток. Повторите позже.", "error")
         return redirect(destination, code=303)
 
@@ -539,17 +585,78 @@ def change_password():
         flash("Текущий пароль указан неверно.", "error")
         return redirect(destination, code=303)
 
+    sender = current_app.config["PASSWORD_CODE_SENDER"]
+    code = f"{secrets.randbelow(1_000_000):06d}" if sender is not None else DEMO_PASSWORD_CODE
+    nonce = secrets.token_hex(16)
+    now = int(time())
     password_hash = generate_password_hash(new, method=PASSWORD_METHOD)
     with connection:
+        connection.execute("DELETE FROM password_change_codes WHERE expires <= ?", (now,))
+        connection.execute(
+            """INSERT INTO password_change_codes VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT (user_id) DO UPDATE SET token_hash = excluded.token_hash, email = excluded.email,
+                   expires = excluded.expires, nonce = excluded.nonce, code_digest = excluded.code_digest,
+                   old_password_hash = excluded.old_password_hash, new_password_hash = excluded.new_password_hash""",
+            (account["id"], _session_hash(), email, now + PASSWORD_CODE_LIFETIME, nonce,
+             _password_code_digest(nonce, code), row["password_hash"], password_hash),
+        )
+    if sender is not None:
+        try:
+            sender(email, code)
+        except Exception:
+            with connection:
+                connection.execute("DELETE FROM password_change_codes WHERE user_id = ? AND nonce = ?", (account["id"], nonce))
+            current_app.logger.warning("Password confirmation email delivery failed")
+            flash("Не удалось отправить код. Повторите запрос позже.", "error")
+            return redirect(destination, code=303)
+    flash("Код отправлен на почту." if sender is not None else "Демо-код готов. Письмо не отправляется.", "success")
+    return redirect(destination, code=303)
+
+
+@auth.post("/profile/password")
+def change_password():
+    account = current_account()
+    if account is None:
+        return redirect(url_for("accounts.login"), code=303)
+    if account["username"] == DEMO_USERNAME:
+        abort(403)
+    check_csrf()
+    destination = url_for("profile_settings", _anchor="password-settings")
+    user_id, token_hash = account["id"], _session_hash()
+    if not _consume_attempts(((f"password-code:user:{user_id}", 5),)):
+        flash("Слишком много попыток. Повторите позже.", "error")
+        return redirect(destination, code=303)
+    code = request.form.get("email_code", "").strip()
+    connection = _db()
+    with connection:
+        connection.execute("BEGIN IMMEDIATE")
+        now = int(time())
+        pending = connection.execute(
+            """SELECT codes.* FROM password_change_codes AS codes
+               JOIN account_details AS details ON details.user_id = codes.user_id AND details.email = codes.email
+               JOIN account_sessions AS active ON active.token_hash = codes.token_hash AND active.user_id = codes.user_id
+               WHERE codes.user_id = ? AND codes.token_hash = ? AND codes.expires > ? AND active.expires > ?""",
+            (user_id, token_hash, now, now),
+        ).fetchone()
+        if pending is None:
+            flash("Запросите новый код для этого сеанса.", "error")
+            return redirect(destination, code=303)
+        if not re.fullmatch(r"[0-9]{6}", code) or not secrets.compare_digest(
+            pending["code_digest"], _password_code_digest(pending["nonce"], code),
+        ):
+            flash("Код указан неверно.", "error")
+            return redirect(destination, code=303)
+        connection.execute("DELETE FROM password_change_codes WHERE user_id = ?", (user_id,))
         updated = connection.execute(
             "UPDATE users SET password_hash = ? WHERE id = ? AND password_hash = ?",
-            (password_hash, account["id"], row["password_hash"]),
+            (pending["new_password_hash"], user_id, pending["old_password_hash"]),
         ).rowcount
         if not updated:
-            flash("Пароль уже изменился. Откройте форму заново.", "error")
+            flash("Пароль уже изменился. Запросите новый код.", "error")
             return redirect(destination, code=303)
         connection.execute("DELETE FROM account_sessions WHERE user_id = ?", (account["id"],))
-        connection.execute("DELETE FROM auth_attempts WHERE scope = ?", (attempt_scope,))
+        connection.execute("DELETE FROM auth_attempts WHERE scope IN (?, ?)",
+                           (f"password:user:{user_id}", f"password-code:user:{user_id}"))
     session.clear()
     flash("Пароль изменён. Войдите снова.", "success")
     return redirect(url_for("accounts.login"), code=303)

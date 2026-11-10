@@ -15,6 +15,7 @@ from statistics import mean
 from tempfile import TemporaryDirectory
 
 from app.catalog import load_catalog
+from app.catalog.subscriptions import entitled_catalog
 from app.contracts import InteractionEvent, Material, Profile
 from app.recommender import recommend
 from app.recommender.engine import _tokenize_stems
@@ -22,7 +23,6 @@ from app.recommender.onboarding import ONBOARDING_ITEMS
 from evaluation.quality_data import read_quality_data
 from evaluation.hybrid import constraints
 from evaluation.runner import TOP_K, _load_cases, run_evaluation
-from evaluation.stress_report import simulated_access
 
 REPORT_NAME = "catalog-quality.json"
 REPORT_VERSION = 1
@@ -107,8 +107,7 @@ def _ratio(numerator: int, denominator: int) -> dict:
             "value": numerator / denominator if denominator else None}
 
 
-def synthetic_paywall(catalog, rank):
-    """Парные профили с одинаковым запросом и без покупок отдельных материалов."""
+def paywall_cases(catalog):
     members = [m for m in catalog if "Курс+" in m.subscriptions]
     separate = next((m for m in catalog if m.access == "paid" and not m.subscriptions), None)
     probes = (members[:9] + [separate]) if separate else members[:10]
@@ -116,25 +115,29 @@ def synthetic_paywall(catalog, rank):
     ordinary = list(dict.fromkeys(p for p in authored if constraints(p.goal)[1:] == (None, None)))
     # Профили заданы вручную, события пользователей здесь не используются.
     ordinary.sort(key=lambda profile: sha256(profile.goal.encode()).digest())
-    groups = {
+    return {
         "Обычные задачи": [(p, None) for p in ordinary[:50 - 2 * len(probes)]],
         "Запрос конкретного платного материала": [(Profile(goal=m.title), m.id) for m in probes],
         "Та же тема с условием «только бесплатно»": [
             (Profile(goal=f"По теме «{m.title}» нужны только бесплатные материалы."), None) for m in probes
         ],
     }
-    materials = {m.id: m for m in catalog}
 
+
+def synthetic_paywall(catalog, rank):
+    """Парные профили с одинаковым запросом и без покупок отдельных материалов."""
+    members = [m for m in catalog if "Курс+" in m.subscriptions]
+    groups = paywall_cases(catalog)
     def top(candidates, profile):
         return tuple(item.material_id for item in rank(candidates, profile, (), TOP_K).items)
 
     unfiltered = {profile: top(catalog, profile) for cases in groups.values() for profile, _ in cases}
     rows, breakdown = [], {label: [] for label in groups}
     for subscribed, plan in ((False, "Без подписки"), (True, "С подпиской Курс+")):
-        allowed = {mid for mid, material in materials.items() if simulated_access(material, subscribed)}
-        candidates = tuple(m for m in catalog if m.id in allowed)
+        candidates = entitled_catalog(catalog, subscribed)
+        allowed = {material.id for material in candidates}
         filtered = {profile: top(candidates, profile) for profile in unfiltered}
-        for mode, orders in (("Текущая выдача", unfiltered), ("Контроль с фильтром доступа", filtered)):
+        for mode, orders in (("Рабочий фильтр выдачи", filtered), ("Сравнение без фильтра", unfiltered)):
             def summarize(cases):
                 nonempty = []
                 target_checks = []

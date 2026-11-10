@@ -6,7 +6,7 @@ from flask import Blueprint, abort, current_app, flash, g, redirect, render_temp
 from app.ctr_report import LEGACY_ALGORITHMS, ORDER_LABELS, Metrics, read_daily_activity, read_report, read_top_cards
 from app.ui.accounts import (
     DEMO_USERNAME, LOGIN_PATTERN, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, admin_usernames, check_csrf,
-    clear_interactions, create_admin_account, current_account, grant_admin, reset_admin_password,
+    clear_interactions, create_admin_account, current_account, grant_admin, reset_admin_password, set_course_plus,
 )
 from evaluation.catalog_quality import read_report as read_catalog_quality
 from evaluation.learning_report import read_report as read_learning_report
@@ -138,3 +138,13 @@ def reset_password_from_console(username: str) -> None:
     if not reset_admin_password(username.strip().casefold(), password):
         raise click.ClickException("Админ-аккаунт с таким логином не найден.")
     click.echo("Пароль обновлён. Предыдущие сессии завершены.")
+
+
+@admin.cli.command("course-plus")
+@click.argument("username")
+@click.option("--revoke", is_flag=True, help="Отозвать доступ к Курс+.")
+def course_plus_from_console(username: str, revoke: bool) -> None:
+    """Управлять доступом существующего аккаунта к Курс+."""
+    if not set_course_plus(username.strip().casefold(), active=not revoke):
+        raise click.ClickException("Аккаунт с таким логином не найден.")
+    click.echo("Доступ к Курс+ отозван." if revoke else "Доступ к Курс+ выдан.")

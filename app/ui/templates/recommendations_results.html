@@ -24,7 +24,7 @@
                     {% endfor %}
                 </div>
                 {% endif %}
-                <form class="result-orders" id="result-orders" aria-label="Порядок и размер выдачи" method="post" action="{{ url_for('index', _anchor='recommendations') }}"{% if not result.items %} hidden{% endif %}>
+                <form class="result-orders" id="result-orders" aria-label="Фильтры, порядок и размер выдачи" method="post" action="{{ url_for('index', _anchor='recommendations') }}"{% if not result.items and is_demo_catalog %} hidden{% endif %}>
                     <input type="hidden" name="goal" value="{{ profile.goal or '' }}">
                     <input type="hidden" name="format_filter" value="{{ format_filter }}">
                     <input type="hidden" name="current_order" value="{{ result_order }}">
@@ -35,6 +35,20 @@
                     {% for field, value in profile_values.items() %}
                     <input type="hidden" name="{{ field }}" value="{{ value or '' }}">
                     {% endfor %}
+                    {% if not is_demo_catalog %}
+                    <input type="hidden" name="access_filters_set" value="1">
+                    <fieldset class="access-filters">
+                        <legend>Доступ к материалам</legend>
+                        {% for category, label in access_labels.items() %}
+                        <label>
+                            <input type="checkbox" name="access_filter" value="{{ category }}"{% if category in access_filters %} checked{% endif %}{% if category not in available_access %} disabled{% endif %}>
+                            {{ label }}
+                        </label>
+                        {% endfor %}
+                        <button class="result-order" type="submit" name="apply_access" value="1">Применить</button>
+                        <p class="result-metrics-note">Платные материалы требуют отдельной покупки. {% if 'subscription' not in available_access %}Для подписочных материалов нужен Курс+.{% endif %}</p>
+                    </fieldset>
+                    {% endif %}
                     {% for order, label in result_orders.items() %}
                     <button class="result-order" type="submit" name="result_order" value="{{ order }}"
                             aria-pressed="{{ 'true' if result_order == order else 'false' }}">{{ label }}</button>
@@ -128,7 +142,11 @@
                 <p class="empty-state">В этой подборке пока нет материалов {{ 'с оценкой' if result_order == 'rating' else 'с данными о популярности' }}. Вернитесь к порядку «По подбору», чтобы увидеть все рекомендации.</p>
                 {% endif %}
                 {% elif not result.follow_up_question %}
+                {% if not is_demo_catalog and not access_filters %}
+                <p class="empty-state">Выберите хотя бы один доступный тип материалов.</p>
+                {% else %}
                 <p class="empty-state">Подборка пока пуста. <a href="#goal">Попробуйте уточнить задачу.</a></p>
+                {% endif %}
                 {% endif %}
             </div>
         </section>

@@ -297,18 +297,38 @@ class WebFlowTest(unittest.TestCase):
                 ],
             )
         with patch.dict("os.environ", {"ALFA_CATALOG_DIR": str(catalog_dir)}):
-            client = create_app(database_path=self.database_path).test_client()
+            (catalog_dir / "subscriptions.json").write_text('{"paid-low":["Курс+"]}', encoding="utf-8")
+            app = create_app(database_path=self.database_path)
+            client = app.test_client()
             self.assertEqual(client.get("/health").json, {"status": "ok", "catalog": "real", "materials": 3})
             response = client.post("/", data={"goal": "налоги для ИП до 1000 ₽", "result_order": "rating"})
             page = response.get_data(as_text=True)
+            self.assertEqual(re.findall(r'href="/materials/([^"/?]+)\?', page), ["free-tax"])
+            self.assertIn('value="subscription" disabled', page)
+            self.assertIn('value="paid" disabled', page)
+            self.assertEqual(client.get("/materials/paid-low").status_code, 404)
+            self.assertEqual(client.post("/", data={"access_filters_set": "1", "access_filter": "subscription"}).status_code, 200)
+            forged = client.post("/", data={"access_filters_set": "1", "access_filter": "subscription"}).get_data(as_text=True)
+            self.assertNotIn('href="/materials/paid-low', forged)
+
+            runner = app.test_cli_runner()
+            self.assertEqual(runner.invoke(args=["admin", "course-plus", "demo"]).exit_code, 0)
+            self.assertEqual(self.post_form("/login/demo", {}, client=client, page="/login").status_code, 303)
+            page = client.post("/", data={"goal": "налоги для ИП до 1000 ₽", "result_order": "rating"}).get_data(as_text=True)
             self.assertEqual(re.findall(r'href="/materials/([^"/?]+)\?', page), ["paid-low", "free-tax"])
-            self.assertIn("800 ₽", page)
+            self.assertIn("По подписке Курс+", page)
             self.assertIn("Оценка · 4,7 из 5", page)
             self.assertIn("Популярность · 42", page)
             self.assertNotIn('name="history"', page)
             self.assertNotIn("приведены для примера", page)
+            only_subscription = client.post("/", data={
+                "access_filters_set": "1", "access_filter": "subscription", "goal": "налоги",
+            }).get_data(as_text=True)
+            self.assertEqual(re.findall(r'href="/materials/([^"/?]+)\?', only_subscription), ["paid-low"])
             preview = client.get("/materials/paid-low", headers={"Accept": "application/json"}).json
             self.assertEqual(preview["url"], "https://example.com/low")
+            self.assertEqual(runner.invoke(args=["admin", "course-plus", "demo", "--revoke"]).exit_code, 0)
+            self.assertEqual(client.get("/materials/paid-low").status_code, 404)
 
     def test_show_more_appends_six_sorted_cards_until_the_selection_ends(self):
         catalog = tuple(
@@ -684,20 +704,32 @@ class WebFlowTest(unittest.TestCase):
         empty = client.post("/", data={"selected_format": "подкаст"}).get_data(as_text=True)
         self.assertIn("нет материалов выбранного формата", empty)
 
-    def test_account_can_change_its_own_password_to_eight_characters(self):
+    def test_account_can_change_its_own_password_to_eight_characters_with_email_code(self):
         self.assertEqual(self.register().status_code, 303)
         path = "/profile/password"
+        send_code = "/profile/password/request-code"
         settings = "/profile/settings"
         other = self.app.test_client()
         credentials = {"username": "owner", "password": self.password}
         self.assertEqual(self.post_form("/login", credentials, client=other).status_code, 303)
+        self.assertIn("Сначала укажите", self.client.get(settings).get_data(as_text=True))
+        self.assertEqual(self.post_form(settings, {**self.business, "email": "owner@example.com",
+                                                   "phone": "8 (900) 123-45-67"}).status_code, 303)
+        self.assertIn("+7 (900) 123-45-67", self.client.get("/profile").get_data(as_text=True))
         self.assertIn('minlength="8"', self.client.get(settings).get_data(as_text=True))
 
         form = {"current_password": "неверный", "new_password": "demo8Key", "confirm_password": "demo8Key"}
-        self.assertEqual(self.post_form(path, form, page=settings).location, "/profile/settings#password-settings")
+        self.assertEqual(self.post_form(send_code, form, page=settings).location, "/profile/settings#password-settings")
+        self.assertNotIn('name="email_code"', self.client.get(settings).get_data(as_text=True))
         self.assertEqual(other.get("/profile").status_code, 200)
         form["current_password"] = self.password
-        self.assertEqual(self.post_form(path, form, page=settings).location, "/login")
+        self.assertEqual(self.post_form(send_code, form, page=settings).location, "/profile/settings#password-settings")
+        self.assertIn("<strong>000000</strong>", self.client.get(settings).get_data(as_text=True))
+        self.assertEqual(self.post_form(path, {"email_code": "000000"}, client=other, page=settings).location,
+                         "/profile/settings#password-settings")
+        self.assertEqual(self.post_form(path, {"email_code": "999999"}, page=settings).location,
+                         "/profile/settings#password-settings")
+        self.assertEqual(self.post_form(path, {"email_code": "000000"}, page=settings).location, "/login")
         self.assertEqual(other.get("/profile").location, "/login")
         self.assertEqual(self.post_form("/login", credentials).status_code, 401)
         self.assertEqual(self.post_form("/login", {**credentials, "password": form["new_password"]}).status_code, 303)

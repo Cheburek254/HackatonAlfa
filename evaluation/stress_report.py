@@ -3,16 +3,11 @@
 import json
 
 from app.contracts import Profile
+from app.catalog.subscriptions import entitled_catalog
 from app.recommender import recommend
 
 REPORT_NAME = "recommendation-stress.json"
 REPORT_VERSION = 1
-
-
-def simulated_access(material, subscribed):
-    if "Курс+" in material.subscriptions:
-        return subscribed
-    return material.access == "free"
 
 
 def read_report(path, fingerprint):
@@ -39,7 +34,7 @@ def check_subscriptions(catalog):
     rows = []
     profile = Profile(goal=target.title)
     for subscribed in (False, True):
-        candidates = {m.id: m for m in catalog if simulated_access(m, subscribed)}
+        candidates = {m.id: m for m in entitled_catalog(catalog, subscribed)}
         result = recommend(tuple(candidates.values()), profile, (), 3, explain_with_llm=False, use_expert_links=False)
         ids = tuple(item.material_id for item in result.items)
         rows.append({

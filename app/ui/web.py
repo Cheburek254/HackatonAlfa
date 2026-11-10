@@ -2,6 +2,7 @@
 
 import json
 import re
+from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -11,12 +12,14 @@ from flask import Flask, Response, abort, redirect, render_template, request, ur
 from app.catalog import DEMO_CATALOG_PATH, catalog_source, load_catalog, load_history
 from app.catalog import material_format as _format_key
 from app.catalog.lessons import read_programs
-from app.contracts import Material, Profile, Recommender
+from app.catalog.subscriptions import ACCESS_LABELS, access_category, available_access, entitled_catalog
+from app.contracts import Material, Profile, RecommendationResult, Recommender
 from app.ctr_report import ORDER_LABELS
 from app.database import account_database_path
 from app.ui.accounts import (
-    DEMO_USERNAME, PROFILE_FIELDS, account_avatar, check_csrf, configure_accounts, csrf_token, current_account,
-    profile_values, recent_interactions, record_interaction, saved_profile, update_profile,
+    DEMO_PASSWORD_CODE, DEMO_USERNAME, PROFILE_FIELDS, account_avatar, check_csrf, configure_accounts, csrf_token,
+    current_account, password_code_pending, profile_values, recent_interactions, record_interaction, saved_profile,
+    update_profile,
 )
 from app.ui.admin import admin
 from app.ui.avatars import AVATAR_MAX_BYTES, AVATAR_MAX_MB, prepare_avatar
@@ -66,11 +69,35 @@ def _material_destination(url: str) -> str:
     return url
 
 
+def _normalize_phone(value: str) -> str:
+    if not value:
+        return ""
+    digits = re.sub(r"[^0-9]", "", value)
+    if not re.fullmatch(r"\+?[0-9() .-]+", value):
+        raise ValueError("Проверьте формат телефона.")
+    if value.startswith("+") and not value.startswith("+7"):
+        if 7 <= len(digits) <= 15:
+            return "+" + digits
+    elif not value.startswith("+") and len(digits) == 10:
+        return "+7" + digits
+    elif len(digits) == 11 and digits[0] in "78":
+        return "+7" + digits[1:]
+    raise ValueError("Введите 10 цифр российского номера после +7 или укажите номер с международным кодом.")
+
+
+def _display_phone(value: str) -> str:
+    if re.fullmatch(r"\+7[0-9]{10}", value):
+        return f"+7 ({value[2:5]}) {value[5:8]}-{value[8:10]}-{value[10:12]}"
+    return value
+
+
 def create_app(
     recommender: Recommender = recommend, *, database_path: Path | None = None, algorithm_name: str | None = None,
+    password_code_sender: Callable[[str, str], None] | None = None,
 ) -> Flask:
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = 8 * 1024
+    app.config["PASSWORD_CODE_SENDER"] = password_code_sender
     source = catalog_source()
     is_demo_catalog = source == DEMO_CATALOG_PATH
     catalog = load_catalog(source)
@@ -122,7 +149,7 @@ def create_app(
             )
             if request.endpoint == "index":
                 response.headers["Content-Security-Policy"] += "; script-src 'self'; connect-src 'self'"
-            elif request.endpoint in {"accounts.login", "accounts.register"}:
+            elif request.endpoint in {"accounts.login", "accounts.register", "profile_settings"}:
                 response.headers["Content-Security-Policy"] += "; script-src 'self'"
             response.headers["Referrer-Policy"] = "no-referrer"
         return response
@@ -142,10 +169,13 @@ def create_app(
             profile_values=saved_profile(account) if values is None else values,
             identity_fields=IDENTITY_FIELDS,
             contact_fields=CONTACT_FIELDS,
+            formatted_phone=_display_phone(account["phone"] or ""),
             identity_values=account if details is None else details,
             avatar_max_mb=AVATAR_MAX_MB,
             error=error,
             saved=request.args.get("saved") == "1" and not settings,
+            password_code_pending=settings and not is_demo and password_code_pending(account),
+            demo_password_code=DEMO_PASSWORD_CODE if app.config["PASSWORD_CODE_SENDER"] is None else None,
         )
 
     @app.get("/profile")
@@ -187,9 +217,8 @@ def create_app(
                     raise ValueError(f"Проверьте поле «{label}». Максимум {maximum} символов.")
             if details["email"] and not re.fullmatch(r"[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+", details["email"]):
                 raise ValueError("Проверьте адрес электронной почты.")
-            phone = details["phone"]
-            if phone and (not re.fullmatch(r"\+?[0-9() .-]+", phone) or not 7 <= len(re.findall(r"[0-9]", phone)) <= 15):
-                raise ValueError("Укажите телефон с 7–15 цифрами.")
+            if details["phone"] != (account["phone"] or ""):
+                details["phone"] = _normalize_phone(details["phone"])
             if upload and remove_avatar:
                 raise ValueError("Выберите одно действие: загрузить новое фото или удалить текущее.")
             avatar = prepare_avatar(upload) if upload else None
@@ -211,10 +240,13 @@ def create_app(
         material = materials_by_id.get(material_id)
         if material is None:
             abort(404)
+        account = current_account()
+        if not is_demo_catalog and access_category(material) not in available_access(account and account["has_course_plus"]):
+            abort(404)
         if request.method == "GET" and not any(
             "prefetch" in request.headers.get(header, "").lower() for header in ("Sec-Purpose", "Purpose")
         ):
-            record_interaction(current_account(), material_id, "view")
+            record_interaction(account, material_id, "view")
         impression = request.args.get("impression")
         open_url = url_for("open_material", material_id=material_id, impression=impression)
         description_html = format_description_html(material.description)
@@ -240,9 +272,11 @@ def create_app(
         material = materials_by_id.get(material_id)
         if material is None:
             abort(404)
+        account = current_account()
+        if not is_demo_catalog and access_category(material) not in available_access(account and account["has_course_plus"]):
+            abort(404)
         target = _material_destination(material.url)
         check_csrf()
-        account = current_account()
         record_interaction(account, material_id, "click")
         record_impressions((request.args.get("impression"),), account, clicked_material=material_id)
         if request.accept_mimetypes.best == "application/json":
@@ -271,7 +305,16 @@ def create_app(
         if not skip_profile and not allow_sample_history:
             # В движке события в конце последовательности имеют больший вес.
             history = recent_interactions(account)[::-1]
-        result = recommender(catalog, profile, history, len(catalog))
+        has_course_plus = bool(account and account["has_course_plus"])
+        available = available_access(has_course_plus)
+        access_filters = available
+        candidates = catalog
+        if not is_demo_catalog:
+            if form.get("access_filters_set") == "1":
+                requested = set(form.getlist("access_filter"))
+                access_filters = tuple(category for category in available if category in requested)
+            candidates = tuple(m for m in entitled_catalog(catalog, has_course_plus) if access_category(m) in access_filters)
+        result = recommender(candidates, profile, history, len(candidates)) if candidates else RecommendationResult((), "")
         result_order = form.get("result_order", form.get("current_order", "recommended"))
         if result_order not in ORDER_LABELS:
             result_order = "recommended"
@@ -279,7 +322,8 @@ def create_app(
         if format_filter not in FORMAT_LABELS:
             format_filter = "all"
 
-        all_candidate_cards = [(materials_by_id[item.material_id], item) for item in result.items]
+        candidate_ids = {material.id for material in candidates}
+        all_candidate_cards = [(materials_by_id[item.material_id], item) for item in result.items if item.material_id in candidate_ids]
         format_counts = {
             fmt: sum(1 for card, _ in all_candidate_cards if _format_key(card) == fmt)
             for fmt in FORMAT_LABELS if fmt != "all"
@@ -299,7 +343,7 @@ def create_app(
             page_size = RESULTS_PER_PAGE
         visible_cards = cards[:page * page_size]
         impression_batch, impression_batch_id, impression_tickets = issue_impression_tickets(
-            [material.id for material, _ in visible_cards], algorithm, result_order, f"{format_filter}:{page_size}",
+            [material.id for material, _ in visible_cards], algorithm, result_order, f"{format_filter}:{page_size}:{','.join(access_filters)}",
             form.get("impression_batch") if page > 1 else None,
         )
         return render_template(
@@ -319,6 +363,9 @@ def create_app(
             format_filter=format_filter,
             format_filters=FORMAT_LABELS,
             format_counts=format_counts,
+            access_labels=ACCESS_LABELS,
+            access_filters=access_filters,
+            available_access=available,
             page_size=page_size,
             page_sizes=PAGE_SIZES,
             result=result,

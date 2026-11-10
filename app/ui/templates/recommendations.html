@@ -11,6 +11,14 @@
                         <input type="hidden" name="result_order" value="{{ result_order }}">
                         <input type="hidden" name="format_filter" value="{{ format_filter }}">
                         <input type="hidden" name="page_size" value="{{ page_size }}">
+                        {% if not is_demo_catalog %}
+                        <div id="query-access-filters" hidden>
+                            <input type="hidden" name="access_filters_set" value="1">
+                            {% for category in access_filters %}
+                            <input type="hidden" name="access_filter" value="{{ category }}">
+                            {% endfor %}
+                        </div>
+                        {% endif %}
                         <label class="sr-only" for="goal">Текущая задача</label>
                         <div class="goal-row">
                             <input id="goal" name="goal" type="text" maxlength="{{ goal_max_length }}"

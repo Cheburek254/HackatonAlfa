@@ -113,6 +113,17 @@ document.addEventListener("submit", async (event) => {
 
         const query = document.querySelector("#recommendation-query");
         const controls = next.querySelector("#result-orders");
+        const queryAccess = query.querySelector("#query-access-filters");
+        if (queryAccess) {
+            queryAccess.querySelectorAll('input[name="access_filter"]').forEach(input => input.remove());
+            for (const checkbox of controls.querySelectorAll('input[name="access_filter"]:checked:not(:disabled)')) {
+                const input = document.createElement("input");
+                input.type = "hidden";
+                input.name = "access_filter";
+                input.value = checkbox.value;
+                queryAccess.append(input);
+            }
+        }
         const carriedFields = ["result_order", "format_filter", "page_size"];
         if (isQuery) {
             carriedFields.push("goal", "stage", "industry", "experience", "team_size", "learning_topic", "preferred_format");

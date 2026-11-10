@@ -4,6 +4,24 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
+COURSE_PLUS = "Курс+"
+ACCESS_LABELS = {"free": "Бесплатные", "paid": "Платные", "subscription": "По подписке Курс+"}
+
+
+def access_category(material):
+    if COURSE_PLUS in material.subscriptions:
+        return "subscription"
+    return material.access
+
+
+def available_access(course_plus):
+    return ("free", "subscription") if course_plus else ("free",)
+
+
+def entitled_catalog(catalog, course_plus):
+    allowed = available_access(course_plus)
+    return tuple(m for m in catalog if access_category(m) in allowed)
+
 
 def subscription_memberships(reader) -> dict[str, list[str]]:
     subscriptions = {

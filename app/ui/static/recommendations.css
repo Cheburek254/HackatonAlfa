@@ -521,6 +521,31 @@ h2 {
     text-decoration: underline;
     text-underline-offset: 3px;
 }
+.access-filters {
+    flex-basis: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 18px;
+    padding: 8px 0 12px;
+    border: 0;
+    margin: 0;
+}
+.access-filters legend {
+    font-weight: 700;
+}
+.access-filters label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.access-filters label:has(input:disabled) {
+    color: var(--muted);
+}
+.access-filters .result-metrics-note {
+    flex-basis: 100%;
+    margin: 0;
+}
 .material-authors {
     margin-block: 6px 12px;
     font-size: 0.9rem;
