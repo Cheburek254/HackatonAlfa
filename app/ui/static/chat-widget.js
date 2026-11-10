@@ -19,13 +19,21 @@
     if (typingIndicator) {
         typingIndicator.style.display = "none";
     }
+    input.style.overflowY = "hidden";
 
     const history = [];
 
     function autoResize() {
         input.style.height = "auto";
-        const newHeight = Math.min(input.scrollHeight, 120);
-        input.style.height = (newHeight > 38 ? newHeight : 38) + "px";
+        const maxHeight = 120;
+        if (input.scrollHeight > maxHeight) {
+            input.style.height = maxHeight + "px";
+            input.style.overflowY = "auto";
+        } else {
+            const newHeight = Math.max(input.scrollHeight, 38);
+            input.style.height = newHeight + "px";
+            input.style.overflowY = "hidden";
+        }
     }
 
     input.addEventListener("input", autoResize);
@@ -168,6 +176,7 @@
 
         input.value = "";
         input.style.height = "38px";
+        input.style.overflowY = "hidden";
         input.disabled = true;
 
         if (typingIndicator) {
