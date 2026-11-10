@@ -1,4 +1,5 @@
 import unittest
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from app.catalog import load_catalog, load_history
@@ -46,12 +47,41 @@ class RecommenderTest(unittest.TestCase):
         """Сценарий 2 из Приложения 2: журнал действий меняет приоритет выдачи."""
         profile = Profile(goal="Маркетинг", stage="работающий бизнес")
         without_hist = recommend(self.catalog, profile, (), 3)
-        with_hist = recommend(self.catalog, profile, self.history, 3)
+        confirmed = (
+            self.history[0], InteractionEvent("marketing-first-sales", "click"),
+            InteractionEvent("marketing-repeat-sales", "click"),
+        )
+        with_hist = recommend(self.catalog, profile, confirmed, 3)
 
         self.assertIn(without_hist.items[0].material_id, {"marketing-first-sales", "marketing-service-leads"})
         self.assertEqual(with_hist.items[0].material_id, "marketing-service-leads")
         # Пройденный start-checklist не должен быть на первом месте
         self.assertNotEqual(with_hist.items[0].material_id, "start-checklist")
+
+    def test_two_fresh_clicks_on_distinct_materials_confirm_a_new_topic(self):
+        materials = tuple(
+            Material(f"{group}-{number}", f"{topic} · материал {number}", f"https://example.com/{group}/{number}",
+                     topics=(topic,), format="статья", access="free")
+            for group, topic in (("old", "бухгалтерия"), ("new", "маркетплейсы"))
+            for number in range(1, 6)
+        )
+        now = datetime(2026, 9, 1, tzinfo=UTC)
+        past = tuple(InteractionEvent(f"old-{number}", "click", now - timedelta(days=60 + number))
+                     for number in range(1, 4))
+        first = InteractionEvent("new-1", "click", now - timedelta(days=1))
+        second = InteractionEvent("new-2", "click", now)
+
+        def top(events, profile=Profile()):
+            result = recommend(materials, profile, events, 3, history_as_of=now, explain_with_llm=False)
+            return tuple(item.material_id for item in result.items)
+
+        stable = top(past)
+        self.assertGreaterEqual(sum(mid.startswith("old-") for mid in stable), 2)
+        self.assertGreaterEqual(len(set(stable) & set(top(past + (first,)))), 2)
+        self.assertGreaterEqual(len(set(stable) & set(top(past + (first, first, first)))), 2)
+        self.assertGreaterEqual(len(set(stable) & set(top(past + (first, InteractionEvent("new-2", "view", now))))), 2)
+        self.assertGreaterEqual(sum(mid.startswith("new-") for mid in top(past + (first, second))), 2)
+        self.assertTrue(top(past + (first, second), Profile(goal="бухгалтерия"))[0].startswith("old-"))
 
     def test_scenario_3_weak_match_provides_follow_up(self):
         """Сценарий 3 из Приложения 2: запрос вне каталога возвращает общую подборку и уточнение."""

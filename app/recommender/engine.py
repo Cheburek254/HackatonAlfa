@@ -4,6 +4,7 @@ import json
 import re
 from collections import defaultdict
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 
@@ -17,6 +18,14 @@ from app.contracts import (
 )
 from app.recommender.llm import refine_with_llm_if_configured
 from app.recommender.onboarding import onboarding
+
+HISTORY_HALF_LIFE_DAYS = 28
+CONFIRMATION_WINDOW_DAYS = 14
+SECONDS_PER_DAY = 86_400
+HISTORY_EVENT_WEIGHTS = {"view": 0.08, "click": 1.0, "complete": 1.25}
+UNCONFIRMED_TOPIC_WEIGHT = 0.8
+TITLE_HISTORY_WEIGHT = 8.0
+STRONG_TASK_SCORE = 19.0
 
 STOPWORDS = {
     "и", "в", "во", "на", "по", "с", "со", "к", "ко", "от", "до", "из", "за", "для", "про",
@@ -378,9 +387,7 @@ def _build_card_explanation(
         if profile_parts:
             reasons.append(f"адаптирован для {', '.join(profile_parts)}")
 
-        if signals.get("history_direct_click"):
-            reasons.append("вы уже переходили к этому материалу — рекомендуем завершить работу с ним")
-        elif signals.get("history_continuation_from"):
+        if signals.get("history_continuation_from"):
             prev_title = signals["history_continuation_from"]
             reasons.append(f"логичное практическое продолжение после изучения «{prev_title}»")
 
@@ -439,6 +446,78 @@ def _build_follow_up_question(
     return None
 
 
+def _timestamp(value: datetime) -> float:
+    return (value if value.tzinfo else value.replace(tzinfo=UTC)).timestamp()
+
+
+def _history_signals(history, materials, links, as_of):
+    """Два разных материала подтверждают тему. Повторы и открытия превью не суммируются."""
+    latest = {}
+    timestamps = []
+    for index, event in enumerate(history):
+        when = _timestamp(event.occurred_at) if event.occurred_at else None
+        if when is not None:
+            timestamps.append(when)
+        key = HISTORY_EVENT_WEIGHTS[event.kind], when if when is not None else float("-inf"), index
+        previous = latest.get(event.material_id)
+        if previous is None or key > previous[0]:
+            latest[event.material_id] = (key, event, when)
+
+    reference = _timestamp(as_of) if as_of else max(timestamps, default=None)
+    ordered = sorted(latest.values(), key=lambda row: row[0][2])
+    topics, industries, title_terms = defaultdict(list), defaultdict(list), defaultdict(list)
+    signals = []
+    for offset, (_, event, when) in enumerate(reversed(ordered)):
+        if when is not None and reference is not None:
+            age = max(0., (reference - when) / SECONDS_PER_DAY)
+            decay = 2 ** (-age / HISTORY_HALF_LIFE_DAYS)
+            recent = age <= CONFIRMATION_WINDOW_DAYS
+        else:
+            decay = 1.0 if offset < 3 else 0.4 if offset < 10 else 0.1
+            recent = offset < 10
+        source = materials[event.material_id]
+        source_topics = set(filter(None, map(_normalize_text, source.topics)))
+        source_industries = set(filter(None, map(_normalize_text, source.industries)))
+        weight = HISTORY_EVENT_WEIGHTS[event.kind] * decay
+        confirmed = 2 if event.kind == "complete" else int(event.kind == "click")
+        evidence = (weight, confirmed if recent else 0, confirmed, source.title)
+        for topic in source_topics:
+            topics[topic].append(evidence)
+        for industry in source_industries:
+            industries[industry].append(evidence)
+        if confirmed:
+            signals.append((event.material_id, source_topics, source.title, decay, recent and confirmed == 2))
+            if recent:
+                for term in _tokenize_stems(source.title) - ACTION_VERB_STEMS:
+                    if not term.isdigit():
+                        title_terms[term].append((len(signals) - 1, decay))
+
+    def strength(evidence):
+        total = sum(row[0] for row in evidence)
+        if sum(row[1] for row in evidence) >= 2:
+            return min(total, 3.0) * 6.0
+        if sum(row[2] for row in evidence) >= 2:
+            return min(total, 3.0) * 1.3
+        return min(total, 1.0) * UNCONFIRMED_TOPIC_WEIGHT
+
+    topic_scores = {topic: (strength(rows), max(rows, key=lambda row: (row[1] > 0, row[0]))[3])
+                    for topic, rows in topics.items()}
+    industry_scores = {industry: strength(rows) * 0.22 for industry, rows in industries.items()}
+    term_scores = {
+        term: TITLE_HISTORY_WEIGHT * min(2.0, sum(decay if position < 3 else decay * 0.4 for position, decay in rows))
+        for term, rows in title_terms.items() if len(rows) >= 2
+    }
+    linked_scores = {}
+    for mid, source_topics, title, decay, completed in signals:
+        confirmed = completed or any(topic_scores[topic][0] >= 6.0 for topic in source_topics)
+        boost = (2.8 if confirmed else 0.35) * decay
+        for linked in links.get(mid, ()):
+            if boost > linked_scores.get(linked, (0., ""))[0]:
+                linked_scores[linked] = (boost, title)
+    seen = {mid: row[1].kind for mid, row in latest.items()}
+    return topic_scores, industry_scores, term_scores, linked_scores, seen
+
+
 def recommend(
     catalog: Sequence[Material],
     profile: Profile,
@@ -449,12 +528,11 @@ def recommend(
     links_directory: Path | None = None,
     use_expert_links: bool = True,
     expert_links: dict[str, list[str]] | None = None,
+    history_as_of: datetime | None = None,
 ) -> RecommendationResult:
     """Ранжирует материалы каталога с учётом задачи, профиля, истории и популярности."""
     if not catalog or limit <= 0:
         return RecommendationResult((), "")
-    if not history and (starter := onboarding(catalog, profile, limit)) is not None:
-        return starter
 
     rec_links = expert_links if expert_links is not None else (
         _load_recommended_links(links_directory or catalog_data_dir()) if use_expert_links else {}
@@ -483,43 +561,15 @@ def recommend(
     if not candidates:
         return RecommendationResult((), "")
 
-    catalog_by_id = {mat.id: mat for _, mat in candidates}
+    catalog_by_id = {mat.id: mat for mat in catalog}
 
     # 2. Разбор сигналов истории (только по существующим в каталоге ID)
     valid_history = [ev for ev in history if ev.material_id in catalog_by_id]
-    completed_ids: set[str] = set()
-    clicked_ids: set[str] = set()
-    viewed_ids: set[str] = set()
-    history_topic_weights: dict[str, float] = defaultdict(float)
-    history_industry_weights: dict[str, float] = defaultdict(float)
-    history_source_title: dict[str, str] = {}
-    linked_boost_ids: dict[str, str] = {}
-
-    for pos, ev in enumerate(valid_history):
-        recency_mult = 1.0 + 0.15 * pos
-        src_mat = catalog_by_id[ev.material_id]
-        if ev.kind == "complete":
-            completed_ids.add(ev.material_id)
-            w = 2.2 * recency_mult
-        elif ev.kind == "click":
-            clicked_ids.add(ev.material_id)
-            w = 2.8 * recency_mult
-        else:
-            viewed_ids.add(ev.material_id)
-            w = 1.2 * recency_mult
-
-        for t in src_mat.topics:
-            tn = _normalize_text(t)
-            if tn:
-                history_topic_weights[tn] += w
-                history_source_title[tn] = src_mat.title
-        for ind in src_mat.industries:
-            in_norm = _normalize_text(ind)
-            if in_norm:
-                history_industry_weights[in_norm] += w * 0.8
-        for linked_id in rec_links.get(ev.material_id, []):
-            if linked_id not in completed_ids:
-                linked_boost_ids[linked_id] = src_mat.title
+    if not valid_history and (starter := onboarding(catalog, profile, limit)) is not None:
+        return starter
+    topic_scores, industry_scores, term_scores, linked_scores, seen_events = _history_signals(
+        valid_history, catalog_by_id, rec_links, history_as_of,
+    )
 
     # 3. Разбор текстовой задачи (goal) и темы из профиля (learning_topic)
     goal_raw = (profile.goal or "").strip()
@@ -566,7 +616,6 @@ def recommend(
             "industry_matched": False,
             "exp_matched": False,
             "fmt_matched": False,
-            "history_direct_click": False,
             "history_continuation_from": None,
         }
 
@@ -650,33 +699,22 @@ def recommend(
 
         # Г. Сигнал истории действий
         hist_score = 0.0
+        history_title_score = 0.0
         if valid_history:
-            if mat.id in completed_ids:
-                # Уже пройденный материал опускаем вниз, чтобы предложить продолжение
+            seen = seen_events.get(mat.id)
+            if seen == "complete":
                 hist_score -= 15.0
-            elif mat.id in clicked_ids:
-                # Пользователь явно кликнул на материал (высокий интерес)
-                hist_score += 4.5
-                signals["history_direct_click"] = True
-            elif mat.id in viewed_ids:
-                # Уже просмотренный обзорный материал чуть уступает новому практическому шагу
-                fmt_norm = _normalize_text(mat.format or "")
-                hist_score += 1.8 if "шаблон" in fmt_norm else 0.4
-
-            if mat.id in linked_boost_ids and mat.id not in completed_ids:
-                hist_score += 3.5
-                signals["history_continuation_from"] = linked_boost_ids[mat.id]
-
-            for tn in topics_norm_map:
-                if tn in history_topic_weights and mat.id not in completed_ids:
-                    hist_score += min(history_topic_weights[tn] * 0.9, 3.8)
-                    if not signals["history_continuation_from"] and mat.id not in clicked_ids:
-                        signals["history_continuation_from"] = history_source_title.get(tn)
-
-            for ind in mat.industries:
-                in_norm = _normalize_text(ind)
-                if in_norm in history_industry_weights and mat.id not in completed_ids:
-                    hist_score += min(history_industry_weights[in_norm] * 0.8, 2.0)
+            else:
+                topic_score, topic_source = max((topic_scores[t] for t in topics_norm_map if t in topic_scores), default=(0., ""))
+                industry_score = max((industry_scores.get(_normalize_text(ind), 0.) for ind in mat.industries), default=0.)
+                graph_score, graph_source = linked_scores.get(mat.id, (0., ""))
+                if seen != "click":
+                    history_title_score = max((term_scores.get(term, 0.) for term in title_stems), default=0.)
+                hist_score = topic_score + industry_score + history_title_score + graph_score
+                if seen == "click":
+                    hist_score -= 1.2
+                elif topic_score >= 2 or graph_score >= 2:
+                    signals["history_continuation_from"] = graph_source or topic_source
 
         # Д. Холодный старт и практическая применимость
         cold_score = 0.0
@@ -710,10 +748,10 @@ def recommend(
         ) or bool(profile.preferred_format and "шаблон" in _normalize_text(profile.preferred_format))
 
         if task_score > 0 and ("шаблон" in fmt_norm or "чек-лист" in fmt_norm):
-            if signals["goal_direct"] or st_matched or ind_matched or signals["history_direct_click"]:
+            if signals["goal_direct"] or st_matched or ind_matched or signals["history_continuation_from"]:
                 actionable_bonus += 1.2
 
-        if is_template_mat and not is_doc_requested and not signals.get("history_continuation_from") and not signals.get("history_direct_click") and hist_score <= 0:
+        if is_template_mat and not is_doc_requested and not signals["history_continuation_from"] and hist_score < 2:
             # Понижаем утилитарные документы при общих запросах на обучение/рост
             actionable_bonus -= 2.8
         elif is_doc_requested and is_template_mat:
@@ -738,6 +776,7 @@ def recommend(
             + pop_bonus
         )
         signals["task_score"] = task_score
+        signals["history_title_score"] = history_title_score
         scored_items.append((total_score, mat, signals))
 
     is_weak_match = bool(goal_norm and max_task_score < 2.5)
@@ -745,7 +784,8 @@ def recommend(
     # При наличии явной задачи и хороших совпадений отбрасываем совсем нерелевантные материалы,
     # если хватает релевантных кандидатов
     if goal_norm and not is_weak_match:
-        relevant_pool = [item for item in scored_items if item[2]["task_score"] > 0]
+        relevant_pool = [item for item in scored_items if item[2]["task_score"] > 0
+                         or (max_task_score < STRONG_TASK_SCORE and item[2]["history_title_score"] >= TITLE_HISTORY_WEIGHT)]
         if len(relevant_pool) >= min(limit, 2):
             scored_items = relevant_pool
 

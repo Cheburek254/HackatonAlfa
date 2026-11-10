@@ -3,6 +3,7 @@
 import json
 import re
 from collections.abc import Callable
+from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -132,8 +133,8 @@ def create_app(
         f"{getattr(recommender, '__module__', recommender_type.__module__)}."
         f"{getattr(recommender, '__qualname__', recommender_type.__qualname__)}"
     )
-    if algorithm_name is None and recommender is recommend and is_demo_catalog:
-        algorithm += ":demo-catalog"
+    if algorithm_name is None and recommender is recommend:
+        algorithm += ":demo-catalog" if is_demo_catalog else ":history-v2"
     app.jinja_env.globals["signed_in"] = lambda: current_account() is not None
     app.jinja_env.globals["material_format"] = _format_key
 
@@ -319,7 +320,8 @@ def create_app(
                 requested = set(form.getlist("access_filter"))
                 access_filters = tuple(category for category in available if category in requested)
             candidates = tuple(m for m in entitled_catalog(catalog, has_course_plus) if access_category(m) in access_filters)
-        result = recommender(candidates, profile, history, len(candidates)) if candidates else RecommendationResult((), "")
+        rank = partial(recommend, history_as_of=datetime.now(UTC)) if recommender is recommend and not is_demo_catalog else recommender
+        result = rank(candidates, profile, history, len(candidates)) if candidates else RecommendationResult((), "")
         result_order = form.get("result_order", form.get("current_order", "recommended"))
         if result_order not in ORDER_LABELS:
             result_order = "recommended"
