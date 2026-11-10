@@ -29,43 +29,27 @@
 </nav>
 <section class="account-card" id="admin-evaluation" aria-labelledby="admin-evaluation-title">
     <h2 id="admin-evaluation-title" class="account-section-title">Тесты рекомендаций</h2>
+    <p class="account-muted">{% if report_date %}Последнее тестирование · <strong>{{ report_date }}</strong>{% else %}Для текущего каталога пока нет сохранённых прогонов.{% endif %}</p>
     <p class="account-muted">Сравниваем топ популярных курсов, персональный recommend и смешанный режим. Вес BM25 — {{ '%g' | format(100 * bm25_weight) }}%, вес recommend — {{ '%g' | format(100 * (1 - bm25_weight)) }}%.</p>
     <p class="account-muted">Hit@3 и MRR@3 оценивают первое попадание. Precision@3 показывает долю подходящих карточек в тройке, nDCG@3 учитывает их позиции, MAP@3 усредняет точность на позициях попаданий.</p>
-    <div class="admin-forms">
-        {% for suite, label in evaluation_suites.items() %}
-        <form class="admin-form" method="post" action="{{ url_for('admin.tests', _anchor='admin-evaluation') }}" aria-labelledby="evaluation-{{ suite }}-title">
-            <h3 id="evaluation-{{ suite }}-title">{{ label }}</h3>
-            <p class="account-muted">{{ evaluation_counts[suite] }} {{ 'сценариев на демонстрационных материалах.' if suite == 'demo' else 'размеченных сценариев на материалах «Альфа-Курса».' }}</p>
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button class="button {{ 'button-primary' if suite == 'real' else 'button-profile' }}" type="submit" name="evaluation_suite" value="{{ suite }}"{% if suite == 'real' and not real_catalog_available %} disabled{% endif %}>{{ 'Запустить синтетические тесты' if suite == 'demo' else 'Запустить тесты на реальном каталоге' }}</button>
-            {% if suite == 'real' and not real_catalog_available %}
-            <p class="account-muted">Для запуска подключите экспорт реального каталога.</p>
-            {% endif %}
-        </form>
-        {% endfor %}
-    </div>
     {% for suite, report in comparison_summaries.items() %}
     <h3>{{ evaluation_suites[suite] }} · сохранённый прогон</h3>
-    <p class="account-muted">Сценариев в наборе · {{ report.scenario_count }}</p>
+    <p class="account-muted">Сценариев в наборе · {{ report.scenario_count }}{% if report.generated_at | report_msk %}. Время прогона · {{ report.generated_at | report_msk }}{% endif %}</p>
     {{ ranking_table(report, evaluation_suites[suite]) }}
-    {% endfor %}
-    {% if evaluation_error %}
-    <p class="account-error admin-message" role="alert">{{ evaluation_suites[evaluation_suite] }}. {{ evaluation_error }}</p>
-    {% elif comparison %}
-    <h3>{{ evaluation_suites[evaluation_suite] }} · результаты</h3>
-    <p class="account-muted" role="status">Проверено сценариев: {{ comparison.scenario_count }}.{% if evaluation_suite == 'demo' %} Сценарии без релевантной карточки показаны отдельно.{% endif %}</p>
-    {{ ranking_table(comparison, evaluation_suites[evaluation_suite]) }}
-    <details class="admin-evaluation-details">
+    {% if report.rows and suite != detailed_suite %}
+    <p><a href="{{ url_for('admin.tests', details=suite, _anchor='details-' ~ suite) }}">Посмотреть разбивку по сценариям · {{ evaluation_suites[suite] }}</a></p>
+    {% elif report.rows %}
+    <details class="admin-evaluation-details" id="details-{{ suite }}" open>
         <summary>Результаты по сценариям</summary>
         <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Результаты по сценариям">
             <table class="admin-table">
                 <thead><tr><th scope="col">Сценарий</th><th scope="col">Разметка</th><th scope="col">Метод</th><th scope="col">Топ-3</th><th scope="col">RR@3</th></tr></thead>
                 <tbody>
-                    {% for row in comparison.rows %}
+                    {% for row in report.rows %}
                     <tr><th scope="row" title="{{ row.note }}">{{ row.goal or row.note }}<br><small>{{ row.case_id }}</small></th>
-                        <td>{% for mid in row.relevant_ids %}{{ titles.get(mid, mid) if evaluation_suite == 'real' else mid }}{% if not loop.last %}<br>{% endif %}{% else %}—{% endfor %}</td>
+                        <td>{% for mid in row.relevant_ids %}{{ titles.get(mid, mid) if suite == 'real' else mid }}{% if not loop.last %}<br>{% endif %}{% else %}—{% endfor %}</td>
                         <td>{{ row.method }}</td>
-                        <td>{% for mid in row.material_ids %}{{ loop.index }}. {{ titles.get(mid, mid) if evaluation_suite == 'real' else mid }}{% if not loop.last %}<br>{% endif %}{% else %}Пусто{% endfor %}</td>
+                        <td>{% for mid in row.material_ids %}{{ loop.index }}. {{ titles.get(mid, mid) if suite == 'real' else mid }}{% if not loop.last %}<br>{% endif %}{% else %}Пусто{% endfor %}</td>
                         <td>{{ '%.3f' | format(row.reciprocal_rank) if row.reciprocal_rank is not none else '—' }}</td></tr>
                     {% endfor %}
                 </tbody>
@@ -73,6 +57,7 @@
         </div>
     </details>
     {% endif %}
+    {% endfor %}
 </section>
 
 {% include "admin_catalog_quality.html" %}

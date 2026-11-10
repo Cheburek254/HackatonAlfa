@@ -1,0 +1,42 @@
+<section id="daily-picks" class="results daily-picks" aria-labelledby="daily-title">
+    <div class="wrap">
+        <p class="eyebrow">ПОДБОРКА НА СЕГОДНЯ</p>
+        <div class="daily-heading">
+            <h2 id="daily-title">Что почитать и послушать</h2>
+            <a class="daily-search-link" href="#goal">Перейти к поиску ↓</a>
+        </div>
+        <div class="daily-carousel">
+            <button class="daily-arrow daily-arrow-previous" type="button" aria-label="Предыдущие материалы" aria-controls="daily-track" data-daily-scroll="-1" hidden>‹</button>
+            <ul class="daily-track" id="daily-track" aria-label="Статьи и подкасты на сегодня" tabindex="0">
+                {% for start, end in [(0, 3), (3, none)] %}
+                {% for kind, format in [('article', 'Статья'), ('podcast', 'Подкаст')] %}
+                {% for pick in daily[kind][start:end] %}
+                {% set material = pick.material %}
+                <li class="card daily-card daily-color-{{ loop.index }}" data-daily-kind="{{ kind }}">
+                    <a class="material-link daily-tile-link" href="{{ url_for('material_page', material_id=material.id) }}">
+                        <span class="daily-type">{{ format }}</span>
+                        <h3>{{ material.title }}</h3>
+                        <p class="daily-reason">{{ pick.reason }}</p>
+                        {% if pick.published %}<time datetime="{{ pick.published.isoformat() }}">{{ pick.published.strftime('%d.%m.%Y') }}</time>{% endif %}
+                        {% if material.subscriptions or material.access == 'paid' %}
+                        <span class="daily-access">{{ 'По подписке ' ~ (material.subscriptions | join(', ')) if material.subscriptions else 'Платно' }}</span>
+                        {% endif %}
+                        <span class="daily-art" aria-hidden="true">
+                            {% if covers.get(material.id) %}
+                            <img src="{{ covers[material.id] }}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">
+                            {% elif kind == 'article' %}
+                            <svg viewBox="0 0 44 44" fill="none"><path d="M11 7h19l6 6v23a2 2 0 0 1-2 2H11a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z" fill="currentColor" opacity=".22"/><path d="M15 18h15m-15 6h15m-15 6h9" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+                            {% else %}
+                            <svg viewBox="0 0 44 44" fill="none"><path d="M9 25v-3a13 13 0 0 1 26 0v3" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><rect x="8" y="23" width="8" height="13" rx="4" fill="currentColor"/><rect x="28" y="23" width="8" height="13" rx="4" fill="currentColor"/></svg>
+                            {% endif %}
+                        </span>
+                    </a>
+                </li>
+                {% endfor %}
+                {% endfor %}
+                {% endfor %}
+            </ul>
+            <button class="daily-arrow daily-arrow-next" type="button" aria-label="Следующие материалы" aria-controls="daily-track" data-daily-scroll="1" hidden>›</button>
+        </div>
+    </div>
+</section>

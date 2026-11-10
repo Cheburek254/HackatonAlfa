@@ -16,9 +16,10 @@ from app.contracts import Material, Profile, Recommendation, RecommendationResul
 from app.ctr_report import DailyActivity, Metrics, read_daily_activity, read_report, read_top_cards
 from app.live_data import LiveDataSnapshot
 from app.ui.accounts import create_admin_account
+from app.ui.experiments import DAY, group_metrics
 from app.ui.stub import recommend as stub_recommend
 from app.ui.web import create_app
-from evaluation.runner import EVALUATION_DIR
+from evaluation.runner import EVALUATION_DIR, EvaluationReport, EvaluationRow, EvaluationSummary, summary_payload
 
 
 class WebFlowTest(unittest.TestCase):
@@ -103,6 +104,111 @@ class WebFlowTest(unittest.TestCase):
         select("hybrid")
         self.assertIn("Подборка учитывает совпадения", results(guest, "финансы"))
 
+    def test_ab_enrollment_and_metrics_follow_guests_through_registration_and_stop(self):
+        app = create_app(database_path=self.database_path)
+        with app.app_context():
+            self.assertTrue(create_admin_account("experiment-admin", self.password))
+        admin, first, second = app.test_client(), app.test_client(), app.test_client()
+        path = "/admin/experiments"
+        form = {"action": "start", "mode_a": "popular", "mode_b": "recommend", "share_a": 50, "traffic": 100}
+        self.assertEqual(first.post(path, data=form).location, "/admin/login")
+        self.assertEqual(self.post_form("/admin/login", {"username": "experiment-admin", "password": self.password},
+                                        client=admin).status_code, 303)
+        self.assertEqual(admin.post(path, data=form).status_code, 400)
+        self.post_form(path, {**form, "mode_b": "popular"}, client=admin)
+        self.assertIn("Выберите два разных алгоритма", admin.get(path).get_data(as_text=True))
+        self.assertEqual(self.post_form(path, form, client=admin).status_code, 303)
+        self.post_form(path, form, client=admin)
+        self.assertIn("Завершите текущий запуск", admin.get(path).get_data(as_text=True))
+
+        with patch("app.ui.experiments._arm", side_effect=("A", "B")) as assign:
+            control_page = first.get("/").get_data(as_text=True)
+            self.assertIn("Курсы отсортированы по популярности", control_page)
+            self.assertIn("Курсы отсортированы по популярности", first.get("/").get_data(as_text=True))
+            treatment_page = second.get("/").get_data(as_text=True)
+            self.assertNotIn("Курсы отсортированы по популярности", treatment_page)
+            admin.get("/")
+            app.test_client().get("/", headers={"User-Agent": "ExampleBot"})
+            app.test_client().get("/", headers={"Sec-Purpose": "prefetch"})
+            self.assertEqual(assign.call_count, 2)
+
+        def first_link(html):
+            return re.search(r'class="material-link" href="([^"]+\?impression=[^"]+)"', html)[1]
+
+        control = first.get(first_link(control_page), headers={"Accept": "application/json"}).json
+        self.assertEqual(first.post(control["open_url"], data={"csrf_token": control["csrf_token"]}).status_code, 303)
+        treatment = second.get(first_link(treatment_page), headers={"Accept": "application/json"})
+        self.assertEqual(treatment.status_code, 200)
+        self.assertEqual(self.post_form("/register", {**self.business, "username": "experiment-user",
+                                                     "password": self.password}, client=first).status_code, 303)
+        self.assertIn("Курсы отсортированы по популярности", first.get("/").get_data(as_text=True))
+        other_device = app.test_client()
+        self.post_form("/login", {"username": "experiment-user", "password": self.password}, client=other_device)
+        self.assertIn("Курсы отсортированы по популярности", other_device.get("/").get_data(as_text=True))
+        self.post_form(path, {"action": "stop", "experiment_id": 1}, client=admin)
+        self.assertNotIn("Курсы отсортированы по популярности", first.get("/").get_data(as_text=True))
+        self.assertIn("История запусков", admin.get(path).get_data(as_text=True))
+
+        now = int(datetime.now(UTC).timestamp())
+        with patch("app.ui.experiments.time", return_value=now + 7 * DAY):
+            self.assertEqual(second.get("/login").status_code, 200)
+        with patch("app.ui.experiments.time", return_value=now + 8 * DAY), app.app_context():
+            stats = group_metrics(1)
+            self.assertEqual((stats["A"].assigned, stats["A"].participants, stats["A"].impressions, stats["A"].clicks,
+                              stats["A"].previews, stats["A"].d7_ready, stats["A"].d7_returned), (1, 1, 1, 1, 1, 1, 0))
+            self.assertEqual((stats["B"].assigned, stats["B"].d7_ready, stats["B"].d7_returned), (1, 1, 1))
+
+    def test_daily_articles_and_podcasts_precede_search_and_use_cross_format_history(self):
+        directory = self.database_path.parent / "daily-catalog"
+        directory.mkdir()
+        records = []
+        for mid, kind, fmt, topic in (
+            ("fresh", "article", "статья", "финансы"),
+            ("article-marketing", "article", "статья", "маркетинг"),
+            ("article-team", "article", "статья", "команда"),
+            ("article-plan", "article", "статья", "планирование"),
+            ("article-sale", "article", "статья", "продажи"),
+            ("podcast-money", "podcast", "подкаст", "финансы"),
+            ("podcast-marketing", "podcast", "подкаст", "маркетинг"),
+            ("podcast-team", "podcast", "подкаст", "команда"),
+            ("podcast-plan", "podcast", "подкаст", "планирование"),
+            ("podcast-sale", "podcast", "подкаст", "продажи"),
+            ("course-one", "course", "курс", "маркетинг"),
+            ("course-two", "course", "курс", "маркетинг"),
+        ):
+            records.append({"id": mid, "title": f"{fmt} про {topic} {mid}", "url": f"https://example.com/{mid}",
+                            "entity_type": kind, "format": fmt, "topics": [topic], "access": "free"})
+        (directory / "catalog.norm.json").write_text(json.dumps(records), encoding="utf-8")
+        (directory / "publication-dates.json").write_text(
+            json.dumps({"fresh": "2026-01-08", "article-marketing": "2025-01-08", "podcast-money": "2026-01-06"}),
+            encoding="utf-8",
+        )
+        with patch.dict("os.environ", {"ALFA_CATALOG_DIR": str(directory)}):
+            client = create_app(database_path=self.database_path).test_client()
+
+        def shelf(page, kind):
+            return [link for entry_kind, link in re.findall(
+                r'data-daily-kind="(article|podcast)">\s*<a [^>]+href="([^"]+)"', page
+            ) if entry_kind == kind]
+
+        home = client.get("/").get_data(as_text=True)
+        self.assertLess(home.index('id="daily-track"'), home.index('id="recommendation-query"'))
+        self.assertEqual(re.findall(r'data-daily-kind="([^"]+)"', home),
+                         ["article"] * 3 + ["podcast"] * 3 + ["article"] * 2 + ["podcast"] * 2)
+        self.assertIn('datetime="2026-01-08"', home)
+        self.assertLess(shelf(home, "article").index("/materials/fresh"),
+                        shelf(home, "article").index("/materials/article-marketing"))
+        for mid in ("course-one", "course-two"):
+            preview = client.get(f"/materials/{mid}", headers={"Accept": "application/json"}).json
+            self.assertEqual(client.post(preview["open_url"], data={"csrf_token": preview["csrf_token"]}).status_code, 303)
+        personalized = client.get("/").get_data(as_text=True)
+        self.assertLess(shelf(personalized, "article").index("/materials/article-marketing"),
+                        shelf(personalized, "article").index("/materials/fresh"))
+        self.assertLess(shelf(personalized, "podcast").index("/materials/podcast-marketing"),
+                        shelf(personalized, "podcast").index("/materials/podcast-money"))
+        fragment = client.post("/", data={"goal": "маркетинг"}, headers={"X-Recommendation-Fragment": "1"}).get_data(as_text=True)
+        self.assertNotIn('id="daily-picks"', fragment)
+
     def test_admin_login_report_and_role_management(self):
         self.assertEqual(self.client.get("/admin").location, "/admin/login")
         self.assertEqual(self.register().status_code, 303)
@@ -166,38 +272,47 @@ class WebFlowTest(unittest.TestCase):
         self.assertIn("app.ai.stub.recomend", page)
         self.assertIn("Эффективность карточек", page)
         self.assertIn("Динамика за 30 дней", page)
-        comparison = self.post_form("/admin/tests", {"evaluation_suite": "demo"}, client=new_admin).get_data(as_text=True)
-        self.assertIn("Проверено сценариев: 50", comparison)
-        self.assertIn("Синтетический каталог · результаты", comparison)
+        report_dir = self.database_path.parent
+        self.app.config.update(EVALUATION_SUMMARY_DIR=report_dir, CATALOG_QUALITY_FINGERPRINT="test-catalog")
+        methods = ("Бейзлайн · популярные курсы", "recommend", "BM25 + recommend")
+        for suite, count, fingerprint, generated_at in (
+            ("demo", 50, None, "2026-11-10T19:30:10+00:00"),
+            ("real", 350, "test-catalog", "2026-11-10T21:57:55+00:00"),
+        ):
+            rows = (EvaluationRow("outside-catalog", "Нет точного совпадения", None, (), "recommend", (), None,
+                                  None, None, None),) if suite == "demo" else ()
+            report = EvaluationReport(tuple(EvaluationSummary(method, count, 1, 0.1, 0.1, 0.1, 0.1)
+                                            for method in methods), rows, count)
+            payload = summary_payload(report, suite, .25, fingerprint, include_cases=True)
+            (report_dir / f"ranking-{suite}.json").write_text(
+                json.dumps({**payload, "generated_at": generated_at}), encoding="utf-8",
+            )
+        comparison = new_admin.get("/admin/tests").get_data(as_text=True)
+        self.assertIn("Сценариев в наборе · 50", comparison)
+        self.assertIn("Синтетический каталог · сохранённый прогон", comparison)
+        self.assertIn("Реальный каталог · сохранённый прогон", comparison)
+        self.assertIn("Сценариев в наборе · 350", comparison)
+        self.assertIn("Последнее тестирование · <strong>11.11.2026 00:57 МСК</strong>", comparison)
+        self.assertIn("Последнее тестирование · <strong>11.11.2026 00:57 МСК</strong>",
+                      new_admin.get("/admin").get_data(as_text=True))
         self.assertIn("Hit@3", comparison)
         self.assertIn("MRR@3", comparison)
         for metric in ("Precision@3", "nDCG@3", "MAP@3", "популярные курсы", "BM25 + recommend"):
             self.assertIn(metric, comparison)
         self.assertIn("План A/B-теста", new_admin.get("/admin/roadmap").get_data(as_text=True))
-        self.assertIn("outside-catalog", comparison)
+        self.assertIn("outside-catalog", new_admin.get("/admin/tests?details=demo").get_data(as_text=True))
+        self.assertNotIn("Запустить синтетические тесты", comparison)
+        self.assertEqual(new_admin.post("/admin/tests", data={"evaluation_suite": "real"}).status_code, 405)
+        self.assertEqual(new_admin.post("/admin", data={"evaluation_suite": "real"}).status_code, 405)
         self.assertIn("CTR по дате показа", page)
-
-        unavailable = self.post_form("/admin/tests", {"evaluation_suite": "real"}, client=new_admin).get_data(as_text=True)
-        self.assertIn("подключите экспорт каталога", unavailable)
-        self.assertNotIn("Проверено сценариев", unavailable)
 
         real_cases = json.loads((EVALUATION_DIR / "profiles.real.json").read_text(encoding="utf-8"))
         self.assertEqual(len(real_cases), 350)
         self.assertEqual(len({case["id"] for case in real_cases}), 350)
         self.assertTrue(all(case["relevant_ids"] for case in real_cases))
-        referenced_ids = {mid for case in real_cases for mid in case["relevant_ids"]}
-        referenced_ids.update(event["material_id"] for case in real_cases for event in case.get("history", ()))
         material = Material("test-card", "Курс из реального каталога", "https://example.com/real", format="курс")
-        self.app.config["EVALUATION_REAL_CATALOG"] = (material,) + tuple(
-            Material(mid, f"Материал {mid}", f"https://example.com/{mid}") for mid in sorted(referenced_ids)
-        )
         self.app.config["CATALOG_FORMATS"] = {material.id: material.format}
         self.app.config["CATALOG_TITLES"] = {material.id: material.title}
-        real_report = self.post_form("/admin/tests", {"evaluation_suite": "real"}, client=new_admin).get_data(as_text=True)
-        self.assertIn("Реальный каталог · результаты", real_report)
-        self.assertIn("350 размеченных сценариев", real_report)
-        self.assertIn("Проверено сценариев: 350", real_report)
-        self.assertNotIn("outside-catalog", real_report)
         self.assertIn(material.title, new_admin.get("/admin/analytics?category=курс").get_data(as_text=True))
         self.assertNotIn(material.title, new_admin.get("/admin/analytics?category=статья").get_data(as_text=True))
 
@@ -411,7 +526,7 @@ class WebFlowTest(unittest.TestCase):
         endpoint = "/recommendations/impressions"
 
         def cards(html):
-            return re.findall(r'class="material-link" href="([^"]+)"', html)
+            return re.findall(r'class="material-link" href="([^"]+\?impression=[^"]+)"', html)
 
         def token(url):
             return parse_qs(urlsplit(url).query)["impression"][0]

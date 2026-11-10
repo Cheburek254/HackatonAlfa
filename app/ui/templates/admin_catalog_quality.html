@@ -33,7 +33,7 @@
     {% set catalog = catalog_quality.catalog %}
     {% set history = catalog_quality.history %}
     {% set expert = catalog_quality.expert %}
-    <p class="account-muted">Агрегированный отчёт по текущему каталогу. Дата расчёта {{ catalog_quality.generated_at[:10] }} (UTC).</p>
+    <p class="account-muted">Агрегированный отчёт по текущему каталогу. Время прогона · {{ catalog_quality.generated_at | report_msk or '—' }}.</p>
     <h3>Покрытие и разнообразие</h3>
     <p class="account-muted">Топ-3 на {{ catalog.scenario_count }} размеченных сценариях, {{ catalog.slots }} выданных позиций.</p>
     <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Покрытие и разнообразие">

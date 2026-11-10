@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 {% block content %}
+        {% if daily.article or daily.podcast %}
+        {% include "daily_picks.html" %}
+        {% endif %}
         <section class="hero" aria-labelledby="hero-title">
             <div class="wrap hero-layout">
                 <div class="hero-content">

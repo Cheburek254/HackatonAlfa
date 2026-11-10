@@ -1,6 +1,6 @@
 """Закрытая сводка по рекомендациям и управление доступом к ней."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 
 import click
 from flask import Blueprint, abort, current_app, flash, g, redirect, render_template, request, session, url_for
@@ -14,13 +14,15 @@ from app.ui.accounts import (
     set_course_plus, set_recommendation_mode,
 )
 from app.ui.admin_summary import build_assessments
+from app.ui.experiments import end_experiment, experiments, group_metrics, running_experiment, start_experiment
 from evaluation.catalog_quality import read_report as read_catalog_quality
 from evaluation.learning_report import read_report as read_learning_report
-from evaluation.runner import EvaluationDataError, SUITE_LABELS, evaluation_scenario_counts, read_summary, run_evaluation
-from evaluation.stress_report import check_subscriptions, read_report as read_stress_report
+from evaluation.runner import SUITE_LABELS, read_summary
+from evaluation.stress_report import read_report as read_stress_report
 
 admin = Blueprint("admin", __name__, url_prefix="/admin")
 PASSWORD_HINT = f"Пароль должен содержать от {PASSWORD_MIN_LENGTH} до {PASSWORD_MAX_LENGTH} символов."
+MSK = timezone(timedelta(hours=3))
 
 
 @admin.before_request
@@ -59,23 +61,49 @@ def _ranking_summary(suite):
     return read_summary(directory / f"ranking-{suite}.json", suite, current_app.config["BM25_WEIGHT"], fingerprint)
 
 
-@admin.route("", methods=["GET", "POST"])
+def _report_datetime(value):
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+def _latest_report_time(reports):
+    return max((value for report in reports if report and (value := _report_datetime(report.get("generated_at")))),
+               default=None)
+
+
+def _msk(value: datetime) -> str:
+    return value.astimezone(MSK).strftime("%d.%m.%Y %H:%M МСК")
+
+
+@admin.app_template_filter("report_msk")
+def report_msk(value):
+    instant = _report_datetime(value)
+    return _msk(instant) if instant else None
+
+
+@admin.get("")
 def dashboard():
-    if request.method == "POST":
-        return redirect(url_for("admin.tests", _anchor="admin-evaluation"), code=307)
     if "category" in request.args:
         return redirect(url_for("admin.analytics", category=request.args["category"], _anchor="admin-cards"), code=303)
     totals, _ = read_report(current_app.config["ACCOUNT_DATABASE"])
     overview = Metrics(sum(row.impressions for row in totals.values()), sum(row.clicks for row in totals.values()))
     reports = _test_reports()
+    real_summary = _ranking_summary("real")
+    latest = _latest_report_time((*reports.values(), real_summary, _ranking_summary("demo")))
     return render_template(
         "admin.html", heading="Сводка рекомендаций", intro="Основные показатели и оценка последних офлайн-прогонов.",
         overview=overview,
+        experiment_running=running_experiment() is not None,
         ranking_mode=recommendation_mode(), ranking_modes=RANKING_MODES,
         assessments=build_assessments(
-            reports["catalog_quality"], reports["stress_report"], reports["learning_report"], _ranking_summary("real"),
+            reports["catalog_quality"], reports["stress_report"], reports["learning_report"], real_summary,
         ),
-        report_date=max((report["generated_at"][:10] for report in reports.values() if report), default=None),
+        report_date=_msk(latest) if latest else None,
     )
 
 
@@ -86,39 +114,66 @@ def change_recommendation_mode():
     if mode not in RANKING_MODES:
         abort(400)
     set_recommendation_mode(mode)
-    flash(f"Режим «{RANKING_MODES[mode]}» включён для всех пользователей.", "ranking_success")
+    flash(f"Общий режим «{RANKING_MODES[mode]}» сохранён. Участники действующего A/B-теста остаются в своих группах.",
+          "ranking_success")
     return redirect(url_for("admin.dashboard", _anchor="admin-ranking-mode"), code=303)
 
 
-@admin.route("/tests", methods=["GET", "POST"])
-def tests():
-    comparison = evaluation_suite = evaluation_error = None
-    real_catalog = current_app.config["EVALUATION_REAL_CATALOG"]
+@admin.route("/experiments", methods=["GET", "POST"])
+def experiment_dashboard():
     if request.method == "POST":
         check_csrf()
-        evaluation_suite = request.form.get("evaluation_suite", "demo")
-        if evaluation_suite not in SUITE_LABELS:
-            abort(400)
-        try:
-            comparison = run_evaluation(
-                current_app.config["EVALUATION_RECOMMENDERS"][evaluation_suite],
-                current_app.config["EVALUATION_HYBRIDS"][evaluation_suite],
-                suite=evaluation_suite, real_catalog=real_catalog,
-            )
-        except EvaluationDataError as error:
-            evaluation_error = str(error)
-    weight = current_app.config["BM25_WEIGHT"]
-    summaries = {suite: snapshot for suite in SUITE_LABELS
-                 if suite != evaluation_suite and (snapshot := _ranking_summary(suite))}
+        action = request.form.get("action")
+        if action == "start":
+            mode_a, mode_b = request.form.get("mode_a"), request.form.get("mode_b")
+            share_a = request.form.get("share_a", type=int)
+            traffic = request.form.get("traffic", type=int)
+            if (mode_a not in RANKING_MODES or mode_b not in RANKING_MODES or mode_a == mode_b
+                    or share_a not in range(1, 100) or traffic not in range(1, 101)):
+                flash("Выберите два разных алгоритма и проверьте проценты трафика.", "experiment_error")
+            elif start_experiment(mode_a, mode_b, share_a, traffic, current_app.config["BM25_WEIGHT"]):
+                flash("A/B-тест запущен. Новые запросы распределяются по группам.", "experiment_success")
+            else:
+                flash("Завершите текущий запуск перед созданием нового.", "experiment_error")
+            return redirect(url_for("admin.experiment_dashboard"), code=303)
+        if action == "stop":
+            experiment_id = request.form.get("experiment_id", type=int)
+            if experiment_id is None or not 0 < experiment_id < 2**63:
+                abort(400)
+            if end_experiment(experiment_id):
+                flash("Эксперимент завершён. Выдача использует общий алгоритм, отчёт сохранён.", "experiment_success")
+            else:
+                flash("Этот эксперимент уже завершён или отсутствует.", "experiment_error")
+            return redirect(url_for("admin.experiment_dashboard"), code=303)
+        abort(400)
+    runs = experiments()
+    active = next((run for run in runs if run["ended_at"] is None), None)
+    selected_id = request.args.get("id", type=int)
+    selected = next((run for run in runs if run["id"] == selected_id), None) if selected_id else active or (runs[0] if runs else None)
+    if selected_id and selected is None:
+        abort(404)
+    return render_template(
+        "admin_experiments.html", heading="A/B-тестирование",
+        intro="Распределение живого трафика между алгоритмами и сравнение результатов.",
+        active=active, selected=selected, last_run=runs[0] if runs else None, runs=runs, modes=RANKING_MODES,
+        metrics=group_metrics(selected["id"]) if selected else None,
+        format_time=lambda value: _msk(datetime.fromtimestamp(value, UTC)),
+    )
+
+
+@admin.get("/tests")
+def tests():
+    summaries = {suite: snapshot for suite in SUITE_LABELS if (snapshot := _ranking_summary(suite))}
+    reports = _test_reports()
+    latest = _latest_report_time((*reports.values(), *summaries.values()))
+    detailed_suite = request.args.get("details")
     return render_template(
         "admin_tests.html", heading="Тесты рекомендаций",
-        intro="Прогоны, метрики по наборам, примеры сценариев и проверка прав доступа.",
-        comparison=comparison, titles=current_app.config["CATALOG_TITLES"],
-        evaluation_suites=SUITE_LABELS, evaluation_suite=evaluation_suite, evaluation_error=evaluation_error,
-        evaluation_counts=evaluation_scenario_counts(),
-        bm25_weight=weight, comparison_summaries=summaries,
-        subscription_check=check_subscriptions(real_catalog, weight) if real_catalog else None,
-        real_catalog_available=bool(real_catalog), **_test_reports(),
+        intro="Сохранённые результаты последних серверных прогонов.",
+        report_date=_msk(latest) if latest else None, titles=current_app.config["CATALOG_TITLES"],
+        evaluation_suites=SUITE_LABELS, detailed_suite=detailed_suite,
+        bm25_weight=current_app.config["BM25_WEIGHT"], comparison_summaries=summaries,
+        subscription_check=(reports["catalog_quality"] or {}).get("subscription_examples"), **reports,
     )
 
 
@@ -141,7 +196,7 @@ def analytics():
         legacy_totals=legacy_totals,
         top_cards=read_top_cards(database, material_ids), titles=current_app.config["CATALOG_TITLES"],
         top_formats=formats, top_category=category,
-        real_catalog_available=bool(current_app.config["EVALUATION_REAL_CATALOG"]),
+        real_catalog_available=current_app.config["EVALUATION_SUMMARY_DIR"] is not None,
         impressions_by_day=[(day, metrics.impressions) for day, metrics in activity],
         clicks_by_day=[(day, metrics.clicks) for day, metrics in activity],
         ctr_by_day=[(day, metrics.ctr) for day, metrics in activity],

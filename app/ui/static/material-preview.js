@@ -1,5 +1,28 @@
 const materialPreview = document.querySelector("#material-preview");
 const seenCards = new WeakSet();
+const dailyTrack = document.querySelector("#daily-track");
+
+if (dailyTrack) {
+    const arrows = [...document.querySelectorAll("[data-daily-scroll]")];
+    const updateArrows = () => {
+        const end = dailyTrack.scrollWidth - dailyTrack.clientWidth;
+        for (const arrow of arrows) {
+            arrow.hidden = end < 2;
+            const atEdge = arrow.dataset.dailyScroll === "-1" ? dailyTrack.scrollLeft < 2 : dailyTrack.scrollLeft >= end - 2;
+            arrow.setAttribute("aria-disabled", String(atEdge));
+        }
+    };
+    for (const arrow of arrows) {
+        arrow.addEventListener("click", () => {
+            if (arrow.getAttribute("aria-disabled") !== "true") {
+                dailyTrack.scrollBy({ left: Number(arrow.dataset.dailyScroll) * dailyTrack.clientWidth * 0.82 });
+            }
+        });
+    }
+    dailyTrack.addEventListener("scroll", updateArrows, { passive: true });
+    window.addEventListener("resize", updateArrows);
+    updateArrows();
+}
 
 const impressionObserver = "IntersectionObserver" in window ? new IntersectionObserver((entries, observer) => {
     const grid = document.querySelector("#recommendations .card-grid");
@@ -208,7 +231,7 @@ if (typeof materialPreview?.showModal === "function") {
         if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
             return;
         }
-        const link = event.target.closest("#recommendations .card")?.querySelector(".material-link");
+        const link = event.target.closest("#recommendations .card, #daily-picks .card")?.querySelector(".material-link");
         if (!link || (!event.target.closest(".material-link") && window.getSelection()?.toString())) {
             return;
         }

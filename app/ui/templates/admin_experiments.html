@@ -1,0 +1,84 @@
+{% extends "admin_shell.html" %}
+{% macro ratio(numerator, denominator) %}
+    {% if denominator %}{{ '%.1f' | format(100 * numerator / denominator) | replace('.', ',') }}% ({{ numerator }}/{{ denominator }}){% else %}—{% endif %}
+{% endmacro %}
+{% block admin_content %}
+<section class="account-card" aria-labelledby="ab-settings-title">
+    <h2 class="account-section-title" id="ab-settings-title">Настройка эксперимента</h2>
+    {% for category, message in get_flashed_messages(with_categories=true, category_filter=['experiment_success', 'experiment_error']) %}
+    <p class="{{ 'account-error' if category == 'experiment_error' else 'account-notice' }}" role="status">{{ message }}</p>
+    {% endfor %}
+    {% if active %}
+    <p>Идёт эксперимент <strong>№{{ active.id }}</strong>. Чтобы поменять алгоритмы или доли трафика, завершите его и начните новый. Назначения и отчёт текущего запуска сохранятся.</p>
+    <form class="admin-inline-form" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="experiment_id" value="{{ active.id }}">
+        <button class="button button-profile" name="action" value="stop" type="submit">Завершить эксперимент №{{ active.id }}</button>
+    </form>
+    {% else %}
+    <p>Задайте контрольный и тестовый алгоритмы. Вне выбранной доли трафика действует <a href="{{ url_for('admin.dashboard', _anchor='admin-ranking-mode') }}">общий режим</a>.</p>
+    <form class="admin-form" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="admin-forms">
+            {% for arm, label, default in [('a', 'Группа A · контроль', 'popular'), ('b', 'Группа B · тест', 'recommend')] %}
+            <label>{{ label }}
+                <select name="mode_{{ arm }}" required>
+                    {% for mode, title in modes.items() %}
+                    <option value="{{ mode }}"{% if mode == (last_run['mode_' ~ arm] if last_run else default) %} selected{% endif %}>{{ title }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            {% endfor %}
+            <label>Доля группы A среди участников, %
+                <input name="share_a" type="number" min="1" max="99" step="1" value="{{ last_run.share_a if last_run else 50 }}" required>
+                <small>Оставшиеся проценты получит группа B.</small>
+            </label>
+            <label>Общий трафик в эксперименте, %
+                <input name="traffic" type="number" min="1" max="100" step="1" value="{{ last_run.traffic if last_run else 100 }}" required>
+                <small>Например, 20% трафика при долях 50/50 дадут около 10% на каждую группу.</small>
+            </label>
+        </div>
+        <button class="button button-primary" name="action" value="start" type="submit">Запустить A/B-тест</button>
+    </form>
+    {% endif %}
+</section>
+
+<section class="account-card" aria-labelledby="ab-results-title">
+    <h2 class="account-section-title" id="ab-results-title">Результаты по группам</h2>
+    {% if selected %}
+    <p><strong>№{{ selected.id }} · {{ 'идёт' if selected.ended_at is none else 'завершён' }}</strong>
+        · запущен {{ format_time(selected.started_at) }}{% if selected.ended_at is not none %} · завершён {{ format_time(selected.ended_at) }}{% endif %}</p>
+    <p class="account-muted">В эксперименте {{ selected.traffic }}% трафика. Плановое распределение A/B — {{ selected.share_a }}/{{ 100 - selected.share_a }}{% if 'hybrid' in (selected.mode_a, selected.mode_b) %}. Вес BM25 — {{ '%g' | format(100 * selected.bm25_weight) }}%{% endif %}.</p>
+    <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Сравнение групп A и B">
+        <table class="admin-table">
+            <thead><tr><th scope="col">Группа</th><th scope="col">Алгоритм</th><th scope="col">Назначено</th><th scope="col">Участники с показами</th><th scope="col">Показы</th><th scope="col">Переходы</th><th scope="col">CTR</th><th scope="col">Открытие описания</th><th scope="col">Удержание D7</th></tr></thead>
+            <tbody>
+                {% for arm, mode in [('A', selected.mode_a), ('B', selected.mode_b)] %}
+                {% set row = metrics[arm] %}
+                <tr><th scope="row">{{ arm }}</th><td>{{ modes[mode] }}</td><td>{{ row.assigned }}</td><td>{{ row.participants }}</td><td>{{ row.impressions }}</td><td>{{ row.clicks }}</td>
+                    <td>{{ ratio(row.clicks, row.impressions) }}</td><td>{{ ratio(row.previews, row.impressions) }}</td><td>{{ ratio(row.d7_returned, row.d7_ready) }}</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% if metrics.A.impressions and metrics.B.impressions %}
+    <p class="account-muted">Разница CTR группы B относительно A · {{ '%+.1f' | format(100 * (metrics.B.clicks / metrics.B.impressions - metrics.A.clicks / metrics.A.impressions)) | replace('.', ',') }} п. п.</p>
+    {% endif %}
+    {% else %}
+    <p class="account-muted">После запуска здесь появятся показатели двух групп.</p>
+    {% endif %}
+    <p class="account-muted">Учитываются подтверждённые показы карточек каталога. D7 — возврат на 7-й календарный день после первого показа, по UTC. В знаменатель входят участники, у которых этот день завершился. Тестовый и административные аккаунты исключены.</p>
+    <p class="account-muted">Глубина чтения, заявки и покупки станут доступны после подключения событий Альфа-Курса. Открытие описания измеряется отдельно.</p>
+</section>
+
+{% if runs %}
+<section class="account-card" aria-labelledby="ab-history-title">
+    <h2 class="account-section-title" id="ab-history-title">История запусков</h2>
+    <ul class="admin-users">
+        {% for run in runs %}
+        <li><a href="{{ url_for('admin.experiment_dashboard', id=run.id) }}"{% if selected and selected.id == run.id %} aria-current="true"{% endif %}>№{{ run.id }} · {{ format_time(run.started_at) }} · {{ 'идёт' if run.ended_at is none else 'завершён' }}</a></li>
+        {% endfor %}
+    </ul>
+</section>
+{% endif %}
+{% endblock %}

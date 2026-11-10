@@ -16,6 +16,7 @@ from app.recommender import recommend
 from app.recommender.baseline import recommend_popular_courses
 from app.recommender.hybrid import DEFAULT_BM25_WEIGHT, acceptable, cached_bm25, constraints, merge_orders
 from app.ui.accounts import current_account, recent_interactions, recommendation_mode, saved_profile
+from app.ui.experiments import experiment_variant
 
 logger = logging.getLogger(__name__)
 
@@ -521,14 +522,16 @@ def chat():
                 viewed_titles.append(title)
 
     # Подбор наиболее релевантных материалов каталога под вопрос и профиль
-    mode = recommendation_mode()
+    variant = experiment_variant(account)
+    mode = variant.mode if variant else recommendation_mode()
+    weight = variant.bm25_weight if variant else current_app.config["BM25_WEIGHT"]
     if mode == "popular":
         by_id = {m.id: m for m in catalog}
         candidates = [by_id[item.material_id] for item in recommend_popular_courses(catalog, 5).items]
     else:
         candidates = _find_relevant_materials(
             message, profile, catalog, viewed_titles, limit=5,
-            bm25_weight=current_app.config["BM25_WEIGHT"] if mode == "hybrid" else 0.0,
+            bm25_weight=weight if mode == "hybrid" else 0.0,
         )
 
     api_key, model = _load_env_credentials()

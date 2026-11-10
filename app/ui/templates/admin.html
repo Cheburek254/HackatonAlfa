@@ -9,7 +9,9 @@
 {% block admin_content %}
 <section class="account-card" id="admin-ranking-mode" aria-labelledby="admin-ranking-title">
     <h2 class="account-section-title" id="admin-ranking-title">Алгоритм рекомендаций</h2>
-    <p class="account-muted">Режим для всех гостей и аккаунтов. Применяется при следующем запросе к каталогу или чату.</p>
+    <p class="account-muted">Общий режим для гостей и аккаунтов. Применяется при следующем запросе к каталогу или чату.</p>
+    {% if experiment_running %}<p class="account-notice">Идёт A/B-тест. Его участникам выдаётся алгоритм их группы.</p>{% endif %}
+    <a href="{{ url_for('admin.experiment_dashboard') }}">Управление A/B-тестом</a>
     {% for message in get_flashed_messages(category_filter=['ranking_success']) %}
     <p class="account-notice admin-message" role="status">{{ message }}</p>
     {% endfor %}
@@ -22,14 +24,14 @@
                 {% endfor %}
             </select>
         </label>
-        <button class="button button-primary" type="submit">Применить для всех</button>
+        <button class="button button-primary" type="submit">Сохранить общий режим</button>
     </form>
 </section>
 
 <section class="account-card" id="admin-summary" aria-labelledby="admin-summary-title">
     <h2 class="account-section-title" id="admin-summary-title">Оценка качества рекомендаций</h2>
     {% if report_date %}
-    <p class="account-muted">Результаты последних сохранённых прогонов. Последнее обновление {{ report_date }} (UTC). Пороговые значения — рабочие ориентиры проекта для этих наборов. Они не означают статистическую значимость.</p>
+    <p class="account-muted">Последнее тестирование · <strong>{{ report_date }}</strong>. Пороговые значения — рабочие ориентиры проекта для этих наборов.</p>
     {% else %}
     <p class="account-muted">Для текущего каталога ещё нет сохранённых прогонов.</p>
     {% endif %}

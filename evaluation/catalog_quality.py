@@ -23,6 +23,7 @@ from app.recommender.hybrid import configured_bm25_weight, constraints
 from app.recommender.onboarding import ONBOARDING_ITEMS
 from evaluation.quality_data import read_quality_data
 from evaluation.runner import TOP_K, _load_cases, run_evaluation
+from evaluation.stress_report import check_subscriptions
 
 REPORT_NAME = "catalog-quality.json"
 REPORT_VERSION = 2
@@ -251,6 +252,7 @@ def build_quality_report(backup: Path, catalog_path: Path, sample_size: int) -> 
             "rated_profiles": len(rated_lists),
         },
         "synthetic_paywall": synthetic_paywall(catalog, current),
+        "subscription_examples": check_subscriptions(catalog, bm25_weight),
         "cold_start": {"profiles": cold, "passed": _ratio(sum(len(row["items"]) == TOP_K and all(
             item["suitable"] for item in row["items"]) for row in cold), len(cold))},
         "expert": {

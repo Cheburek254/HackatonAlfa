@@ -2,7 +2,7 @@
 <section class="account-card" id="admin-learning" aria-labelledby="admin-learning-title">
     <h2 id="admin-learning-title" class="account-section-title">Сложные сценарии рекомендаций</h2>
     {% if learning_report %}
-    <p class="account-muted">250 сценариев в пяти наборах. Дата расчёта {{ learning_report.generated_at[:10] }} (UTC).</p>
+    <p class="account-muted">250 сценариев в пяти наборах. Время прогона · {{ learning_report.generated_at | report_msk or '—' }}.</p>
     {% for suite in learning_report.suites %}
     <details class="admin-evaluation-details" {% if loop.first %}open{% endif %}>
         <summary>{{ suite.title }} · {{ suite.overall.count }} сценариев</summary>

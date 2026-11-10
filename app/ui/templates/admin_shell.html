@@ -10,7 +10,7 @@
         <nav class="account-tabs" aria-label="Разделы админ-панели">
             {% for endpoint, label in [
                 ("dashboard", "Сводка"), ("tests", "Тесты"), ("analytics", "Статистика"),
-                ("roadmap", "Развитие системы"), ("settings", "Управление")
+                ("experiment_dashboard", "A/B-тест"), ("roadmap", "Развитие системы"), ("settings", "Управление")
             ] %}
             <a href="{{ url_for('admin.' ~ endpoint) }}"{% if request.endpoint == 'admin.' ~ endpoint %} aria-current="page"{% endif %}>{{ label }}</a>
             {% endfor %}

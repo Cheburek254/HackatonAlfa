@@ -2,6 +2,7 @@
 
 import json
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from functools import lru_cache
 from hashlib import sha256
 from math import log2
@@ -25,10 +26,6 @@ class EvaluationDataError(ValueError):
 @lru_cache(maxsize=len(SUITE_LABELS))
 def _load_cases(suite: str) -> list[dict]:
     return json.loads((EVALUATION_DIR / f"profiles.{suite}.json").read_text(encoding="utf-8"))
-
-
-def evaluation_scenario_counts() -> dict[str, int]:
-    return {suite: len(_load_cases(suite)) for suite in SUITE_LABELS}
 
 
 def _summary_identity(suite: str, weight: float, fingerprint: str | None) -> dict:
@@ -81,9 +78,15 @@ class EvaluationReport:
     scenario_count: int
 
 
-def summary_payload(report: EvaluationReport, suite: str, weight: float, fingerprint: str | None) -> dict:
-    return {**_summary_identity(suite, weight, fingerprint), "scenario_count": report.scenario_count,
-            "summaries": [asdict(row) | {"hit_rate": row.hit_rate} for row in report.summaries]}
+def summary_payload(
+    report: EvaluationReport, suite: str, weight: float, fingerprint: str | None, *, include_cases: bool = False,
+) -> dict:
+    snapshot = {**_summary_identity(suite, weight, fingerprint), "scenario_count": report.scenario_count,
+                "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+                "summaries": [asdict(row) | {"hit_rate": row.hit_rate} for row in report.summaries]}
+    if include_cases:
+        snapshot["rows"] = [asdict(row) for row in report.rows]
+    return snapshot
 
 
 def read_summary(path: Path, suite: str, weight: float, fingerprint: str | None) -> dict | None:

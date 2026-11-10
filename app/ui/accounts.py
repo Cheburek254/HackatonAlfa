@@ -90,6 +90,33 @@ CREATE TABLE IF NOT EXISTS recommendation_settings (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     mode TEXT NOT NULL CHECK (mode IN ('popular', 'recommend', 'hybrid'))
 );
+CREATE TABLE IF NOT EXISTS ab_experiments (
+    id INTEGER PRIMARY KEY,
+    mode_a TEXT NOT NULL CHECK (mode_a IN ('popular', 'recommend', 'hybrid')),
+    mode_b TEXT NOT NULL CHECK (mode_b IN ('popular', 'recommend', 'hybrid') AND mode_b <> mode_a),
+    share_a INTEGER NOT NULL CHECK (share_a BETWEEN 1 AND 99),
+    traffic INTEGER NOT NULL CHECK (traffic BETWEEN 1 AND 100),
+    bm25_weight REAL NOT NULL CHECK (bm25_weight BETWEEN 0 AND 1),
+    seed TEXT NOT NULL,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ab_one_running ON ab_experiments ((1)) WHERE ended_at IS NULL;
+CREATE TABLE IF NOT EXISTS ab_enrollments (
+    experiment_id INTEGER NOT NULL REFERENCES ab_experiments (id),
+    subject TEXT NOT NULL,
+    user_id INTEGER REFERENCES users (id) ON DELETE CASCADE,
+    arm TEXT NOT NULL CHECK (arm IN ('A', 'B', 'outside')),
+    PRIMARY KEY (experiment_id, subject),
+    UNIQUE (experiment_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS ab_activity_days (
+    experiment_id INTEGER NOT NULL,
+    subject TEXT NOT NULL,
+    day INTEGER NOT NULL,
+    PRIMARY KEY (experiment_id, subject, day),
+    FOREIGN KEY (experiment_id, subject) REFERENCES ab_enrollments (experiment_id, subject) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS course_plus_accounts (
     user_id INTEGER PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE
 );
@@ -122,6 +149,9 @@ CREATE TABLE IF NOT EXISTS recommendation_impressions (
     user_id INTEGER REFERENCES users (id) ON DELETE CASCADE,
     shown_at INTEGER NOT NULL,
     clicked_at INTEGER,
+    experiment_id INTEGER,
+    experiment_subject TEXT,
+    previewed_at INTEGER,
     PRIMARY KEY (batch_id, material_id, position)
 );
 """
@@ -174,6 +204,17 @@ def configure_accounts(app: Flask, database_path: Path) -> None:
                 connection.execute("ALTER TABLE account_details ADD COLUMN email TEXT NOT NULL DEFAULT ''")
             if "phone" not in detail_columns:
                 connection.execute("ALTER TABLE account_details ADD COLUMN phone TEXT NOT NULL DEFAULT ''")
+            impression_columns = {row["name"] for row in connection.execute("PRAGMA table_info(recommendation_impressions)")}
+            for name, statement in (
+                ("experiment_id", "ALTER TABLE recommendation_impressions ADD COLUMN experiment_id INTEGER"),
+                ("experiment_subject", "ALTER TABLE recommendation_impressions ADD COLUMN experiment_subject TEXT"),
+                ("previewed_at", "ALTER TABLE recommendation_impressions ADD COLUMN previewed_at INTEGER"),
+            ):
+                if name not in impression_columns:
+                    connection.execute(statement)
+            connection.execute("""CREATE INDEX IF NOT EXISTS ab_impressions_by_subject
+                                  ON recommendation_impressions (experiment_id, experiment_subject)
+                                  WHERE experiment_id IS NOT NULL""")
             connection.execute(
                 INSERT_USER,
                 {
@@ -343,9 +384,10 @@ def record_interaction(
 
 def save_recommendation_impressions(
     account: sqlite3.Row | None,
-    placements: Sequence[tuple[str, str, int, str, str]],
+    placements: Sequence[tuple[str, str, int, str, str, int | None, str | None]],
     *,
     clicked: bool,
+    previewed: bool = False,
 ) -> None:
     audience = "guest"
     user_id = None
@@ -358,11 +400,14 @@ def save_recommendation_impressions(
     with connection:
         connection.executemany(
             """INSERT INTO recommendation_impressions (
-                   batch_id, material_id, position, algorithm, result_order, audience, user_id, shown_at, clicked_at
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   batch_id, material_id, position, algorithm, result_order, experiment_id, experiment_subject,
+                   audience, user_id, shown_at, clicked_at, previewed_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(batch_id, material_id, position) DO UPDATE SET
-                   clicked_at = COALESCE(recommendation_impressions.clicked_at, excluded.clicked_at)""",
-            [(*placement, audience, user_id, now, now if clicked else None) for placement in placements],
+                   clicked_at = COALESCE(recommendation_impressions.clicked_at, excluded.clicked_at),
+                   previewed_at = COALESCE(recommendation_impressions.previewed_at, excluded.previewed_at)""",
+            [(*placement, audience, user_id, now, now if clicked else None, now if previewed else None)
+             for placement in placements],
         )
 
 
@@ -477,7 +522,7 @@ def _auth_form(mode: str, error: str = "", username: str = "", status: int = 200
     ), status
 
 
-def _start_session(user_id: int, *, admin_login: bool = False):
+def _start_session(user_id: int, *, admin_login: bool = False, attach_experiment: bool = False):
     token = secrets.token_urlsafe(32)
     now = int(time())
     expires = now + int(SESSION_LIFETIME.total_seconds())
@@ -491,6 +536,10 @@ def _start_session(user_id: int, *, admin_login: bool = False):
             "INSERT INTO account_sessions (token_hash, user_id, expires) VALUES (?, ?, ?)",
             (sha256(token.encode()).hexdigest(), user_id, expires),
         )
+    if attach_experiment:
+        from app.ui.experiments import attach_guest
+
+        attach_guest(user_id)
     session.clear()
     session.permanent = True
     session["account_token"] = token
@@ -540,7 +589,7 @@ def credentials():
             ).fetchone()
         if account is None:
             return _auth_form(mode, "Выберите другой логин.", username, 409)
-        return _start_session(account["id"])
+        return _start_session(account["id"], attach_experiment=True)
 
     account = _db().execute(
         """SELECT id, password_hash, EXISTS (SELECT 1 FROM admin_accounts WHERE user_id = users.id) AS is_admin
@@ -550,7 +599,7 @@ def credentials():
     password_hash = account["password_hash"] if account is not None else DUMMY_HASH
     if 0 < len(password) <= PASSWORD_MAX_LENGTH and check_password_hash(password_hash, password) and account is not None:
         if not admin_login or account["is_admin"]:
-            return _start_session(account["id"], admin_login=admin_login)
+            return _start_session(account["id"], admin_login=admin_login, attach_experiment=not account["is_admin"])
     error = "Проверьте данные админ-аккаунта." if admin_login else "Проверьте логин и пароль."
     return _auth_form(mode, error, username[:32], 401)
 

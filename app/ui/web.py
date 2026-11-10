@@ -6,7 +6,6 @@ import re
 from collections import Counter
 from collections.abc import Callable
 from datetime import UTC, datetime
-from functools import partial
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -15,6 +14,7 @@ from flask import Flask, Response, abort, redirect, render_template, request, ur
 from app.catalog import DEMO_CATALOG_PATH, catalog_source, load_catalog, load_history
 from app.catalog import material_format as _format_key
 from app.catalog.lessons import read_programs
+from app.catalog.publications import load_publications
 from app.catalog.subscriptions import ACCESS_LABELS, access_category, available_access
 from app.contracts import Material, Profile, RecommendationResult, Recommender
 from app.ctr_report import ORDER_LABELS
@@ -29,9 +29,11 @@ from app.ui.admin import admin
 from app.ui.chat import chat_bp
 from app.ui.avatars import AVATAR_MAX_BYTES, AVATAR_MAX_MB, prepare_avatar
 from app.ui.descriptions import format_description_html
+from app.ui.experiments import experiment_variant, track_experiment_activity
 from app.ui.impressions import issue_impression_tickets, record_impressions
 from app.recommender import recommend
 from app.recommender.baseline import recommend_popular_courses
+from app.recommender.daily import daily_picks
 from app.recommender.hybrid import configured_bm25_weight
 from evaluation.catalog_quality import REPORT_NAME, catalog_fingerprint
 from evaluation.learning_report import REPORT_NAME as LEARNING_REPORT_NAME
@@ -207,11 +209,11 @@ def create_app(
     if not is_demo_catalog and not catalog:
         raise ValueError(f"Каталог пуст: {source}")
     materials_by_id = {material.id: material for material in catalog}
+    publication_dates = load_publications(source.parent)
     app.config["CHAT_CATALOG"] = catalog
     programs = read_programs(source, {material.id for material in catalog if material.entity_type == "course"})
     covers = {} if is_demo_catalog else json.loads(COVER_METADATA.read_text(encoding="utf-8"))
     app.config["CATALOG_TITLES"] = {material.id: material.title for material in catalog}
-    app.config["EVALUATION_REAL_CATALOG"] = None if is_demo_catalog else catalog
     app.config["EVALUATION_SUMMARY_DIR"] = None if is_demo_catalog else source.parent
     app.config["CATALOG_QUALITY_PATH"] = None if is_demo_catalog else source.parent / REPORT_NAME
     app.config["STRESS_REPORT_PATH"] = None if is_demo_catalog else source.parent / STRESS_REPORT_NAME
@@ -219,19 +221,11 @@ def create_app(
     app.config["CATALOG_QUALITY_FINGERPRINT"] = None if is_demo_catalog else catalog_fingerprint(catalog)
     app.config["CATALOG_FORMATS"] = {} if is_demo_catalog else {material.id: _format_key(material) for material in catalog}
     app.config["CATALOG_FORMAT_LABELS"] = FORMAT_LABELS
-    app.config["EVALUATION_RECOMMENDERS"] = {
-        suite: partial(recommend, explain_with_llm=False, links_directory=directory, balance_access=True)
-        if recommender is recommend else recommender
-        for suite, directory in (("demo", FIXTURES), ("real", source.parent))
-    }
-    app.config["EVALUATION_HYBRIDS"] = {
-        suite: partial(rank, bm25_weight=bm25_weight) if recommender is recommend else rank
-        for suite, rank in app.config["EVALUATION_RECOMMENDERS"].items()
-    }
     sample_history = load_history(FIXTURES / "history.demo.json") if is_demo_catalog else ()
     configure_accounts(app, database_path or account_database_path())
     app.register_blueprint(admin)
     app.register_blueprint(chat_bp)
+    app.after_request(track_experiment_activity)
     recommender_type = type(recommender)
     algorithm = algorithm_name or (
         f"{getattr(recommender, '__module__', recommender_type.__module__)}."
@@ -352,11 +346,13 @@ def create_app(
         if material is None:
             abort(404)
         account = current_account()
+        impression = request.args.get("impression")
         if request.method == "GET" and not any(
             "prefetch" in request.headers.get(header, "").lower() for header in ("Sec-Purpose", "Purpose")
         ):
             record_interaction(account, material_id, "view")
-        impression = request.args.get("impression")
+            if impression:
+                record_impressions((impression,), account, previewed_material=material_id)
         open_url = url_for("open_material", material_id=material_id, impression=impression)
         description_html = format_description_html(material.description)
         lessons = programs.get(material_id, ())
@@ -423,6 +419,7 @@ def create_app(
         goal = quick_goal if quick_goal in QUICK_GOALS else form.get("goal", "")
         skip_profile = form.get("action") == "skip_profile"
         account = current_account()
+        now = datetime.now(UTC)
         stored_profile = saved_profile(account)
         values = profile_values({} if skip_profile else {**stored_profile, **form})
         profile = Profile(goal=goal.strip()[:GOAL_MAX_LENGTH] or None, **values)
@@ -449,19 +446,20 @@ def create_app(
         format_filter = form.get("selected_format") or form.get("format_filter", request.args.get("format", "all"))
         if format_filter not in FORMAT_LABELS:
             format_filter = "all"
-        mode = recommendation_mode() if recommender is recommend else "recommend"
+        variant = experiment_variant(account) if recommender is recommend else None
+        mode = variant.mode if variant else recommendation_mode() if recommender is recommend else "recommend"
         effective_algorithm = algorithm
         if mode == "popular":
             effective_algorithm = "app.recommender.baseline.recommend_popular_courses"
             result = recommend_popular_courses(candidates, len(candidates))
         elif recommender is recommend and candidates:
-            active_weight = bm25_weight if mode == "hybrid" else 0.0
+            active_weight = (variant.bm25_weight if variant else bm25_weight) if mode == "hybrid" else 0.0
             if mode == "hybrid":
                 effective_algorithm += f":bm25-{active_weight:.12g}"
             result = recommend(
                 candidates, profile, history, len(candidates),
                 links_directory=source.parent,
-                history_as_of=None if is_demo_catalog else datetime.now(UTC),
+                history_as_of=None if is_demo_catalog else now,
                 balance_access=(access_filters == all_access_filters and format_filter == "all" and result_order == "recommended"),
                 bm25_weight=active_weight,
             )
@@ -497,14 +495,19 @@ def create_app(
             effective_algorithm, result_order,
             f"{format_filter}:{page_size}:{','.join(access_filters)}",
             form.get("impression_batch") if page > 1 else None,
+            variant=variant,
         )
+        is_fragment = request.headers.get("X-Recommendation-Fragment") == "1"
+        daily = daily_picks(materials_by_id, profile, history, publication_dates, available,
+                            now=now, links_directory=source.parent) if request.method == "GET" and format_filter == "all" and not is_fragment else {}
         return render_template(
-            "recommendations_results.html" if request.headers.get("X-Recommendation-Fragment") == "1" else "recommendations.html",
+            "recommendations_results.html" if is_fragment else "recommendations.html",
             profile=profile,
             profile_values=values,
             profile_fields=PROFILE_FIELDS,
             show_profile_details=use_sample_history or (not skip_profile and values != stored_profile),
             quick_goals=QUICK_GOALS,
+            daily=daily,
             goal_max_length=GOAL_MAX_LENGTH,
             allow_sample_history=allow_sample_history,
             use_sample_history=use_sample_history,

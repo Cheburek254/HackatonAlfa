@@ -18,6 +18,7 @@ def main() -> None:
     parser.add_argument("--catalog", type=Path, help="Путь к экспорту SQLite/JSON для реального набора")
     parser.add_argument("--bm25-weight", type=float, help="Вес BM25 в смешанном режиме от 0 до 1")
     parser.add_argument("--summary-json", type=Path, help="Сохранить итоги трёх режимов в JSON")
+    parser.add_argument("--include-cases", action="store_true", help="Добавить в JSON результаты размеченных сценариев")
     args = parser.parse_args()
     if args.catalog and args.suite != "real":
         parser.error("--catalog используется только вместе с --suite real")
@@ -34,7 +35,8 @@ def main() -> None:
         offline = partial(recommend, explain_with_llm=False, links_directory=links_directory, balance_access=True)
         report = run_evaluation(offline, partial(offline, bm25_weight=weight), suite=args.suite, real_catalog=catalog)
         if args.summary_json:
-            summary = summary_payload(report, args.suite, weight, catalog_fingerprint(catalog) if catalog else None)
+            summary = summary_payload(report, args.suite, weight, catalog_fingerprint(catalog) if catalog else None,
+                                      include_cases=args.include_cases)
             args.summary_json.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     except (ValueError, FileNotFoundError) as error:
         parser.exit(1, f"{error}\n")
