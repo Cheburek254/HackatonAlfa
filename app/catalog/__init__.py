@@ -50,14 +50,15 @@ def _read_records(path: Path) -> list[dict]:
         connection.row_factory = sqlite3.Row
         columns = {row["name"] for row in connection.execute("PRAGMA table_info(materials)")}
         entity_type = "entity_type" if "entity_type" in columns else "NULL AS entity_type"
+        authors = "authors_json" if "authors_json" in columns else "'[]' AS authors_json"
         rows = connection.execute(
-            f"""SELECT id, title, url, description, format, access, cost, popularity_score, avg_rating, {entity_type},
+            f"""SELECT id, title, url, description, format, access, cost, popularity_score, avg_rating, {entity_type}, {authors},
                       topics_json, stages_json, industries_json, experience_levels_json
                FROM materials ORDER BY popularity_score DESC, rowid"""
         ).fetchall()
     records = [dict(row) for row in rows]
     for record in records:
-        for field in ("topics", "stages", "industries", "experience_levels"):
+        for field in ("topics", "stages", "industries", "experience_levels", "authors"):
             record[field] = json.loads(record.pop(f"{field}_json") or "[]")
     return records
 
@@ -84,6 +85,7 @@ def load_catalog(path: Path | str | None = None) -> tuple[Material, ...]:
         seen_ids.add(mid)
         access_raw = record.get("access", "unknown")
         access = access_raw if access_raw in ("free", "paid", "unknown") else "unknown"
+        authors = dict.fromkeys(name.strip() for name in (record.get("authors") or ()) if isinstance(name, str) and name.strip())
         materials.append(
             Material(
                 id=mid,
@@ -103,6 +105,7 @@ def load_catalog(path: Path | str | None = None) -> tuple[Material, ...]:
                 cost=_optional_metric(record.get("cost")),
                 entity_type=record.get("entity_type"),
                 subscriptions=memberships.get(mid, ()),
+                authors=tuple(authors),
             )
         )
     return tuple(materials)

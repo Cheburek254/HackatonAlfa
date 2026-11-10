@@ -23,6 +23,7 @@ class Material:
     cost: float | None = None
     entity_type: str | None = None
     subscriptions: tuple[str, ...] = ()
+    authors: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

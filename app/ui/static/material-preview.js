@@ -156,12 +156,41 @@ document.addEventListener("submit", async (event) => {
 
 if (typeof materialPreview?.showModal === "function") {
     const previewTitle = materialPreview.querySelector("#preview-title");
+    const previewAuthors = materialPreview.querySelector("#preview-authors");
     const previewSubscription = materialPreview.querySelector("#preview-subscription");
     const previewDescription = materialPreview.querySelector("#preview-description");
+    const previewProgram = materialPreview.querySelector("#preview-program");
     const materialLink = materialPreview.querySelector(".material-preview-link");
     let currentPreview;
     let openingLink;
     let isLoading = false;
+
+    function renderProgram(lessons) {
+        previewProgram.hidden = lessons.length === 0;
+        previewProgram.open = lessons.length > 0;
+        previewProgram.querySelector("summary").textContent = `Программа курса · ${lessons.length}`;
+        const list = previewProgram.querySelector("ol");
+        list.replaceChildren();
+        let section;
+        for (const lesson of lessons) {
+            const item = document.createElement("li");
+            if (lesson.section && lesson.section !== section) {
+                const label = document.createElement("span");
+                label.className = "lesson-section";
+                label.textContent = lesson.section;
+                item.append(label);
+            }
+            section = lesson.section;
+            item.append(lesson.title);
+            const badges = [lesson.type, lesson.trial ? "Пробный" : ""].filter(Boolean);
+            if (badges.length) {
+                const meta = document.createElement("small");
+                meta.textContent = ` · ${badges.join(" · ")}`;
+                item.append(meta);
+            }
+            list.append(item);
+        }
+    }
 
     document.addEventListener("click", async (event) => {
         if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
@@ -183,10 +212,14 @@ if (typeof materialPreview?.showModal === "function") {
             }
             currentPreview = await response.json();
             previewTitle.textContent = currentPreview.title;
+            const authors = currentPreview.authors ?? [];
+            previewAuthors.hidden = authors.length === 0;
+            previewAuthors.textContent = authors.length ? `Авторы · ${authors.join(", ")}` : "";
             const subscriptions = currentPreview.subscriptions ?? [];
             previewSubscription.hidden = subscriptions.length === 0;
             previewSubscription.textContent = subscriptions.length ? `По подписке ${subscriptions.join(", ")}` : "";
             previewDescription.innerHTML = currentPreview.description_html;
+            renderProgram(currentPreview.lessons ?? []);
             materialLink.href = currentPreview.url;
             openingLink = link;
             materialPreview.showModal();

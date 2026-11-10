@@ -9,7 +9,7 @@
             <tr>
                 <th scope="row">{{ method.label }}</th>
                 {% for value in method["values"] %}
-                <td>{% if value is none %}—{% elif columns[loop.index0] == "MRR@3" %}{{ "%.3f"|format(value) }}{% else %}{{ "%.1f"|format(value * 100) }}%{% endif %}</td>
+                <td>{% if value is none %}—{% elif columns[loop.index0] in ("MRR@3", "Средний максимум косинуса") %}{{ "%.3f"|format(value) }}{% else %}{{ "%.1f"|format(value * 100) }}%{% endif %}</td>
                 {% endfor %}
             </tr>
             {% endfor %}

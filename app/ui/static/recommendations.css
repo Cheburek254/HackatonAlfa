@@ -521,6 +521,30 @@ h2 {
     text-decoration: underline;
     text-underline-offset: 3px;
 }
+.material-authors {
+    margin-block: 6px 12px;
+    font-size: 0.9rem;
+    opacity: 0.8;
+}
+.course-program {
+    margin-block: 20px;
+    max-width: 660px;
+}
+.course-program summary {
+    cursor: pointer;
+    font-weight: 700;
+}
+.course-program ol {
+    padding-inline-start: 24px;
+}
+.course-program li + li {
+    margin-top: 8px;
+}
+.lesson-section {
+    display: block;
+    font-weight: 700;
+    margin-block: 10px 4px;
+}
 .material-preview-actions {
     position: sticky;
     bottom: -10px;

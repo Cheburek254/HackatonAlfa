@@ -1,0 +1,29 @@
+{% from "admin_stress.html" import comparison %}
+<section class="account-card" id="admin-learning" aria-labelledby="admin-learning-title">
+    <h2 id="admin-learning-title" class="account-section-title">Сложные сценарии рекомендаций</h2>
+    {% if learning_report %}
+    <p class="account-muted">250 сценариев в пяти наборах. Дата расчёта {{ learning_report.generated_at[:10] }} (UTC).</p>
+    {% for suite in learning_report.suites %}
+    <details class="admin-evaluation-details" {% if loop.first %}open{% endif %}>
+        <summary>{{ suite.title }} · {{ suite.overall.count }} сценариев</summary>
+        <p>{{ suite.description }}</p>
+        {{ comparison(suite.columns, suite.overall.methods) }}
+        <details class="admin-evaluation-details">
+            <summary>Пример запроса и истории</summary>
+            <blockquote>{{ suite.example.goal }}</blockquote>
+            <p>История от раннего действия к недавнему</p>
+            <ol>{% for title in suite.example.history %}<li>{{ title }}</li>{% endfor %}</ol>
+        </details>
+        <details class="admin-evaluation-details">
+            <summary>Разбивка по группам</summary>
+            {% for group in suite.groups %}
+            <h3>{{ group.label }} · {{ group.count }}</h3>
+            {{ comparison(suite.columns, group.methods) }}
+            {% endfor %}
+        </details>
+    </details>
+    {% endfor %}
+    {% else %}
+    <p class="account-muted">Для текущего каталога нет отчёта по сложным сценариям.</p>
+    {% endif %}
+</section>

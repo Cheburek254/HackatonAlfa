@@ -5,11 +5,28 @@
         <div class="wrap">
             <p class="eyebrow">{{ material.format | upper if material.format else 'МАТЕРИАЛ' }}</p>
             <h1 id="material-title">{{ material.title }}</h1>
+            {% if material.authors %}<p class="material-authors">Авторы · {{ material.authors | join(', ') }}</p>{% endif %}
             {% if material.subscriptions %}<p class="tag paid">По подписке {{ material.subscriptions | join(', ') }}</p>{% endif %}
             {% if description_html %}
             <div class="hero-copy preview-description">{{ description_html | safe }}</div>
             {% elif material.description %}
             <p class="hero-copy">{{ material.description }}</p>
+            {% endif %}
+            {% if lessons %}
+            <details class="course-program" open>
+                <summary>Программа курса · {{ lessons | length }}</summary>
+                <ol>
+                    {% for lesson in lessons %}
+                    <li>
+                        {% if lesson.section and (loop.first or lessons[loop.index0 - 1].section != lesson.section) %}
+                        <span class="lesson-section">{{ lesson.section }}</span>
+                        {% endif %}
+                        {{ lesson.title }}{% if lesson.type %} <small>· {{ lesson.type }}</small>{% endif %}
+                        {% if lesson.trial %}<small> · Пробный</small>{% endif %}
+                    </li>
+                    {% endfor %}
+                </ol>
+            </details>
             {% endif %}
             <div class="auth-options">
                 <form method="post" action="{{ open_url }}">

@@ -87,6 +87,9 @@
                                 {% if loop.first and result_order == 'recommended' %}<span class="first-pick">Начните с этого</span>{% endif %}
                             </div>
                             <h3>{{ material.title }}</h3>
+                            {% if material.authors %}
+                            <p class="material-authors">{{ material.authors | join(', ') }}</p>
+                            {% endif %}
                             {% if material.popularity is not none or material.rating is not none %}
                             <div class="card-metrics">
                                 {% if material.popularity is not none %}

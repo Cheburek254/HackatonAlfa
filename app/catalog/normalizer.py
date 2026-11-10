@@ -8,6 +8,7 @@ import zlib
 from collections import defaultdict
 from pathlib import Path
 
+from app.catalog.lessons import store_lessons
 from app.catalog.subscriptions import subscription_memberships
 
 BASE_URL = "https://kurs.alfabank.ru"
@@ -619,6 +620,7 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
             "stages": m["stages"],
             "industries": m["industries"],
             "experience_levels": m["experience_levels"],
+            "authors": m["authors"],
             "popularity": m["popularity_score"],
             "rating": m["avg_rating"],
             "cost": m["cost"],
@@ -689,8 +691,10 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
             ),
         )
     conn.commit()
+    lesson_count, _, standalone = store_lessons(conn, reader)
     conn.close()
-    return {"total": len(materials), "links": sum(len(v) for v in rec_links.values())}
+    return {"total": len(materials), "links": sum(len(v) for v in rec_links.values()),
+            "lessons": lesson_count, "standalone_lessons": standalone}
 
 
 if __name__ == "__main__":

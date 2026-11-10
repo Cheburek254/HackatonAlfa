@@ -10,6 +10,7 @@ from flask import Flask, Response, abort, redirect, render_template, request, ur
 
 from app.catalog import DEMO_CATALOG_PATH, catalog_source, load_catalog, load_history
 from app.catalog import material_format as _format_key
+from app.catalog.lessons import read_programs
 from app.contracts import Material, Profile, Recommender
 from app.ctr_report import ORDER_LABELS
 from app.database import account_database_path
@@ -23,6 +24,7 @@ from app.ui.descriptions import format_description_html
 from app.ui.impressions import issue_impression_tickets, record_impressions
 from app.recommender import recommend
 from evaluation.catalog_quality import REPORT_NAME, catalog_fingerprint
+from evaluation.learning_report import REPORT_NAME as LEARNING_REPORT_NAME
 from evaluation.stress_report import REPORT_NAME as STRESS_REPORT_NAME
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
@@ -75,11 +77,13 @@ def create_app(
     if not is_demo_catalog and not catalog:
         raise ValueError(f"Каталог пуст: {source}")
     materials_by_id = {material.id: material for material in catalog}
+    programs = read_programs(source, {material.id for material in catalog if material.entity_type == "course"})
     covers = {} if is_demo_catalog else json.loads(COVER_METADATA.read_text(encoding="utf-8"))
     app.config["CATALOG_TITLES"] = {material.id: material.title for material in catalog}
     app.config["EVALUATION_REAL_CATALOG"] = None if is_demo_catalog else catalog
     app.config["CATALOG_QUALITY_PATH"] = None if is_demo_catalog else source.parent / REPORT_NAME
     app.config["STRESS_REPORT_PATH"] = None if is_demo_catalog else source.parent / STRESS_REPORT_NAME
+    app.config["LEARNING_REPORT_PATH"] = None if is_demo_catalog else source.parent / LEARNING_REPORT_NAME
     app.config["CATALOG_QUALITY_FINGERPRINT"] = None if is_demo_catalog else catalog_fingerprint(catalog)
     app.config["CATALOG_FORMATS"] = {} if is_demo_catalog else {material.id: _format_key(material) for material in catalog}
     app.config["CATALOG_FORMAT_LABELS"] = FORMAT_LABELS
@@ -214,18 +218,21 @@ def create_app(
         impression = request.args.get("impression")
         open_url = url_for("open_material", material_id=material_id, impression=impression)
         description_html = format_description_html(material.description)
+        lessons = programs.get(material_id, ())
         if request.accept_mimetypes.best == "application/json":
             return {
                 "title": material.title,
                 "description": material.description,
                 "description_html": description_html,
                 "subscriptions": material.subscriptions,
+                "lessons": lessons,
+                "authors": material.authors,
                 "url": _material_destination(material.url),
                 "open_url": open_url,
                 "csrf_token": csrf_token(),
             }
         return render_template(
-            "material.html", material=material, description_html=description_html, open_url=open_url
+            "material.html", material=material, description_html=description_html, open_url=open_url, lessons=lessons
         )
 
     @app.post("/materials/<material_id>/open")
