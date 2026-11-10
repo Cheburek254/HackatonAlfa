@@ -10,7 +10,7 @@ services:
       ALFA_SECRET_KEY: ${ALFA_SECRET_KEY:-}
       ALFA_CATALOG_DIR: ${ALFA_CATALOG_DIR:+/app/data}
       ALFA_LLM_API_KEY: ${ALFA_LLM_API_KEY:-}
-      ALFA_LLM_MODEL: ${ALFA_LLM_MODEL:-gemini-2.5-flash}
+      ALFA_LLM_MODEL: ${ALFA_LLM_MODEL:-gemini-3.5-flash-lite}
     volumes:
       - accounts:/var/lib/alfahack
       - ${ALFA_CATALOG_DIR:-./data}:/app/data:ro

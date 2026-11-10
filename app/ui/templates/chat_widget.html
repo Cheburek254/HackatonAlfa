@@ -1,4 +1,5 @@
-<div id="alfa-chat-widget" class="alfa-chat-widget" data-user-id="{{ current_account().id if current_account and current_account() else 'guest' }}">
+{% set chat_account = current_account() %}
+<div id="alfa-chat-widget" class="alfa-chat-widget" data-user-id="{{ chat_account.id if chat_account else 'guest' }}">
     <button id="alfa-chat-trigger" class="alfa-chat-trigger" type="button" aria-label="Открыть чат с ИИ-помощником" aria-expanded="false">
         <svg class="chat-icon-open" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
@@ -35,7 +36,7 @@
         <div id="alfa-chat-messages" class="alfa-chat-messages" role="log" aria-live="polite">
             <div class="chat-message chat-message-assistant">
                 <div class="message-bubble">
-                    Здравствуйте! Я ИИ-помощник образовательной платформы <strong>«Альфа-Курс»</strong>.<br><br>
+                    Здравствуйте! Я помощник демо-проекта по подбору материалов <strong>«Альфа-Курса»</strong>.<br><br>
                     Помогу разобраться с бизнес-задачей, подберу практические курсы, статьи или шаблоны документов. С чего хотите начать?
                 </div>
             </div>

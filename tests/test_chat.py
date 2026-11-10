@@ -1,15 +1,22 @@
 """Тесты для ИИ-помощника Альфа-Курс."""
 
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from app.contracts import Material
 from app.ui.chat import _fallback_reply, _linkify_materials
 from app.ui.web import create_app
 
 
 class ChatApiTest(unittest.TestCase):
     def setUp(self):
-        self.app = create_app()
+        temporary = self.enterContext(TemporaryDirectory())
+        self.enterContext(patch.dict("os.environ", {"ALFA_CATALOG_DIR": ""}))
+        self.enterContext(patch("app.catalog.DATA_DIR", Path(temporary)))
+        self.credentials = self.enterContext(patch("app.ui.chat._load_env_credentials", return_value=("", "")))
+        self.app = create_app(database_path=Path(temporary) / "accounts.sqlite3")
         self.app.config["TESTING"] = True
         self.client = self.app.test_client()
 
@@ -50,8 +57,9 @@ class ChatApiTest(unittest.TestCase):
 
     def test_linkify_materials_converts_known_titles(self):
         text = "Советую курс «Маркетплейсы: с чего начать и как преуспеть» для старта."
-        converted = _linkify_materials(text, [])
-        self.assertIn("[Маркетплейсы: с чего начать и как преуспеть](/materials/d0aa4598-3da2-478b-bbf8-bda81b231b58)", converted)
+        material = Material("course", "Маркетплейсы: с чего начать и как преуспеть", "https://example.com/course")
+        converted = _linkify_materials(text, [material])
+        self.assertIn("[Маркетплейсы: с чего начать и как преуспеть](/materials/course)", converted)
 
     def test_fallback_reply_personalization(self):
         profile = {"industry": "общепит", "stage": "запуск"}
@@ -59,12 +67,41 @@ class ChatApiTest(unittest.TestCase):
         self.assertIn("общепит", reply.lower())
 
     def test_chat_endpoint_returns_json_reply(self):
-        with patch("app.ui.chat._call_gemini", return_value="Привет! Посмотри курс [Старт](/materials/123)."):
-            response = self.client.post("/api/chat", json={"message": "Привет"})
+        response = self.client.post("/api/chat", json={"message": "Привет"})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json().get("ok"))
+        self.assertEqual(self.client.post("/api/chat", json={"message": 123}).status_code, 400)
+
+    def test_chat_uses_entitled_catalog_and_filters_model_links(self):
+        self.app.config["CHAT_CATALOG"] = (
+            Material("free", "Бесплатный курс по продажам", "https://example.com/free", access="free"),
+            Material("plus", "Подписочный курс по продажам", "https://example.com/plus", access="paid", subscriptions=("Курс+",)),
+            Material("paid", "Платный курс по продажам", "https://example.com/paid", access="paid"),
+        )
+        self.credentials.return_value = ("mock", "gemini-3.5-flash-lite")
+        reply = "• [Бесплатный](/materials/free)\n• [Подписочный](/materials/plus)\n• [Платный](/materials/paid)"
+        with patch("app.ui.chat._call_gemini", return_value=reply) as call:
+            response = self.client.post("/api/chat", json={"message": "курс по продажам", "history": [None, {"role": "user", "text": 7}]})
             self.assertEqual(response.status_code, 200)
-            data = response.get_json()
-            self.assertTrue(data.get("ok"))
-            self.assertIn("/materials/123", data.get("reply", ""))
+            self.assertIn("/materials/free", response.json["reply"])
+            self.assertNotIn("/materials/plus", response.json["reply"])
+            self.assertNotIn("/materials/paid", response.json["reply"])
+            self.assertEqual(call.call_args.args[3], [])
+            self.assertNotIn("/materials/plus", call.call_args.kwargs["system_prompt"])
+            self.assertEqual(self.app.test_cli_runner().invoke(args=["admin", "course-plus", "demo"]).exit_code, 0)
+            self.client.get("/login")
+            with self.client.session_transaction() as session:
+                token = session["csrf"]
+            self.assertEqual(self.client.post("/login/demo", data={"csrf_token": token}).status_code, 303)
+            result = self.client.post("/api/chat", json={"message": "курс по продажам"}).json["reply"]
+            self.assertIn("/materials/plus", result)
+            self.assertNotIn("/materials/paid", result)
+
+    def test_material_page_allows_chat_script_and_fetch(self):
+        result = self.client.get("/materials/start-checklist")
+        self.assertEqual(result.status_code, 200)
+        self.assertIn("chat-widget.js", result.get_data(as_text=True))
+        self.assertIn("connect-src 'self'", result.headers["Content-Security-Policy"])
 
 
 if __name__ == "__main__":

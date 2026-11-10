@@ -46,7 +46,9 @@
             <span>Демонстрационные материалы и ссылки</span>
         </div>
     </footer>{% endblock %}
-    {% include "chat_widget.html" %}
-    <script src="{{ url_for('static', filename='chat-widget.js') }}" defer></script>
+    {% if request.endpoint in chat_pages %}
+        {% include "chat_widget.html" %}
+        <script src="{{ url_for('static', filename='chat-widget.js') }}" defer></script>
+    {% endif %}
 </body>
 </html>

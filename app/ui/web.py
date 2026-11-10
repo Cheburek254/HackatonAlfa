@@ -41,6 +41,7 @@ RESULTS_PER_PAGE = 6
 PAGE_SIZES = (6, 12, 24)
 COVER_ORIGIN = "https://s19060.cdn.ngenix.net"
 COVER_METADATA = Path(__file__).with_name("public-covers.json")
+CHAT_PAGES = frozenset({"index", "material_page", "profile_page", "profile_settings", "accounts.login", "accounts.register"})
 
 FORMAT_LABELS = {
     "all": "Все форматы",
@@ -184,6 +185,7 @@ def create_app(
     if not is_demo_catalog and not catalog:
         raise ValueError(f"Каталог пуст: {source}")
     materials_by_id = {material.id: material for material in catalog}
+    app.config["CHAT_CATALOG"] = catalog
     programs = read_programs(source, {material.id for material in catalog if material.entity_type == "course"})
     covers = {} if is_demo_catalog else json.loads(COVER_METADATA.read_text(encoding="utf-8"))
     app.config["CATALOG_TITLES"] = {material.id: material.title for material in catalog}
@@ -212,6 +214,7 @@ def create_app(
         algorithm += ":demo-catalog" if is_demo_catalog else ":history-v3.1"
     app.jinja_env.globals["signed_in"] = lambda: current_account() is not None
     app.jinja_env.globals["current_account"] = current_account
+    app.jinja_env.globals["chat_pages"] = CHAT_PAGES
     app.jinja_env.globals["material_format"] = _format_key
 
     @app.get("/health")
@@ -229,9 +232,7 @@ def create_app(
                 f"default-src 'none'; img-src 'self'{cover_source}; style-src 'self'; "
                 "base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
             )
-            if request.endpoint == "index":
-                response.headers["Content-Security-Policy"] += "; script-src 'self'; connect-src 'self'"
-            elif request.endpoint in {"accounts.login", "accounts.register", "profile_page", "profile_settings"}:
+            if request.endpoint in CHAT_PAGES:
                 response.headers["Content-Security-Policy"] += "; script-src 'self'; connect-src 'self'"
             response.headers["Referrer-Policy"] = "no-referrer"
         return response

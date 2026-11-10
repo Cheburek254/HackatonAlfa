@@ -64,8 +64,8 @@
         // Bold **text**
         safe = safe.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
 
-        // Markdown links: [Title](/materials/<id>) or [Title](/path)
-        safe = safe.replace(/\[([^\]]+)\]\((\/[a-zA-Z0-9_\-\/\?&=%#\.]+)\)/g, '<a href="$2" class="chat-material-link">$1</a>');
+        // Ссылки на карточки каталога и профиль.
+        safe = safe.replace(/\[([^\]]+)\]\((\/(?:materials\/[a-zA-Z0-9_-]+|profile))\)/g, '<a href="$2" class="chat-material-link">$1</a>');
 
         // Lists and paragraphs
         const lines = safe.split("\n");
