@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}{{ heading }} — Админ-панель АльфаХак{% endblock %}
+{% block content %}
+<section class="hero admin-hero" aria-labelledby="admin-title">
+    <div class="wrap">
+        <p class="eyebrow">АДМИН-ПАНЕЛЬ</p>
+        <h1 id="admin-title">{{ heading }}</h1>
+        <p class="admin-intro">{{ intro }}</p>
+        {% block admin_header %}{% endblock %}
+        <nav class="account-tabs" aria-label="Разделы админ-панели">
+            {% for endpoint, label in [
+                ("dashboard", "Сводка"), ("tests", "Тесты"), ("analytics", "Статистика"),
+                ("roadmap", "Развитие системы"), ("settings", "Управление")
+            ] %}
+            <a href="{{ url_for('admin.' ~ endpoint) }}"{% if request.endpoint == 'admin.' ~ endpoint %} aria-current="page"{% endif %}>{{ label }}</a>
+            {% endfor %}
+        </nav>
+    </div>
+</section>
+<div class="results admin-body">
+    <div class="wrap admin-sections">
+        {% block admin_content %}{% endblock %}
+    </div>
+</div>
+{% endblock %}

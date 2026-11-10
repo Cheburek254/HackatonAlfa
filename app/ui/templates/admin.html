@@ -1,264 +1,32 @@
-{% extends "base.html" %}
-{% block title %}Админ-панель — АльфаХак{% endblock %}
-{% macro metric_cells(metrics, bar=false) %}
-    <td>{{ metrics.impressions }}</td>
-    <td>{{ metrics.clicks }}</td>
-    <td class="admin-ctr">
-        {% if bar %}<meter min="0" max="100" value="{{ metrics.ctr }}" aria-label="CTR"></meter>{% endif %}
-        <strong>{{ '%.2f' | format(metrics.ctr) | replace('.', ',') }}%</strong>
-    </td>
-{% endmacro %}
-{% macro activity_chart(chart_id, label, series, percentage=false) %}
-    {% set peak = 100 if percentage else [series | map(attribute=1) | max, 1] | max %}
-    {% set path %}
-        {% set line = namespace(connected=false) %}
-        {% for day, count in series %}
-            {% if count is none %}{% set line.connected = false %}
-            {% else %}{{ 'L' if line.connected else 'M' }}{{ 45 + loop.index0 * 19 }} {{ 140 - count / peak * 110 }} {% set line.connected = true %}{% endif %}
+{% extends "admin_shell.html" %}
+{% block admin_header %}
+<dl class="admin-kpis">
+    <div><dt>Показы</dt><dd>{{ overview.impressions }}</dd></div>
+    <div><dt>Показы с переходом</dt><dd>{{ overview.clicks }}</dd></div>
+    <div><dt>CTR</dt><dd>{{ '%.2f' | format(overview.ctr) | replace('.', ',') ~ '%' if overview.impressions else '—' }}</dd></div>
+</dl>
+{% endblock %}
+{% block admin_content %}
+<section class="account-card" id="admin-summary" aria-labelledby="admin-summary-title">
+    <h2 class="account-section-title" id="admin-summary-title">Оценка качества рекомендаций</h2>
+    {% if report_date %}
+    <p class="account-muted">Результаты последних сохранённых прогонов. Последнее обновление {{ report_date }} (UTC). Пороговые значения — рабочие ориентиры проекта для этих наборов. Они не означают статистическую значимость.</p>
+    {% else %}
+    <p class="account-muted">Для текущего каталога ещё нет сохранённых прогонов.</p>
+    {% endif %}
+    {% for group in assessments %}
+    {% if group.rows %}
+    <h3>{{ group.label }}</h3>
+    <ul class="admin-assessments {{ group.tone }}">
+        {% for row in group.rows %}
+        <li>
+            <div class="admin-assessment-title"><a href="{{ url_for('admin.tests', _anchor=row.anchor) }}">{{ row.label }}</a><strong>{{ row.value }}</strong></div>
+            <p>{{ row.explanation }}</p>
+        </li>
         {% endfor %}
-    {% endset %}
-    <figure class="admin-chart {{ chart_id }}">
-        <figcaption id="{{ chart_id }}-label">{{ label }}</figcaption>
-        <svg viewBox="0 0 630 170" role="img" aria-labelledby="{{ chart_id }}-label">
-            <line class="admin-chart-axis" x1="44" y1="30" x2="596" y2="30"/>
-            <line class="admin-chart-axis" x1="44" y1="140" x2="596" y2="140"/>
-            <text x="40" y="34" text-anchor="end">{{ peak }}{{ '%' if percentage }}</text>
-            <text x="40" y="144" text-anchor="end">0{{ '%' if percentage }}</text>
-            <path class="admin-chart-line" d="{{ path | trim }}"/>
-            {% for day, count in series %}
-            {% if count is not none %}
-            <circle class="admin-chart-point" cx="{{ 45 + loop.index0 * 19 }}" cy="{{ 140 - count / peak * 110 }}" r="3">
-                <title>{{ day }} · {{ ('%.2f' | format(count) | replace('.', ',') ~ '%') if percentage else count }}</title>
-            </circle>
-            {% endif %}
-            {% endfor %}
-            <text x="44" y="162">{{ series[0][0][8:10] }}.{{ series[0][0][5:7] }}</text>
-            <text x="596" y="162" text-anchor="end">{{ series[-1][0][8:10] }}.{{ series[-1][0][5:7] }}</text>
-        </svg>
-    </figure>
-{% endmacro %}
-{% block content %}
-    <section class="hero admin-hero" aria-labelledby="admin-title">
-        <div class="wrap">
-            <p class="eyebrow">АДМИН-ПАНЕЛЬ</p>
-            <h1 id="admin-title">Аналитика рекомендаций</h1>
-            <p class="admin-intro">Показы и переходы гостей и личных аккаунтов за всё время.</p>
-            <dl class="admin-kpis">
-                <div><dt>Показы</dt><dd>{{ overview.impressions }}</dd></div>
-                <div><dt>Показы с переходом</dt><dd>{{ overview.clicks }}</dd></div>
-                <div><dt>CTR</dt><dd>{{ '%.2f' | format(overview.ctr) | replace('.', ',') ~ '%' if overview.impressions else '—' }}</dd></div>
-            </dl>
-            <nav class="account-tabs" aria-label="Разделы админ-панели">
-                <a href="#admin-report">Отчёт</a>
-                <a href="#admin-activity">Динамика</a>
-                <a href="#admin-cards">Карточки</a>
-                <a href="#admin-evaluation">Hit@3 и MRR@3</a>
-                <a href="#admin-stress">Офлайн-проверки</a>
-                <a href="#admin-learning">Сложные сценарии</a>
-                <a href="#admin-subscriptions">Курс+</a>
-                <a href="#admin-catalog-quality">Качество каталога</a>
-                <a href="#admin-history">Моя история</a>
-                <a href="#admin-accounts">Админ-аккаунты</a>
-            </nav>
-        </div>
-    </section>
-
-    <div class="results admin-body">
-        <div class="wrap admin-sections">
-            <section class="account-card" id="admin-report" aria-labelledby="admin-report-title">
-                <h2 id="admin-report-title" class="account-section-title">Отчёт по рекомендациям</h2>
-                <p class="account-muted">CTR — доля показов, после которых открыли материал. Повторные переходы с одного показа учитываются один раз. Тестовый аккаунт исключён.</p>
-                {% if totals %}
-                <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Сводка по алгоритмам">
-                    <table class="admin-table">
-                        <caption>Сводка по алгоритмам</caption>
-                        <thead><tr><th scope="col">Алгоритм</th><th scope="col">Показы</th><th scope="col">Переходы</th><th scope="col">CTR</th></tr></thead>
-                        <tbody>
-                            {% for algorithm, metrics in totals.items() %}
-                            <tr><th scope="row">{{ algorithm }}</th>{{ metric_cells(metrics) }}</tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-                <details class="admin-evaluation-details">
-                    <summary>Разбивка по позициям</summary>
-                    <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Разбивка по позициям">
-                        <table class="admin-table">
-                            <thead><tr><th scope="col">Алгоритм</th><th scope="col">Позиция</th><th scope="col">Сортировка</th><th scope="col">Показы</th><th scope="col">Переходы</th><th scope="col">CTR</th></tr></thead>
-                            <tbody>
-                                {% for algorithm, order, position, metrics in details %}
-                                <tr><th scope="row">{{ algorithm }}</th><td>{{ position }}</td><td>{{ order_labels.get(order, order) }}</td>{{ metric_cells(metrics, true) }}</tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </details>
-                {% else %}
-                <p class="admin-empty">Показов гостей и личных аккаунтов пока нет.</p>
-                {% endif %}
-                <details class="admin-evaluation-details">
-                    <summary>Архив · исходный тестовый сценарий</summary>
-                    <p class="account-muted"><code>app.ui.stub.recommend</code> использовался до подключения рекомендателя. Эти данные нерелевантны для оценки текущей выдачи и исключены из сводки, графиков и рейтинга карточек.</p>
-                    {% if legacy_totals %}
-                    <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Архив тестового сценария">
-                        <table class="admin-table">
-                            <thead><tr><th scope="col">Алгоритм</th><th scope="col">Показы</th><th scope="col">Переходы</th><th scope="col">CTR</th></tr></thead>
-                            <tbody>
-                                {% for algorithm, metrics in legacy_totals.items() %}
-                                <tr><th scope="row">{{ algorithm }}</th>{{ metric_cells(metrics) }}</tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                    {% endif %}
-                </details>
-            </section>
-
-            <section class="account-card" id="admin-activity" aria-labelledby="admin-activity-title">
-                <h2 id="admin-activity-title" class="account-section-title">Динамика за 30 дней</h2>
-                <p class="account-muted">Показы и переходы по дням. Даты в UTC. Тестовый аккаунт исключён.</p>
-                <div class="admin-charts">
-                    {{ activity_chart('chart-impressions', 'Показы', impressions_by_day) }}
-                    {{ activity_chart('chart-clicks', 'Переходы', clicks_by_day) }}
-                    {{ activity_chart('chart-ctr', 'CTR по дате показа', ctr_by_day, true) }}
-                </div>
-                <p class="account-muted">В CTR переход относится к дню показа, даже если карточку открыли позже. В дни без показов на графике оставлен пропуск.</p>
-            </section>
-
-            <section class="account-card" id="admin-cards" aria-labelledby="admin-cards-title">
-                <h2 id="admin-cards-title" class="account-section-title">Эффективность карточек</h2>
-                <p class="account-muted">До 20 карточек реального каталога по CTR. При равенстве выше карточка с большим числом переходов.</p>
-                <form class="admin-inline-form" method="get" action="{{ url_for('admin.dashboard', _anchor='admin-cards') }}">
-                    <label>Формат материала
-                        <select name="category">
-                            {% for value, label in top_formats.items() %}
-                            <option value="{{ value }}"{% if top_category == value %} selected{% endif %}>{{ label }}</option>
-                            {% endfor %}
-                        </select>
-                    </label>
-                    <button class="button button-profile" type="submit">Показать топ</button>
-                </form>
-                {% if top_cards %}
-                <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Эффективность карточек">
-                    <table class="admin-table">
-                        <thead><tr><th scope="col">Материал</th><th scope="col">Показы</th><th scope="col">Переходы</th><th scope="col">CTR</th></tr></thead>
-                        <tbody>
-                            {% for material_id, metrics in top_cards %}
-                            <tr><th scope="row">
-                                {% if material_id in titles %}<a href="{{ url_for('material_page', material_id=material_id) }}">{{ titles[material_id] }}</a>
-                                {% else %}{{ material_id }}{% endif %}
-                            </th>{{ metric_cells(metrics, true) }}</tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-                {% else %}
-                <p class="admin-empty">{% if real_catalog_available %}В выбранном формате пока нет показов.{% else %}Подключите реальный каталог, чтобы посмотреть топ.{% endif %}</p>
-                {% endif %}
-            </section>
-
-            <section class="account-card" id="admin-evaluation" aria-labelledby="admin-evaluation-title">
-                <h2 id="admin-evaluation-title" class="account-section-title">Тесты рекомендаций</h2>
-                <p class="account-muted">Hit@3 показывает долю сценариев с подходящим материалом в тройке. MRR@3 учитывает место первого подходящего материала.</p>
-                <div class="admin-forms">
-                    {% for suite, label in evaluation_suites.items() %}
-                    <form class="admin-form" method="post" action="{{ url_for('admin.dashboard', category=top_category, _anchor='admin-evaluation') }}" aria-labelledby="evaluation-{{ suite }}-title">
-                        <h3 id="evaluation-{{ suite }}-title">{{ label }}</h3>
-                        <p class="account-muted">{{ evaluation_counts[suite] }} {{ 'сценариев на демонстрационных материалах.' if suite == 'demo' else 'размеченных сценариев на материалах «Альфа-Курса».' }}</p>
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button class="button {{ 'button-primary' if suite == 'real' else 'button-profile' }}" type="submit" name="evaluation_suite" value="{{ suite }}"{% if suite == 'real' and not real_catalog_available %} disabled{% endif %}>{{ 'Запустить синтетические тесты' if suite == 'demo' else 'Запустить тесты на реальном каталоге' }}</button>
-                        {% if suite == 'real' and not real_catalog_available %}
-                        <p class="account-muted">Для запуска подключите экспорт реального каталога.</p>
-                        {% endif %}
-                    </form>
-                    {% endfor %}
-                </div>
-                {% if evaluation_error %}
-                <p class="account-error admin-message" role="alert">{{ evaluation_suites[evaluation_suite] }}. {{ evaluation_error }}</p>
-                {% elif comparison %}
-                <h3>{{ evaluation_suites[evaluation_suite] }} · результаты</h3>
-                <p class="account-muted" role="status">Проверено сценариев: {{ comparison.scenario_count }}.{% if evaluation_suite == 'demo' %} Сценарии без релевантной карточки показаны отдельно.{% endif %}</p>
-                <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Итоги тестов · {{ evaluation_suites[evaluation_suite] }}">
-                    <table class="admin-table">
-                        <thead><tr><th scope="col">Метод</th><th scope="col">Hit@3</th><th scope="col">MRR@3</th></tr></thead>
-                        <tbody>
-                            {% for row in comparison.summaries %}
-                            <tr><th scope="row">{{ row.method }}</th>
-                                <td>{% if row.hit_rate is not none %}{{ '%.1f' | format(100 * row.hit_rate) }}% ({{ row.hits }}/{{ row.eligible }}){% else %}—{% endif %}</td>
-                                <td>{{ '%.3f' | format(row.mrr) if row.mrr is not none else '—' }}</td></tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-                <details class="admin-evaluation-details">
-                    <summary>Результаты по сценариям</summary>
-                    <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Результаты по сценариям">
-                        <table class="admin-table">
-                            <thead><tr><th scope="col">Сценарий</th><th scope="col">Разметка</th><th scope="col">Метод</th><th scope="col">Топ-3</th><th scope="col">RR@3</th></tr></thead>
-                            <tbody>
-                                {% for row in comparison.rows %}
-                                <tr><th scope="row" title="{{ row.note }}">{{ row.goal or row.note }}<br><small>{{ row.case_id }}</small></th>
-                                    <td>{% for mid in row.relevant_ids %}{{ titles.get(mid, mid) if evaluation_suite == 'real' else mid }}{% if not loop.last %}<br>{% endif %}{% else %}—{% endfor %}</td>
-                                    <td>{{ row.method }}</td>
-                                    <td>{% for mid in row.material_ids %}{{ loop.index }}. {{ titles.get(mid, mid) if evaluation_suite == 'real' else mid }}{% if not loop.last %}<br>{% endif %}{% else %}Пусто{% endfor %}</td>
-                                    <td>{{ '%.3f' | format(row.reciprocal_rank) if row.reciprocal_rank is not none else '—' }}</td></tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </details>
-                {% endif %}
-            </section>
-
-            {% include "admin_catalog_quality.html" %}
-            {% include "admin_stress.html" %}
-            {% include "admin_learning.html" %}
-
-            <section class="account-card" id="admin-history" aria-labelledby="admin-history-title">
-                <h2 id="admin-history-title" class="account-section-title">Моя история</h2>
-                <p class="account-muted">Очистка удаляет ваши просмотры и переходы, которые учитываются при подборе. Сводная статистика CTR сохраняется.</p>
-                {% for category, message in get_flashed_messages(with_categories=true, category_filter=['history_error', 'history_success']) %}
-                <p class="{{ 'account-error' if category == 'history_error' else 'account-notice' }} admin-message" role="status">{{ message }}</p>
-                {% endfor %}
-                <form class="admin-inline-form" method="post" action="{{ url_for('admin.clear_own_history') }}">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <label><input type="checkbox" name="confirm" value="1" required> Подтверждаю очистку своей истории</label>
-                    <button class="button button-primary" type="submit">Очистить историю</button>
-                </form>
-            </section>
-
-            <section class="account-card" id="admin-accounts" aria-labelledby="admin-accounts-title">
-                <h2 id="admin-accounts-title" class="account-section-title">Админ-аккаунты</h2>
-                <p class="account-muted">Администраторы могут смотреть отчёт, создавать админ-аккаунты и выдавать админ-роли.</p>
-                {% for category, message in get_flashed_messages(with_categories=true, category_filter=['error', 'success']) %}
-                <p class="{{ 'account-error' if category == 'error' else 'account-notice' }} admin-message" role="{{ 'alert' if category == 'error' else 'status' }}">{{ message }}</p>
-                {% endfor %}
-                <ul class="admin-users" aria-label="Текущие администраторы">
-                    {% for username in usernames %}<li>{{ username }}</li>{% endfor %}
-                </ul>
-                <div class="admin-forms">
-                    <form class="admin-form" method="post" action="{{ url_for('admin.manage_accounts') }}" aria-labelledby="grant-admin-title">
-                        <h3 id="grant-admin-title">Выдать роль</h3>
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <input type="hidden" name="action" value="grant">
-                        <label>Логин пользователя<input name="username" required minlength="3" maxlength="32" autocapitalize="none"></label>
-                        <button class="button button-primary" type="submit">Выдать админ-роль</button>
-                    </form>
-                    <form class="admin-form" method="post" action="{{ url_for('admin.manage_accounts') }}" aria-labelledby="create-admin-title">
-                        <h3 id="create-admin-title">Создать аккаунт</h3>
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <input type="hidden" name="action" value="create">
-                        <label>Новый логин<input name="username" required minlength="3" maxlength="32" autocapitalize="none"></label>
-                        <label>Пароль<input name="password" type="password" required minlength="{{ password_min }}" maxlength="{{ password_max }}" autocomplete="new-password" aria-describedby="admin-password-hint"></label>
-                        <small id="admin-password-hint">{{ password_hint }}</small>
-                        <button class="button button-primary" type="submit">Создать админ-аккаунт</button>
-                    </form>
-                </div>
-            </section>
-            <form class="logout-form" method="post" action="{{ url_for('accounts.logout') }}">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button class="button" type="submit">Выйти из аккаунта</button>
-            </form>
-        </div>
-    </div>
+    </ul>
+    {% endif %}
+    {% endfor %}
+    <a class="button button-profile" href="{{ url_for('admin.tests') }}">Все результаты тестов</a>
+</section>
 {% endblock %}

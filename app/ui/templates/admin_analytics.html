@@ -1,0 +1,131 @@
+{% extends "admin_shell.html" %}
+{% macro metric_cells(metrics, bar=false) %}
+    <td>{{ metrics.impressions }}</td>
+    <td>{{ metrics.clicks }}</td>
+    <td class="admin-ctr">
+        {% if bar %}<meter min="0" max="100" value="{{ metrics.ctr }}" aria-label="CTR"></meter>{% endif %}
+        <strong>{{ '%.2f' | format(metrics.ctr) | replace('.', ',') }}%</strong>
+    </td>
+{% endmacro %}
+{% macro activity_chart(chart_id, label, series, percentage=false) %}
+    {% set peak = 100 if percentage else [series | map(attribute=1) | max, 1] | max %}
+    {% set path %}
+        {% set line = namespace(connected=false) %}
+        {% for day, count in series %}
+            {% if count is none %}{% set line.connected = false %}
+            {% else %}{{ 'L' if line.connected else 'M' }}{{ 45 + loop.index0 * 19 }} {{ 140 - count / peak * 110 }} {% set line.connected = true %}{% endif %}
+        {% endfor %}
+    {% endset %}
+    <figure class="admin-chart {{ chart_id }}">
+        <figcaption id="{{ chart_id }}-label">{{ label }}</figcaption>
+        <svg viewBox="0 0 630 170" role="img" aria-labelledby="{{ chart_id }}-label">
+            <line class="admin-chart-axis" x1="44" y1="30" x2="596" y2="30"/>
+            <line class="admin-chart-axis" x1="44" y1="140" x2="596" y2="140"/>
+            <text x="40" y="34" text-anchor="end">{{ peak }}{{ '%' if percentage }}</text>
+            <text x="40" y="144" text-anchor="end">0{{ '%' if percentage }}</text>
+            <path class="admin-chart-line" d="{{ path | trim }}"/>
+            {% for day, count in series %}
+            {% if count is not none %}
+            <circle class="admin-chart-point" cx="{{ 45 + loop.index0 * 19 }}" cy="{{ 140 - count / peak * 110 }}" r="3">
+                <title>{{ day }} · {{ ('%.2f' | format(count) | replace('.', ',') ~ '%') if percentage else count }}</title>
+            </circle>
+            {% endif %}
+            {% endfor %}
+            <text x="44" y="162">{{ series[0][0][8:10] }}.{{ series[0][0][5:7] }}</text>
+            <text x="596" y="162" text-anchor="end">{{ series[-1][0][8:10] }}.{{ series[-1][0][5:7] }}</text>
+        </svg>
+    </figure>
+{% endmacro %}
+{% block admin_content %}
+<section class="account-card" id="admin-report" aria-labelledby="admin-report-title">
+    <h2 id="admin-report-title" class="account-section-title">Отчёт по рекомендациям</h2>
+    <p class="account-muted">CTR — доля показов, после которых открыли материал. Повторные переходы с одного показа учитываются один раз. Тестовый аккаунт исключён.</p>
+    {% if totals %}
+    <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Сводка по алгоритмам">
+        <table class="admin-table">
+            <caption>Сводка по алгоритмам</caption>
+            <thead><tr><th scope="col">Алгоритм</th><th scope="col">Показы</th><th scope="col">Переходы</th><th scope="col">CTR</th></tr></thead>
+            <tbody>
+                {% for algorithm, metrics in totals.items() %}
+                <tr><th scope="row">{{ algorithm }}</th>{{ metric_cells(metrics) }}</tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <details class="admin-evaluation-details">
+        <summary>Разбивка по позициям</summary>
+        <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Разбивка по позициям">
+            <table class="admin-table">
+                <thead><tr><th scope="col">Алгоритм</th><th scope="col">Позиция</th><th scope="col">Сортировка</th><th scope="col">Показы</th><th scope="col">Переходы</th><th scope="col">CTR</th></tr></thead>
+                <tbody>
+                    {% for algorithm, order, position, metrics in details %}
+                    <tr><th scope="row">{{ algorithm }}</th><td>{{ position }}</td><td>{{ order_labels.get(order, order) }}</td>{{ metric_cells(metrics, true) }}</tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </details>
+    {% else %}
+    <p class="admin-empty">Показов гостей и личных аккаунтов пока нет.</p>
+    {% endif %}
+    <details class="admin-evaluation-details">
+        <summary>Архив · исходный тестовый сценарий</summary>
+        <p class="account-muted"><code>app.ui.stub.recommend</code> использовался до подключения рекомендателя. Эти данные нерелевантны для оценки текущей выдачи и исключены из сводки, графиков и рейтинга карточек.</p>
+        {% if legacy_totals %}
+        <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Архив тестового сценария">
+            <table class="admin-table">
+                <thead><tr><th scope="col">Алгоритм</th><th scope="col">Показы</th><th scope="col">Переходы</th><th scope="col">CTR</th></tr></thead>
+                <tbody>
+                    {% for algorithm, metrics in legacy_totals.items() %}
+                    <tr><th scope="row">{{ algorithm }}</th>{{ metric_cells(metrics) }}</tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    </details>
+</section>
+
+<section class="account-card" id="admin-activity" aria-labelledby="admin-activity-title">
+    <h2 id="admin-activity-title" class="account-section-title">Динамика за 30 дней</h2>
+    <p class="account-muted">Показы и переходы по дням. Даты в UTC. Тестовый аккаунт исключён.</p>
+    <div class="admin-charts">
+        {{ activity_chart('chart-impressions', 'Показы', impressions_by_day) }}
+        {{ activity_chart('chart-clicks', 'Переходы', clicks_by_day) }}
+        {{ activity_chart('chart-ctr', 'CTR по дате показа', ctr_by_day, true) }}
+    </div>
+    <p class="account-muted">В CTR переход относится к дню показа, даже если карточку открыли позже. В дни без показов на графике оставлен пропуск.</p>
+</section>
+
+<section class="account-card" id="admin-cards" aria-labelledby="admin-cards-title">
+    <h2 id="admin-cards-title" class="account-section-title">Эффективность карточек</h2>
+    <p class="account-muted">До 20 карточек реального каталога по CTR. При равенстве выше карточка с большим числом переходов.</p>
+    <form class="admin-inline-form" method="get" action="{{ url_for('admin.analytics', _anchor='admin-cards') }}">
+        <label>Формат материала
+            <select name="category">
+                {% for value, label in top_formats.items() %}
+                <option value="{{ value }}"{% if top_category == value %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <button class="button button-profile" type="submit">Показать топ</button>
+    </form>
+    {% if top_cards %}
+    <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Эффективность карточек">
+        <table class="admin-table">
+            <thead><tr><th scope="col">Материал</th><th scope="col">Показы</th><th scope="col">Переходы</th><th scope="col">CTR</th></tr></thead>
+            <tbody>
+                {% for material_id, metrics in top_cards %}
+                <tr><th scope="row">
+                    {% if material_id in titles %}<a href="{{ url_for('material_page', material_id=material_id) }}">{{ titles[material_id] }}</a>
+                    {% else %}{{ material_id }}{% endif %}
+                </th>{{ metric_cells(metrics, true) }}</tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="admin-empty">{% if real_catalog_available %}В выбранном формате пока нет показов.{% else %}Подключите реальный каталог, чтобы посмотреть топ.{% endif %}</p>
+    {% endif %}
+</section>
+{% endblock %}

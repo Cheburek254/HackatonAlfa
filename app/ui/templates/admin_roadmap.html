@@ -1,0 +1,42 @@
+{% extends "admin_shell.html" %}
+{% block admin_content %}
+<section class="account-card" aria-labelledby="live-data-title">
+    <h2 class="account-section-title" id="live-data-title">Live-данные</h2>
+    <p>Источник {{ 'настроен' if live_configured else 'ожидает подключения' }}. API доступен после входа в админку.</p>
+    <p><a href="{{ url_for('admin.live_data', days=30) }}"><code>GET /admin/api/v1/live-data?days=30</code></a></p>
+    <p class="account-muted">Интервал от 1 до 90 дней включительно. Ответ содержит дату расчёта, источник и агрегаты по дням UTC. CTR относится к дате показа, число переходов — к дате перехода. Дни без показов имеют пустое значение CTR.</p>
+    <p class="account-muted">Без адаптера API возвращает HTTP 503 и статус <code>not_configured</code>. Точка подключения в приложении — <code>create_app(live_data_provider=...)</code>.</p>
+</section>
+
+<section class="account-card" aria-labelledby="architecture-title">
+    <h2 class="account-section-title" id="architecture-title">Как подключить ClickHouse</h2>
+    <ol class="architecture-steps">
+        <li><strong>Зафиксировать схему событий.</strong> Начать с показа, перехода и завершения. На событии хранить <code>event_id</code>, время события и загрузки, ID показа и материала, позицию, версию ранжировщика и группу эксперимента. Тестовый трафик помечать отдельно.</li>
+        <li><strong>Запустить небольшой пакетный экспорт.</strong> Отправлять события в ClickHouse по стабильному курсору с повторяемой загрузкой и сверкой с исходными счётчиками. При миграции аккаунтов и подписок в PostgreSQL можно добавить транзакционный outbox. При появлении нескольких потребителей рассмотреть Kafka и Debezium. <a href="https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html">Документация Debezium</a></li>
+        <li><strong>Собирать дневные витрины.</strong> В ClickHouse хранить поток событий и отдельно сводки по дате, алгоритму и позиции. Перед суммированием обрабатывать дубликаты по ID. Поздние переходы должны уточнять CTR дня показа. Сначала сверить число показов, уникальных переходов и CTR с SQLite. <a href="https://clickhouse.com/docs/concepts/features/materialized-views/incremental-materialized-view">Витрины ClickHouse</a></li>
+        <li><strong>Подключить чтение через адаптер.</strong> Дать API доступ только на чтение агрегатов. Аккаунты, почту, пароли и права на подписку оставить в операционной БД. Отдельно измерять задержку доставки событий и задержку ответа API.</li>
+    </ol>
+</section>
+
+<section class="account-card" aria-labelledby="tooling-title">
+    <h2 class="account-section-title" id="tooling-title">Варианты расширения</h2>
+    <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Варианты расширения стека">
+        <table class="admin-table">
+            <thead><tr><th scope="col">Слой</th><th scope="col">Инструменты</th><th scope="col">Когда пригодятся</th></tr></thead>
+            <tbody>
+                <tr><th scope="row">Операционные данные</th><td><a href="https://www.postgresql.org/docs/current/backup.html">PostgreSQL</a>, PgBouncer</td><td>При нескольких процессах записи и росте нагрузки на аккаунты, подписки и каталог. Проверять восстановление из резервной копии.</td></tr>
+                <tr><th scope="row">Аналитика и BI</th><td><a href="https://clickhouse.com/docs/">ClickHouse</a>, <a href="https://www.metabase.com/docs/latest/">Metabase</a>, Grafana</td><td>CTR, воронки, сегменты, качество карточек и сравнение версий ранжировщика по большому потоку событий.</td></tr>
+                <tr><th scope="row">Доставка событий</th><td><a href="https://kafka.apache.org/documentation/">Kafka</a>, Debezium, outbox</td><td>Когда события нужны аналитике, поиску и обучению одновременно. Нужны повторная доставка, дедупликация и отслеживание отставания.</td></tr>
+                <tr><th scope="row">Расчёты и проверка данных</th><td>Планировщик CI, <a href="https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/overview.html">Airflow</a>, <a href="https://docs.getdbt.com/docs/build/data-tests">dbt</a>, Great Expectations</td><td>Для регулярных офлайн-прогонов, проверки свежести, схемы и уникальности событий. Airflow полезен, когда появятся зависимости между заданиями.</td></tr>
+                <tr><th scope="row">Поиск и подбор кандидатов</th><td>Текущий BM25, <a href="https://github.com/pgvector/pgvector">pgvector</a>, <a href="https://docs.opensearch.org/latest/search-plugins/hybrid-search/">OpenSearch</a>, <a href="https://qdrant.tech/documentation/search/hybrid-queries/">Qdrant</a></td><td>Сначала сравнить лексический и векторный поиск на текущих наборах. Отдельный индекс рассматривать по мере роста каталога или требований к задержке.</td></tr>
+                <tr><th scope="row">Персонализация</th><td>Текущий ranker, CatBoost или LightGBM, <a href="https://docs.feast.dev/">Feast</a></td><td>Проверять, улучшают ли признаки свежих действий, уровня и формата смену контекста. Feature store нужен, когда несколько моделей используют общие признаки.</td></tr>
+                <tr><th scope="row">Эксперименты</th><td><a href="https://mlflow.org/docs/latest/ml/model-registry/">MLflow</a>, <a href="https://openfeature.dev/">OpenFeature</a>, <a href="https://posthog.com/docs/experiments">PostHog</a></td><td>Версионировать прогоны и модели, включать варианты под флагами, записывать факт попадания в эксперимент и измерять открытие или начало обучения.</td></tr>
+                <tr><th scope="row">Фоновые задачи и кеш</th><td><a href="https://docs.celeryq.dev/en/stable/getting-started/introduction.html">Celery</a>, <a href="https://valkey.io/topics/introduction/">Valkey</a> или Redis</td><td>Выносить долгие прогоны из HTTP-запроса и кешировать публичные метаданные. Для персональной выдачи учитывать права и версию каталога в ключе кеша.</td></tr>
+                <tr><th scope="row">Наблюдаемость</th><td><a href="https://opentelemetry.io/docs/what-is-opentelemetry/">OpenTelemetry</a>, <a href="https://prometheus.io/docs/introduction/overview/">Prometheus</a>, <a href="https://grafana.com/docs/grafana/latest/">Grafana</a>, Loki, Sentry</td><td>Следить за p95 задержки, 5xx, долей пустых выдач, отставанием загрузки и доступностью источников.</td></tr>
+                <tr><th scope="row">Хранилище и восстановление</th><td>S3-совместимое хранилище, Parquet, <a href="https://iceberg.apache.org/docs/latest/">Apache Iceberg</a></td><td>Сохранять версии выгрузок, резервные копии и результаты офлайн-тестов. Табличный формат нужен при большом объёме архивных данных и регулярных перерасчётах.</td></tr>
+                <tr><th scope="row">Релизы и секреты</th><td>GitHub Actions, Docker Compose, Kubernetes, Vault</td><td>Автоматизировать проверки, выкладку и откат. Оркестрация нужна при нескольких сервисах и узлах, секреты хранятся отдельно от сборки и отчётов.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

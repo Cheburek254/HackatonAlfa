@@ -14,6 +14,7 @@ from PIL import Image
 
 from app.contracts import Material, Profile, Recommendation, RecommendationResult
 from app.ctr_report import DailyActivity, Metrics, read_daily_activity, read_report, read_top_cards
+from app.live_data import LiveDataSnapshot
 from app.ui.stub import recommend as stub_recommend
 from app.ui.web import create_app
 from evaluation.runner import EVALUATION_DIR
@@ -87,14 +88,14 @@ class WebFlowTest(unittest.TestCase):
         }, page="/profile", client=guest).status_code, 403)
         self.assertEqual(self.post_form("/admin/accounts", {
             "action": "grant", "username": "nextadmin",
-        }, page="/admin").status_code, 303)
+        }, page="/admin/settings").status_code, 303)
         self.assertEqual(guest.get("/admin").location, "/admin/login")
         self.assertEqual(self.post_form("/admin/login", {
             "username": "nextadmin", "password": self.password,
         }, client=guest).location, "/admin")
 
         new_account = {"action": "create", "username": "newadmin", "password": self.password}
-        self.assertEqual(self.post_form("/admin/accounts", new_account, page="/admin").status_code, 303)
+        self.assertEqual(self.post_form("/admin/accounts", new_account, page="/admin/settings").status_code, 303)
         new_admin = self.app.test_client()
         self.assertEqual(self.post_form("/admin/login", new_account, client=new_admin).location, "/admin")
 
@@ -115,7 +116,12 @@ class WebFlowTest(unittest.TestCase):
         self.assertEqual(totals, {"algorithm-a": Metrics(3, 1), "algorithm-b": Metrics(1, 0)})
         self.assertEqual(detail[0], ("algorithm-a", "recommended", 1, Metrics(2, 1)))
         self.assertAlmostEqual(totals["algorithm-a"].ctr, 100 / 3)
-        page = new_admin.get("/admin").get_data(as_text=True)
+        summary = new_admin.get("/admin").get_data(as_text=True)
+        self.assertIn("Оценка качества рекомендаций", summary)
+        self.assertIn('href="/admin/tests"', summary)
+        self.assertNotIn("Результаты по сценариям", summary)
+        self.assertNotIn("Сводка по алгоритмам", summary)
+        page = new_admin.get("/admin/analytics").get_data(as_text=True)
         self.assertIn("Сводка по алгоритмам", page)
         self.assertIn("50,00%", page)
         self.assertNotIn("demo-only", page)
@@ -123,7 +129,7 @@ class WebFlowTest(unittest.TestCase):
         self.assertIn("app.ai.stub.recomend", page)
         self.assertIn("Эффективность карточек", page)
         self.assertIn("Динамика за 30 дней", page)
-        comparison = self.post_form("/admin", {"evaluation_suite": "demo"}, client=new_admin).get_data(as_text=True)
+        comparison = self.post_form("/admin/tests", {"evaluation_suite": "demo"}, client=new_admin).get_data(as_text=True)
         self.assertIn("Проверено сценариев: 50", comparison)
         self.assertIn("Синтетический каталог · результаты", comparison)
         self.assertIn("Hit@3", comparison)
@@ -131,7 +137,7 @@ class WebFlowTest(unittest.TestCase):
         self.assertIn("outside-catalog", comparison)
         self.assertIn("CTR по дате показа", page)
 
-        unavailable = self.post_form("/admin", {"evaluation_suite": "real"}, client=new_admin).get_data(as_text=True)
+        unavailable = self.post_form("/admin/tests", {"evaluation_suite": "real"}, client=new_admin).get_data(as_text=True)
         self.assertIn("подключите экспорт каталога", unavailable)
         self.assertNotIn("Проверено сценариев", unavailable)
 
@@ -147,21 +153,21 @@ class WebFlowTest(unittest.TestCase):
         )
         self.app.config["CATALOG_FORMATS"] = {material.id: material.format}
         self.app.config["CATALOG_TITLES"] = {material.id: material.title}
-        real_report = self.post_form("/admin", {"evaluation_suite": "real"}, client=new_admin).get_data(as_text=True)
+        real_report = self.post_form("/admin/tests", {"evaluation_suite": "real"}, client=new_admin).get_data(as_text=True)
         self.assertIn("Реальный каталог · результаты", real_report)
         self.assertIn("350 размеченных сценариев", real_report)
         self.assertIn("Проверено сценариев: 350", real_report)
         self.assertNotIn("outside-catalog", real_report)
-        self.assertIn(material.title, new_admin.get("/admin?category=курс").get_data(as_text=True))
-        self.assertNotIn(material.title, new_admin.get("/admin?category=статья").get_data(as_text=True))
+        self.assertIn(material.title, new_admin.get("/admin/analytics?category=курс").get_data(as_text=True))
+        self.assertNotIn(material.title, new_admin.get("/admin/analytics?category=статья").get_data(as_text=True))
 
         with closing(sqlite3.connect(self.database_path)) as connection, connection:
             connection.execute(
                 """INSERT INTO interaction_events (user_id, material_id, kind, occurred_at)
                    SELECT id, 'test-card', 'view', 100 FROM users WHERE username IN ('owner', 'nextadmin')"""
             )
-        response = self.post_form("/admin/history/clear", {"confirm": "1"}, page="/admin")
-        self.assertEqual(response.location, "/admin#admin-history")
+        response = self.post_form("/admin/history/clear", {"confirm": "1"}, page="/admin/settings")
+        self.assertEqual(response.location, "/admin/settings#admin-history")
         with closing(sqlite3.connect(self.database_path)) as connection:
             remaining = connection.execute(
                 "SELECT username FROM interaction_events JOIN users ON users.id = user_id"
@@ -733,6 +739,31 @@ class WebFlowTest(unittest.TestCase):
         self.assertEqual(other.get("/profile").location, "/login")
         self.assertEqual(self.post_form("/login", credentials).status_code, 401)
         self.assertEqual(self.post_form("/login", {**credentials, "password": form["new_password"]}).status_code, 303)
+
+    def test_live_data_contract_requires_admin_and_validates_provider_output(self):
+        endpoint = "/admin/api/v1/live-data"
+        self.assertEqual(self.client.get(endpoint).status_code, 401)
+        self.assertEqual(self.register().status_code, 303)
+        self.assertEqual(self.client.get(endpoint).status_code, 403)
+        self.assertEqual(self.app.test_cli_runner().invoke(args=["admin", "grant", "owner"]).exit_code, 0)
+        self.assertEqual(self.client.get(endpoint).status_code, 401)
+        self.assertEqual(self.post_form("/admin/login", {"username": "owner", "password": self.password}).status_code, 303)
+        self.assertEqual(self.client.get(endpoint + "?days=91").status_code, 400)
+        response = self.client.get(endpoint)
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json["status"], "not_configured")
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+
+        now = datetime.now(UTC)
+        self.app.config["LIVE_DATA_PROVIDER"] = lambda start, end: LiveDataSnapshot(
+            "test", now, ((start, DailyActivity(4, 2, 1)), (end, DailyActivity(0, 3, 0))),
+        )
+        result = self.client.get(endpoint + "?days=2").json
+        self.assertEqual(result["period"]["timezone"], "UTC")
+        self.assertEqual(result["daily"][0]["ctr_pct"], 25)
+        self.assertIsNone(result["daily"][1]["ctr_pct"])
+        self.assertEqual(self.client.get(endpoint + "?days=1").status_code, 502)
+        self.assertIn("ClickHouse", self.client.get("/admin/roadmap").get_data(as_text=True))
 
     def test_course_plus_activation_requires_provider_confirmation(self):
         self.assertEqual(self.register().status_code, 303)

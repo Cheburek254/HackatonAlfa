@@ -15,6 +15,7 @@ from app.catalog.lessons import read_programs
 from app.catalog.subscriptions import ACCESS_LABELS, access_category, available_access, entitled_catalog
 from app.contracts import Material, Profile, RecommendationResult, Recommender
 from app.ctr_report import ORDER_LABELS
+from app.live_data import LiveDataProvider
 from app.database import account_database_path
 from app.ui.accounts import (
     DEMO_PASSWORD_CODE, DEMO_USERNAME, PROFILE_FIELDS, account_avatar, check_csrf, configure_accounts, csrf_token,
@@ -95,11 +96,13 @@ def create_app(
     recommender: Recommender = recommend, *, database_path: Path | None = None, algorithm_name: str | None = None,
     password_code_sender: Callable[[str, str], None] | None = None,
     course_plus_activator: Callable[[int], bool] | None = None,
+    live_data_provider: LiveDataProvider | None = None,
 ) -> Flask:
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = 8 * 1024
     app.config["PASSWORD_CODE_SENDER"] = password_code_sender
     app.config["COURSE_PLUS_ACTIVATOR"] = course_plus_activator
+    app.config["LIVE_DATA_PROVIDER"] = live_data_provider
     source = catalog_source()
     is_demo_catalog = source == DEMO_CATALOG_PATH
     catalog = load_catalog(source)

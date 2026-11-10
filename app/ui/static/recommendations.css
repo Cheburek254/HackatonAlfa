@@ -318,6 +318,18 @@ h1 {
 .admin-kpis dd { margin: 6px 0 0; font-size: clamp(25px, 4vw, 43px); font-weight: 800; font-variant-numeric: tabular-nums; }
 .admin-kpis > div:last-child { border-color: #6c3a36; background: #3a2020; }
 .admin-sections { display: grid; gap: 18px; }
+.admin-section-links { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+.admin-section-links a { font-weight: 650; }
+#admin-summary h3 { margin-top: 22px; }
+.admin-assessments { display: grid; gap: 8px; margin: 12px 0 20px; padding: 0; list-style: none; }
+.admin-assessments li { border-inline-start: 3px solid #909098; padding: 10px 13px; border-radius: 7px; background: #f5f5f7; }
+.admin-assessments.needs-attention li { border-inline-start-color: #a72923; }
+.admin-assessments.meets-target li { border-inline-start-color: #247454; }
+.admin-assessment-title { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 14px; }
+.admin-assessment-title a { font-weight: 650; }
+.admin-assessments p { margin: 5px 0 0; color: var(--muted); line-height: 1.45; }
+.architecture-steps { padding-inline-start: 23px; }
+.architecture-steps li { margin-top: 12px; line-height: 1.5; }
 .admin-inline-form { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 14px; }
 .admin-inline-form select { margin-inline-start: 6px; padding: 7px 10px; border: 1px solid #c9c9cf; border-radius: 8px; background: #fff; color: var(--ink); font: inherit; }
 .admin-evaluation-details { margin-top: 16px; }

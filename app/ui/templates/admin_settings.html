@@ -1,0 +1,48 @@
+{% extends "admin_shell.html" %}
+{% block admin_content %}
+<section class="account-card" id="admin-history" aria-labelledby="admin-history-title">
+    <h2 id="admin-history-title" class="account-section-title">Моя история</h2>
+    <p class="account-muted">Очистка удаляет ваши просмотры и переходы, которые учитываются при подборе. Сводная статистика CTR сохраняется.</p>
+    {% for category, message in get_flashed_messages(with_categories=true, category_filter=['history_error', 'history_success']) %}
+    <p class="{{ 'account-error' if category == 'history_error' else 'account-notice' }} admin-message" role="status">{{ message }}</p>
+    {% endfor %}
+    <form class="admin-inline-form" method="post" action="{{ url_for('admin.clear_own_history') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label><input type="checkbox" name="confirm" value="1" required> Подтверждаю очистку своей истории</label>
+        <button class="button button-primary" type="submit">Очистить историю</button>
+    </form>
+</section>
+
+<section class="account-card" id="admin-accounts" aria-labelledby="admin-accounts-title">
+    <h2 id="admin-accounts-title" class="account-section-title">Админ-аккаунты</h2>
+    <p class="account-muted">Администраторы могут смотреть отчёт, создавать админ-аккаунты и выдавать админ-роли.</p>
+    {% for category, message in get_flashed_messages(with_categories=true, category_filter=['error', 'success']) %}
+    <p class="{{ 'account-error' if category == 'error' else 'account-notice' }} admin-message" role="{{ 'alert' if category == 'error' else 'status' }}">{{ message }}</p>
+    {% endfor %}
+    <ul class="admin-users" aria-label="Текущие администраторы">
+        {% for username in usernames %}<li>{{ username }}</li>{% endfor %}
+    </ul>
+    <div class="admin-forms">
+        <form class="admin-form" method="post" action="{{ url_for('admin.manage_accounts') }}" aria-labelledby="grant-admin-title">
+            <h3 id="grant-admin-title">Выдать роль</h3>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="grant">
+            <label>Логин пользователя<input name="username" required minlength="3" maxlength="32" autocapitalize="none"></label>
+            <button class="button button-primary" type="submit">Выдать админ-роль</button>
+        </form>
+        <form class="admin-form" method="post" action="{{ url_for('admin.manage_accounts') }}" aria-labelledby="create-admin-title">
+            <h3 id="create-admin-title">Создать аккаунт</h3>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="create">
+            <label>Новый логин<input name="username" required minlength="3" maxlength="32" autocapitalize="none"></label>
+            <label>Пароль<input name="password" type="password" required minlength="{{ password_min }}" maxlength="{{ password_max }}" autocomplete="new-password" aria-describedby="admin-password-hint"></label>
+            <small id="admin-password-hint">{{ password_hint }}</small>
+            <button class="button button-primary" type="submit">Создать админ-аккаунт</button>
+        </form>
+    </div>
+</section>
+<form class="logout-form" method="post" action="{{ url_for('accounts.logout') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="button" type="submit">Выйти из аккаунта</button>
+</form>
+{% endblock %}
