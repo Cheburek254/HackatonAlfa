@@ -10,7 +10,7 @@ from evaluation.runner import EvaluationDataError, FIXTURES_DIR, SUITE_LABELS, l
 
 
 def main() -> None:
-    parser = ArgumentParser(description="Оценка тематического бейзлайна и recommend.")
+    parser = ArgumentParser(description="Сравнение популярных курсов, тематического бейзлайна и recommend.")
     parser.add_argument("--suite", choices=SUITE_LABELS, default="demo", help="Набор сценариев")
     parser.add_argument("--catalog", type=Path, help="Путь к экспорту SQLite/JSON для реального набора")
     args = parser.parse_args()
@@ -23,17 +23,18 @@ def main() -> None:
             source = args.catalog or catalog_source()
             catalog = load_real_catalog(source)
             links_directory = source.parent
-        offline = partial(recommend, explain_with_llm=False, links_directory=links_directory)
+        offline = partial(recommend, explain_with_llm=False, links_directory=links_directory, balance_access=True)
         report = run_evaluation(offline, suite=args.suite, real_catalog=catalog)
     except (EvaluationDataError, FileNotFoundError) as error:
         parser.exit(1, f"{error}\n")
     print(f"{SUITE_LABELS[args.suite]}. Сценариев: {report.scenario_count}.\n")
-    print("| Метод | Hit@3 | MRR@3 |")
-    print("| --- | ---: | ---: |")
+    print("| Метод | Hit@3 | MRR@3 | Precision@3 | nDCG@3 | MAP@3 |")
+    print("| --- | ---: | ---: | ---: | ---: | ---: |")
     for row in report.summaries:
         hit = f"{row.hit_rate:.1%} ({row.hits}/{row.eligible})" if row.hit_rate is not None else "—"
-        mrr = f"{row.mrr:.3f}" if row.mrr is not None else "—"
-        print(f"| {row.method} | {hit} | {mrr} |")
+        scores = [f"{value:.3f}" if value is not None else "—"
+                  for value in (row.mrr, row.precision, row.ndcg, row.map_at_k)]
+        print(f"| {row.method} | {hit} | {' | '.join(scores)} |")
 
     print("\n| Профиль | Метод | Топ-3 в порядке выдачи | Hit@3 | RR@3 |")
     print("| --- | --- | --- | ---: | ---: |")
@@ -42,7 +43,7 @@ def main() -> None:
         hit = str(int(rank > 0)) if rank is not None else "—"
         rr = f"{rank:.3f}" if rank is not None else "—"
         print(f"| {row.case_id} | {row.method} | {', '.join(row.material_ids) or 'пусто'} | {hit} | {rr} |")
-    print("\nСценарии без релевантных материалов помечены «—» и исключены из обеих метрик.")
+    print("\nСценарии без релевантных материалов исключены из метрик. Если для курсов нет значений популярности, бейзлайн помечен «—».")
 
 
 if __name__ == "__main__":

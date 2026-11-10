@@ -1,7 +1,7 @@
 {% extends "admin_shell.html" %}
 {% block admin_content %}
 <nav class="admin-section-links" aria-label="Наборы тестов">
-    <a href="#admin-evaluation">Hit@3 и MRR@3</a>
+    <a href="#admin-evaluation">Сравнение ранжирования</a>
     <a href="#admin-catalog-quality">Качество каталога</a>
     <a href="#admin-stress">Офлайн-проверки</a>
     <a href="#admin-learning">Сложные сценарии</a>
@@ -9,7 +9,8 @@
 </nav>
 <section class="account-card" id="admin-evaluation" aria-labelledby="admin-evaluation-title">
     <h2 id="admin-evaluation-title" class="account-section-title">Тесты рекомендаций</h2>
-    <p class="account-muted">Hit@3 показывает долю сценариев с подходящим материалом в тройке. MRR@3 учитывает место первого подходящего материала.</p>
+    <p class="account-muted">Сравниваем персональную выдачу, тематический бейзлайн и один и тот же топ популярных курсов для всех профилей.</p>
+    <p class="account-muted">Hit@3 и MRR@3 оценивают первое попадание. Precision@3 показывает долю подходящих карточек в тройке, nDCG@3 учитывает их позиции, MAP@3 усредняет точность на позициях попаданий.</p>
     <div class="admin-forms">
         {% for suite, label in evaluation_suites.items() %}
         <form class="admin-form" method="post" action="{{ url_for('admin.tests', _anchor='admin-evaluation') }}" aria-labelledby="evaluation-{{ suite }}-title">
@@ -30,16 +31,22 @@
     <p class="account-muted" role="status">Проверено сценариев: {{ comparison.scenario_count }}.{% if evaluation_suite == 'demo' %} Сценарии без релевантной карточки показаны отдельно.{% endif %}</p>
     <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Итоги тестов · {{ evaluation_suites[evaluation_suite] }}">
         <table class="admin-table">
-            <thead><tr><th scope="col">Метод</th><th scope="col">Hit@3</th><th scope="col">MRR@3</th></tr></thead>
+            <thead><tr><th scope="col">Метод</th><th scope="col">Hit@3</th><th scope="col">MRR@3</th><th scope="col">Precision@3</th><th scope="col">nDCG@3</th><th scope="col">MAP@3</th></tr></thead>
             <tbody>
                 {% for row in comparison.summaries %}
                 <tr><th scope="row">{{ row.method }}</th>
                     <td>{% if row.hit_rate is not none %}{{ '%.1f' | format(100 * row.hit_rate) }}% ({{ row.hits }}/{{ row.eligible }}){% else %}—{% endif %}</td>
-                    <td>{{ '%.3f' | format(row.mrr) if row.mrr is not none else '—' }}</td></tr>
+                    {% for value in (row.mrr, row.precision, row.ndcg, row.map_at_k) %}
+                    <td>{{ '%.3f' | format(value) if value is not none else '—' }}</td>
+                    {% endfor %}
+                </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
+    {% if comparison.summaries[0].eligible == 0 %}
+    <p class="account-muted">Для расчёта бейзлайна нужны курсы с данными о популярности и сценарии с размеченными попаданиями.</p>
+    {% endif %}
     <details class="admin-evaluation-details">
         <summary>Результаты по сценариям</summary>
         <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Результаты по сценариям">

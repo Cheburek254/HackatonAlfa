@@ -3,6 +3,7 @@
 import json
 import math
 import re
+from collections import Counter
 from collections.abc import Callable
 from datetime import UTC, datetime
 from functools import partial
@@ -109,10 +110,20 @@ def _find_next_materials(
     curr_format = (current_material.format or "").lower()
 
     candidates = []
+    paid_followups = []
     for m in all_materials:
         if m.id == current_material.id:
             continue
-        if allowed_access is not None and access_category(m) not in allowed_access:
+        category = access_category(m)
+        needs_access = allowed_access is not None and category not in allowed_access
+        paid_followup = (
+            needs_access and category in {"paid", "subscription"} and access_category(current_material) == "free"
+            and (m.entity_type == "course" or _format_key(m) == "курс")
+            and bool(curr_topics.intersection(m.topics))
+            and (not curr_stages or not m.stages or bool(curr_stages.intersection(m.stages)))
+            and (not curr_industries or not m.industries or bool(curr_industries.intersection(m.industries)))
+        )
+        if needs_access and not paid_followup:
             continue
 
         score = 0.0
@@ -159,12 +170,19 @@ def _find_next_materials(
         else:
             step_label = "Рекомендуем изучить"
 
-        candidates.append((score, step_label, m))
+        if paid_followup:
+            topic = min(common_topics)
+            paid_followups.append((score, f"Углубление по теме «{topic}»", m))
+        else:
+            candidates.append((score, step_label, m))
 
     candidates.sort(key=lambda item: item[0], reverse=True)
+    next_items = candidates[:limit]
+    if limit > 1 and paid_followups and all(access_category(row[2]) == "free" for row in next_items):
+        next_items = next_items[:limit - 1] + [max(paid_followups, key=lambda row: row[0])]
     return [
         {"material": m, "step_label": label}
-        for _, label, m in candidates[:limit]
+        for _, label, m in next_items
     ]
 
 
@@ -197,7 +215,7 @@ def create_app(
     app.config["CATALOG_FORMATS"] = {} if is_demo_catalog else {material.id: _format_key(material) for material in catalog}
     app.config["CATALOG_FORMAT_LABELS"] = FORMAT_LABELS
     app.config["EVALUATION_RECOMMENDERS"] = {
-        suite: partial(recommend, explain_with_llm=False, links_directory=directory)
+        suite: partial(recommend, explain_with_llm=False, links_directory=directory, balance_access=True)
         if recommender is recommend else recommender
         for suite, directory in (("demo", FIXTURES), ("real", source.parent))
     }
@@ -211,7 +229,7 @@ def create_app(
         f"{getattr(recommender, '__qualname__', recommender_type.__qualname__)}"
     )
     if algorithm_name is None and recommender is recommend:
-        algorithm += ":demo-catalog" if is_demo_catalog else ":history-v3.1"
+        algorithm += ":demo-catalog" if is_demo_catalog else ":access-pacing-v1"
     app.jinja_env.globals["signed_in"] = lambda: current_account() is not None
     app.jinja_env.globals["current_account"] = current_account
     app.jinja_env.globals["chat_pages"] = CHAT_PAGES
@@ -416,14 +434,20 @@ def create_app(
                 access_filters = tuple(category for category in all_access_filters if category in requested)
             if access_filters != all_access_filters:
                 candidates = tuple(m for m in catalog if access_category(m) in access_filters)
-        rank = partial(recommend, history_as_of=datetime.now(UTC)) if recommender is recommend and not is_demo_catalog else recommender
-        result = rank(candidates, profile, history, len(candidates)) if candidates else RecommendationResult((), "")
         result_order = form.get("result_order", form.get("current_order", "recommended"))
         if result_order not in ORDER_LABELS:
             result_order = "recommended"
         format_filter = form.get("selected_format") or form.get("format_filter", request.args.get("format", "all"))
         if format_filter not in FORMAT_LABELS:
             format_filter = "all"
+        rank = recommender
+        if recommender is recommend:
+            rank = partial(
+                recommend, links_directory=source.parent,
+                history_as_of=None if is_demo_catalog else datetime.now(UTC),
+                balance_access=(access_filters == all_access_filters and format_filter == "all" and result_order == "recommended"),
+            )
+        result = rank(candidates, profile, history, len(candidates)) if candidates else RecommendationResult((), "")
 
         candidate_ids = {material.id for material in candidates}
         all_candidate_cards = [(materials_by_id[item.material_id], item) for item in result.items if item.material_id in candidate_ids]
@@ -445,6 +469,8 @@ def create_app(
         if page_size not in PAGE_SIZES:
             page_size = RESULTS_PER_PAGE
         visible_cards = cards[:page * page_size]
+        first_cards = cards[:RESULTS_PER_PAGE]
+        access_counts = Counter(access_category(material) for material, _ in first_cards)
         impression_batch, impression_batch_id, impression_tickets = issue_impression_tickets(
             [material.id for material, _ in visible_cards], algorithm, result_order, f"{format_filter}:{page_size}:{','.join(access_filters)}",
             form.get("impression_batch") if page > 1 else None,
@@ -467,6 +493,8 @@ def create_app(
             format_filters=FORMAT_LABELS,
             format_counts=format_counts,
             access_labels=ACCESS_LABELS,
+            access_counts=access_counts,
+            access_sample_size=len(first_cards),
             access_filters=access_filters,
             available_access=available,
             page_size=page_size,

@@ -52,6 +52,8 @@
                             <div class="next-card-bottom">
                                 {% if item.material.subscriptions %}
                                 <span class="tag paid">По подписке Курс+</span>
+                                {% elif item.material.access == 'paid' %}
+                                <span class="tag paid">{{ '{:,.0f}'.format(item.material.cost).replace(',', ' ') ~ ' ₽' if item.material.cost is not none else 'Платно' }}</span>
                                 {% elif item.material.access == 'free' %}
                                 <span class="tag">Бесплатно</span>
                                 {% endif %}

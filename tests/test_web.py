@@ -134,6 +134,9 @@ class WebFlowTest(unittest.TestCase):
         self.assertIn("Синтетический каталог · результаты", comparison)
         self.assertIn("Hit@3", comparison)
         self.assertIn("MRR@3", comparison)
+        for metric in ("Precision@3", "nDCG@3", "MAP@3", "Популярные курсы"):
+            self.assertIn(metric, comparison)
+        self.assertIn("План A/B-теста", new_admin.get("/admin/roadmap").get_data(as_text=True))
         self.assertIn("outside-catalog", comparison)
         self.assertIn("CTR по дате показа", page)
 
@@ -310,6 +313,7 @@ class WebFlowTest(unittest.TestCase):
             response = client.post("/", data={"goal": "налоги для ИП до 1000 ₽", "result_order": "rating"})
             page = response.get_data(as_text=True)
             self.assertEqual(re.findall(r'href="/materials/([^"/?]+)\?', page), ["paid-low", "free-tax"])
+            self.assertIn("Состав первых 2 карточек · бесплатные 1 · платные 0 · Курс+ 1", page)
             for category, mid in (("free", "free-tax"), ("paid", "paid-high"), ("subscription", "paid-low")):
                 self.assertIn(f'name="access_filter" value="{category}" checked>', page)
                 filtered = client.post("/", data={"access_filters_set": "1", "access_filter": category}).get_data(as_text=True)
@@ -321,6 +325,9 @@ class WebFlowTest(unittest.TestCase):
             self.assertEqual(preview["url"], "https://example.com/low")
             transition = client.post(preview["open_url"], data={"csrf_token": preview["csrf_token"]})
             self.assertEqual(transition.location, "https://example.com/low")
+            next_page = client.get("/materials/free-tax").get_data(as_text=True)
+            self.assertIn("Углубление по теме «налоги»", next_page)
+            self.assertIn('href="/materials/paid-high"', next_page)
 
             runner = app.test_cli_runner()
             self.assertEqual(runner.invoke(args=["admin", "course-plus", "demo"]).exit_code, 0)

@@ -10,6 +10,7 @@ from math import log1p, sqrt
 from pathlib import Path
 
 from app.catalog import catalog_data_dir
+from app.catalog.subscriptions import access_category
 from app.contracts import (
     InteractionEvent,
     Material,
@@ -19,6 +20,7 @@ from app.contracts import (
 )
 from app.recommender.llm import refine_with_llm_if_configured
 from app.recommender.onboarding import onboarding
+from app.recommender.pacing import balance_first_page
 
 HISTORY_HALF_LIFE_DAYS = 28
 CONFIRMATION_WINDOW_DAYS = 14
@@ -264,11 +266,11 @@ def _passes_hard_filters(material: Material, constraints: dict) -> bool:
     if not material.id or not material.title.strip() or not material.url.strip():
         return False
 
-    if constraints["only_free"] and material.access != "free":
+    if constraints["only_free"] and access_category(material) != "free":
         return False
 
     max_budget = constraints["max_budget"]
-    if max_budget is not None and material.access != "free":
+    if max_budget is not None and access_category(material) != "free":
         cost = material.cost
         if cost is None or cost > max_budget:
             return False
@@ -626,6 +628,7 @@ def recommend(
     use_expert_links: bool = True,
     expert_links: dict[str, list[str]] | None = None,
     history_as_of: datetime | None = None,
+    balance_access: bool = False,
 ) -> RecommendationResult:
     """Ранжирует материалы каталога с учётом задачи, профиля, истории и популярности."""
     if not catalog or limit <= 0:
@@ -649,8 +652,8 @@ def recommend(
         seen_urls.add(mat.url)
         candidates.append((idx, mat))
 
-    # Если жёсткий фильтр отсёк вообще всё, ослабляем фильтр формата/бюджета, сохраняя валидность
-    if not candidates:
+    # При пустой выдаче можно предложить другой формат, сохранив заявленные условия оплаты.
+    if not candidates and not constraints["only_free"] and constraints["max_budget"] is None:
         for idx, mat in enumerate(catalog):
             if mat.id not in seen_ids and mat.id and mat.title.strip() and mat.url.strip():
                 seen_ids.add(mat.id)
@@ -938,7 +941,21 @@ def recommend(
 
     # Выбираем топ-limit материалов
     selected_ids = {mat.id for _, mat, _ in context_items}
-    selected = context_items + [row for row in scored_items if row[1].id not in selected_ids][:limit - len(context_items)]
+    ordered = context_items + [row for row in scored_items if row[1].id not in selected_ids]
+    if balance_access and not browse_from_seed and not is_weak_match and not any(
+        (constraints["only_free"], constraints["max_budget"] is not None, constraints["only_format"])
+    ):
+        beginner = _normalize_text(profile.stage or "") in {"идея", "запуск"} or (
+            _normalize_text(profile.experience or "") in EXPERIENCE_ALIASES["начинающий"]
+        )
+        experienced = _normalize_text(profile.experience or "") in EXPERIENCE_ALIASES["опытный"]
+        engaged = sum(kind in {"click", "complete"} for kind in seen_events.values()) >= 2
+        growing = _normalize_text(profile.stage or "") in {"работающий бизнес", "рост"}
+        paid_target = 1
+        if not beginner:
+            paid_target += int(experienced or engaged or growing) + int(experienced and growing and engaged)
+        ordered = balance_first_page(ordered, paid_target=paid_target, seen=set(seen_events))
+    selected = ordered[:limit]
 
     recommendations: list[Recommendation] = []
     selected_materials: list[Material] = []

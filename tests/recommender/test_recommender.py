@@ -35,6 +35,31 @@ class RecommenderTest(unittest.TestCase):
         self.assertEqual(len(res6.items), 6)
         self.assertEqual(len({i.material_id for i in res6.items}), 6)
 
+    def test_adaptive_access_mix_preserves_relevance_and_explicit_price(self):
+        catalog = tuple(
+            Material(f"free-{i}", f"Налоги · практика {i}", f"https://example.com/free/{i}",
+                     topics=("налоги",), format="статья", access="free") for i in range(6)
+        ) + tuple(
+            Material(f"paid-{i}", f"Налоги · курс {i}", f"https://example.com/paid/{i}",
+                     topics=("налоги",), format="курс", access="paid", cost=5000) for i in range(3)
+        ) + (Material("irrelevant", "Команда", "https://example.com/team", topics=("команда",), format="курс",
+                      access="paid", cost=3000, popularity=5000),)
+
+        def ranked(profile, items=catalog, limit=6):
+            return [item.material_id for item in recommend(items, profile, (), limit, balance_access=True).items]
+
+        beginner = Profile(goal="налоги", stage="запуск", experience="начинающий")
+        advanced = Profile(goal="налоги", stage="рост", experience="с опытом")
+        self.assertEqual(sum(mid.startswith("paid-") for mid in ranked(beginner)), 1)
+        self.assertEqual(sum(mid.startswith("paid-") for mid in ranked(advanced)), 2)
+        self.assertTrue(ranked(advanced)[0].startswith("free-"))
+        self.assertEqual(ranked(advanced, limit=3), ranked(advanced)[:3])
+        self.assertEqual(ranked(advanced)[:3], [item.material_id for item in recommend(catalog, advanced, (), 3).items])
+        self.assertNotIn("irrelevant", ranked(advanced))
+        for goal in ("только бесплатные", "налоги до 1000 ₽"):
+            self.assertEqual(ranked(Profile(goal=goal), items=catalog[6:]), [])
+        self.assertTrue(all(mid.startswith("free-") for mid in ranked(Profile(goal="только бесплатные налоги"))))
+
     def test_scenario_1_new_user_business_promotion(self):
         """Сценарий 1 из Приложения 2: новичок указывает задачу «продвижение бизнеса»."""
         result = recommend(self.catalog, Profile(goal="продвижение бизнеса"), (), 3)
@@ -93,7 +118,7 @@ class RecommenderTest(unittest.TestCase):
 
         def top(*materials):
             history = tuple(InteractionEvent(mid, "click") for mid in materials)
-            return tuple(card.material_id for card in recommend(catalog, profile, history, 3).items)
+            return tuple(card.material_id for card in recommend(catalog, profile, history, 3, balance_access=True).items)
 
         first = top("Налоги-0", "Налоги-1")
         self.assertTrue(all(mid.startswith("Налоги") for mid in first[:2]))

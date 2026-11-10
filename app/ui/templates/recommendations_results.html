@@ -9,6 +9,9 @@
                     {% if format_filter == 'all' and result_order == 'recommended' and result.ordering_reason %}
                     <p class="order-reason">{{ result.ordering_reason }}</p>
                     {% endif %}
+                    {% if not is_demo_catalog and access_sample_size %}
+                    <p class="order-reason">Состав первых {{ access_sample_size }} карточек · бесплатные {{ access_counts.free or 0 }} · платные {{ access_counts.paid or 0 }} · Курс+ {{ access_counts.subscription or 0 }}{% if access_counts.unknown %} · доступ не указан {{ access_counts.unknown }}{% endif %}</p>
+                    {% endif %}
                 </div>
 
                 {% if result.items %}

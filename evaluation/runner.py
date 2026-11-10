@@ -3,9 +3,10 @@
 import json
 from dataclasses import dataclass
 from functools import lru_cache
+from math import log2
 from pathlib import Path
 
-from app.catalog import DEMO_CATALOG_PATH, load_catalog, load_history
+from app.catalog import DEMO_CATALOG_PATH, load_catalog, load_history, material_format
 from app.contracts import InteractionEvent, Material, Profile, Recommender
 from evaluation.topic_baseline import recommend_by_topic
 
@@ -45,6 +46,9 @@ class EvaluationRow:
     method: str
     material_ids: tuple[str, ...]
     reciprocal_rank: float | None
+    precision: float | None
+    ndcg: float | None
+    average_precision: float | None
 
 
 @dataclass(frozen=True)
@@ -53,6 +57,9 @@ class EvaluationSummary:
     eligible: int
     hits: int
     mrr: float | None
+    precision: float | None
+    ndcg: float | None
+    map_at_k: float | None
 
     @property
     def hit_rate(self) -> float | None:
@@ -64,6 +71,22 @@ class EvaluationReport:
     summaries: tuple[EvaluationSummary, ...]
     rows: tuple[EvaluationRow, ...]
     scenario_count: int
+
+
+def _ranking_scores(ids: tuple[str, ...], relevant: set[str]) -> tuple[float, float, float, float]:
+    hit_ranks = []
+    remaining = relevant.copy()
+    for rank, mid in enumerate(ids[:TOP_K], 1):
+        if mid in remaining:
+            hit_ranks.append(rank)
+            remaining.remove(mid)
+    ideal_count = min(TOP_K, len(relevant))
+    ideal_gain = sum(1 / log2(rank + 1) for rank in range(1, ideal_count + 1))
+    reciprocal_rank = 1 / hit_ranks[0] if hit_ranks else 0.0
+    precision = len(hit_ranks) / TOP_K
+    ndcg = sum(1 / log2(rank + 1) for rank in hit_ranks) / ideal_gain
+    average_precision = sum(hit / rank for hit, rank in enumerate(hit_ranks, 1)) / ideal_count
+    return reciprocal_rank, precision, ndcg, average_precision
 
 
 def run_evaluation(
@@ -86,8 +109,13 @@ def run_evaluation(
                 f"Каталог не совпадает с разметкой. В сценарии {case['id']} отсутствуют материалы: "
                 f"{', '.join(sorted(unknown_ids))}."
             )
-    methods = (("Тематический бейзлайн", recommend_by_topic), ("recommend", recommender))
-    ranks: dict[str, list[float]] = {name: [] for name, _ in methods}
+    popular_courses = sorted(
+        (m for m in catalog if (m.entity_type == "course" or material_format(m) == "курс") and m.popularity is not None),
+        key=lambda m: (-m.popularity, m.id),
+    )
+    popular_ids = tuple(dict.fromkeys(m.id for m in popular_courses))[:TOP_K]
+    methods = ("Популярные курсы", "Тематический бейзлайн", "recommend")
+    scores_by_method: dict[str, list[tuple[float, float, float, float]]] = {name: [] for name in methods}
     rows = []
 
     for case in cases:
@@ -97,17 +125,18 @@ def run_evaluation(
             InteractionEvent(**event) for event in case.get("history", ())
         )
         profile = Profile(**case["profile"])
-        for name, recommend in methods:
-            result = recommend(catalog, profile, history, limit=TOP_K)
-            ids = tuple(item.material_id for item in result.items[:TOP_K])
-            score = None
-            if relevant:
-                score = next((1 / rank for rank, mid in enumerate(ids, 1) if mid in relevant), 0.0)
-                ranks[name].append(score)
-            rows.append(EvaluationRow(case["id"], case["note"], profile.goal, tuple(case["relevant_ids"]), name, ids, score))
+        topic = recommend_by_topic(catalog, profile, history, limit=TOP_K)
+        personalized = recommender(catalog, profile, history, limit=TOP_K)
+        orders = (popular_ids, *(tuple(item.material_id for item in result.items[:TOP_K]) for result in (topic, personalized)))
+        for name, ids in zip(methods, orders, strict=True):
+            scores = (None, None, None, None)
+            if relevant and (name != methods[0] or popular_ids):
+                scores = _ranking_scores(ids, relevant)
+                scores_by_method[name].append(scores)
+            rows.append(EvaluationRow(case["id"], case["note"], profile.goal, tuple(case["relevant_ids"]), name, ids, *scores))
 
-    summaries = tuple(
-        EvaluationSummary(name, len(scores), sum(score > 0 for score in scores), sum(scores) / len(scores) if scores else None)
-        for name, scores in ranks.items()
-    )
-    return EvaluationReport(summaries, tuple(rows), len(cases))
+    summaries = []
+    for name, scores in scores_by_method.items():
+        averages = tuple(sum(metric) / len(scores) for metric in zip(*scores)) if scores else (None,) * 4
+        summaries.append(EvaluationSummary(name, len(scores), sum(row[0] > 0 for row in scores), *averages))
+    return EvaluationReport(tuple(summaries), tuple(rows), len(cases))
