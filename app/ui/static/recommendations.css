@@ -875,6 +875,7 @@ h2 {
     margin-top: auto;
     padding-top: 10px;
     border-top: 1px solid #eef2f6;
+    flex-wrap: wrap;
 }
 
 .next-card-link-text {
@@ -885,6 +886,7 @@ h2 {
     align-items: center;
     white-space: nowrap;
     margin-left: auto;
+    flex-shrink: 0;
 }
 
 .material-card-actions {

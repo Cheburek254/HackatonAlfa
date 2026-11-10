@@ -12,6 +12,8 @@ services:
       ALFA_LLM_API_KEY: ${ALFA_LLM_API_KEY:-}
       ALFA_LLM_MODEL: ${ALFA_LLM_MODEL:-gemini-3.5-flash-lite}
       ALFA_BM25_WEIGHT: ${ALFA_BM25_WEIGHT:-0.25}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-nvidia/nemotron-3.5-super-vl:free}
     volumes:
       - accounts:/var/lib/alfahack
       - ${ALFA_CATALOG_DIR:-./data}:/app/data:ro

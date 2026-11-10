@@ -61,6 +61,29 @@ def _load_env_credentials() -> tuple[str, str]:
     return api_key, model
 
 
+def _load_openrouter_credentials() -> tuple[str, str]:
+    api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    model = os.environ.get("OPENROUTER_MODEL", "nvidia/nemotron-3.5-super-vl:free").strip()
+    if api_key:
+        return api_key, model
+
+    env_path = Path(__file__).resolve().parents[2] / ".env"
+    if env_path.is_file():
+        try:
+            for line in env_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k, v = k.strip(), v.strip()
+                if k == "OPENROUTER_API_KEY" and not api_key:
+                    api_key = v
+                elif k == "OPENROUTER_MODEL" and v:
+                    model = v
+        except Exception as exc:
+            logger.warning("Не удалось прочитать .env для OpenRouter: %s", exc)
+
+    return api_key, model
 def _find_relevant_materials(
     query: str,
     profile: dict,
@@ -278,6 +301,55 @@ def _call_gemini(api_key: str, model: str, message: str, history: list[dict], sy
     return None
 
 
+def _call_openrouter(
+    api_key: str,
+    model: str,
+    message: str,
+    history: list[dict],
+    system_prompt: str = BASE_SYSTEM_PROMPT,
+) -> str | None:
+    if not api_key:
+        return None
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    messages = [{"role": "system", "content": system_prompt}]
+    for item in history[-6:]:
+        role = "user" if item.get("role") == "user" else "assistant"
+        text = (item.get("text") or "").strip()
+        if text:
+            messages.append({"role": role, "content": text})
+    messages.append({"role": "user", "content": message})
+
+    payload = {
+        "model": model or "nvidia/nemotron-3.5-super-vl:free",
+        "messages": messages,
+        "temperature": 0.7,
+        "max_tokens": 700,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+            "HTTP-Referer": "https://alfakurs.alfa-bank.ru",
+            "X-Title": "AlfaKurs Assistant",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=12) as response:
+            res_data = json.loads(response.read().decode("utf-8"))
+            choices = res_data.get("choices") or []
+            if choices:
+                msg_obj = choices[0].get("message", {})
+                content = msg_obj.get("content") or ""
+                if content:
+                    return content.strip()
+    except Exception as exc:
+        logger.warning("Ошибка при обращении к OpenRouter API (%s): %s", model, exc)
+    return None
+
+
 def _fallback_reply(
     message: str,
     profile: dict | None = None,
@@ -350,6 +422,38 @@ def _fallback_reply(
             "3. При сохранении проблемы напишите в поддержку Альфа-Банка, специалисты оперативно помогут решить вопрос."
         )
 
+    # Проверка запроса на подробности о конкретном материале из списка (например: "расскажи о 1 статье")
+    item_match = re.search(
+        r"(?:расскажи|подробн\w*|что в|о чем|покажи|прочитай|разбер\w*)\s+(?:о|об|про)?\s*"
+        r"(?:(\d+)\s*(?:материал\w*|стать\w*|курс\w*|шаблон\w*)?|(перв\w*|втор\w*|трет\w*|четверт\w*|пят\w*)\s*(?:материал\w*|стать\w*|курс\w*|шаблон\w*)?)",
+        msg,
+    )
+    if item_match and cand:
+        idx = None
+        if item_match.group(1):
+            try:
+                idx = int(item_match.group(1)) - 1
+            except ValueError:
+                idx = None
+        elif item_match.group(2):
+            words_map = {"перв": 0, "втор": 1, "трет": 2, "четверт": 3, "пят": 4}
+            for w, i in words_map.items():
+                if item_match.group(2).startswith(w):
+                    idx = i
+                    break
+        if idx is not None and 0 <= idx < len(cand):
+            target = cand[idx]
+            desc = getattr(target, "description", "") or "Практический обучающий материал от экспертов «Альфа-Курса»."
+            lessons = getattr(target, "lessons", ()) or ()
+            lessons_info = ""
+            if lessons:
+                lessons_info = f"\n\nВ программе курса ({len(lessons)} уроков): " + ", ".join(getattr(l, "title", str(l)) for l in lessons[:3]) + "..."
+            return (
+                f"Материал **[«{target.title}»](/materials/{target.id})** ({getattr(target, 'format', 'материал')}):\n\n"
+                f"{desc}{lessons_info}\n\n"
+                f"Изучить материал можно здесь: [«{target.title}»](/materials/{target.id})."
+            )
+
     # Если есть подходящие кандидаты под нестандартный запрос
     if cand:
         cand_links = "\n".join(
@@ -420,16 +524,20 @@ def chat():
         )
 
     api_key, model = _load_env_credentials()
+    openrouter_key, openrouter_model = _load_openrouter_credentials()
     reply = None
 
-    if api_key:
+    if api_key or openrouter_key:
         system_prompt = _build_system_prompt(
             profile=profile,
             has_plus=has_plus,
             viewed_titles=viewed_titles,
             candidates=candidates,
         )
-        reply = _call_gemini(api_key, model, message, history, system_prompt=system_prompt)
+        if api_key:
+            reply = _call_gemini(api_key, model, message, history, system_prompt=system_prompt)
+        if not reply and openrouter_key:
+            reply = _call_openrouter(openrouter_key, openrouter_model, message, history, system_prompt=system_prompt)
 
     if not reply:
         reply = _fallback_reply(message, profile=profile, viewed_titles=viewed_titles, candidates=candidates)
