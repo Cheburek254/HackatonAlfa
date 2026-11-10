@@ -733,3 +733,22 @@ class WebFlowTest(unittest.TestCase):
         self.assertEqual(other.get("/profile").location, "/login")
         self.assertEqual(self.post_form("/login", credentials).status_code, 401)
         self.assertEqual(self.post_form("/login", {**credentials, "password": form["new_password"]}).status_code, 303)
+
+    def test_course_plus_activation_requires_provider_confirmation(self):
+        self.assertEqual(self.register().status_code, 303)
+        path = "/profile/course-plus/activate"
+        self.assertEqual(self.client.post(path).status_code, 400)
+        self.assertIn("Активировать Курс+", self.client.get("/profile").get_data(as_text=True))
+        self.assertEqual(self.post_form(path, {}, page="/profile").location, "/profile#course-plus")
+        demo = self.client.get("/profile").get_data(as_text=True)
+        self.assertIn("Сервис оформления подписки Курс+ пока не подключён", demo)
+        self.assertNotIn("Подписка Курс+ активна", demo)
+
+        self.app.config["COURSE_PLUS_ACTIVATOR"] = lambda account_id: False
+        self.assertEqual(self.post_form(path, {}, page="/profile").status_code, 303)
+        self.assertNotIn("Подписка Курс+ активна", self.client.get("/profile").get_data(as_text=True))
+        self.app.config["COURSE_PLUS_ACTIVATOR"] = lambda account_id: True
+        self.assertEqual(self.post_form(path, {}, page="/profile").status_code, 303)
+        activated = self.client.get("/profile").get_data(as_text=True)
+        self.assertIn("Подписка Курс+ активна", activated)
+        self.assertNotIn(">Активировать Курс+<", activated)

@@ -94,10 +94,12 @@ def _display_phone(value: str) -> str:
 def create_app(
     recommender: Recommender = recommend, *, database_path: Path | None = None, algorithm_name: str | None = None,
     password_code_sender: Callable[[str, str], None] | None = None,
+    course_plus_activator: Callable[[int], bool] | None = None,
 ) -> Flask:
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = 8 * 1024
     app.config["PASSWORD_CODE_SENDER"] = password_code_sender
+    app.config["COURSE_PLUS_ACTIVATOR"] = course_plus_activator
     source = catalog_source()
     is_demo_catalog = source == DEMO_CATALOG_PATH
     catalog = load_catalog(source)
@@ -149,7 +151,7 @@ def create_app(
             )
             if request.endpoint == "index":
                 response.headers["Content-Security-Policy"] += "; script-src 'self'; connect-src 'self'"
-            elif request.endpoint in {"accounts.login", "accounts.register", "profile_settings"}:
+            elif request.endpoint in {"accounts.login", "accounts.register", "profile_page", "profile_settings"}:
                 response.headers["Content-Security-Policy"] += "; script-src 'self'"
             response.headers["Referrer-Policy"] = "no-referrer"
         return response

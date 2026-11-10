@@ -544,6 +544,35 @@ def demo_login():
     return _start_session(account["id"])
 
 
+@auth.post("/profile/course-plus/activate")
+def activate_course_plus():
+    account = current_account()
+    if account is None:
+        return redirect(url_for("accounts.login"), code=303)
+    check_csrf()
+    destination = url_for("profile_page", _anchor="course-plus")
+    activate = current_app.config["COURSE_PLUS_ACTIVATOR"]
+    if account["has_course_plus"]:
+        message = "Подписка Курс+ уже активна."
+    elif activate is None:
+        message = "Это деморежим. Сервис оформления подписки Курс+ пока не подключён."
+    elif not _consume_attempts(((f"course-plus:user:{account['id']}", 5),)):
+        message = "Слишком много попыток. Повторите позже."
+    else:
+        try:
+            confirmed = activate(account["id"])
+        except Exception:
+            current_app.logger.warning("Course Plus activation provider failed")
+            message = "Не удалось проверить подписку. Повторите позже."
+        else:
+            if confirmed is True and set_course_plus(account["username"], active=True):
+                message = "Подписка Курс+ активирована."
+            else:
+                message = "Сервис пока не подтвердил доступ к Курс+."
+    flash(message, "course_plus")
+    return redirect(destination, code=303)
+
+
 def _password_code_digest(nonce: str, code: str) -> str:
     mode = "demo" if current_app.config["PASSWORD_CODE_SENDER"] is None else "email"
     return digest(current_app.secret_key.encode(), f"{mode}:{nonce}:{code}".encode(), "sha256").hex()

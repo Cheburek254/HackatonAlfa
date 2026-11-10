@@ -78,6 +78,8 @@ docker compose exec web flask --app app.ui.web:create_app admin reset-password �
 
 Для аккаунтов с Курс+ в выдаче доступны бесплатные и подписочные материалы. Выдать или отозвать право можно командами ниже. Для тестового профиля используется логин `demo`.
 
+Кнопка в профиле вызывает `POST /profile/course-plus/activate`. В демо она показывает уведомление. Для подключения сервиса передайте в `create_app` адаптер `course_plus_activator(account_id)`. Адаптер возвращает `True` только после подтверждения права на подписку внешним сервисом. Тогда приложение сохраняет доступ в базе.
+
 ```bash
 docker compose exec web flask --app app.ui.web:create_app admin course-plus ЛОГИН
 docker compose exec web flask --app app.ui.web:create_app admin course-plus ЛОГИН --revoke

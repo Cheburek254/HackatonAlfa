@@ -160,6 +160,26 @@
                     {% endif %}
                 </div>
                 {% endif %}
+                <section class="account-card" id="course-plus" aria-labelledby="course-plus-title">
+                    <h2 class="account-section-title" id="course-plus-title">Подписка Курс+</h2>
+                    {% if account.has_course_plus %}
+                    <p class="account-muted">Подписка активна. Подборка включает материалы Курс+.</p>
+                    {% else %}
+                    <form method="post" action="{{ url_for('accounts.activate_course_plus') }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="button button-primary" type="submit">Активировать Курс+</button>
+                    </form>
+                    {% endif %}
+                </section>
+                {% set course_notices = get_flashed_messages(category_filter=['course_plus']) %}
+                {% if course_notices %}
+                <dialog class="auth-demo-notice" aria-labelledby="course-plus-notice-title" open data-show-modal>
+                    <h2 id="course-plus-notice-title">Курс+</h2>
+                    <p>{{ course_notices | last }}</p>
+                    <form method="dialog"><button class="button button-primary" type="submit" autofocus>Понятно</button></form>
+                </dialog>
+                <script src="{{ url_for('static', filename='auth-demo.js') }}" defer></script>
+                {% endif %}
                 <form class="logout-form" method="post" action="{{ url_for('accounts.logout') }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button class="button" type="submit">Выйти из аккаунта</button>
