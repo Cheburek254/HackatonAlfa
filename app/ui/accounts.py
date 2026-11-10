@@ -278,7 +278,12 @@ def saved_profile(account: sqlite3.Row | None) -> dict[str, str | None]:
 def record_interaction(
     account: sqlite3.Row | None, material_id: str, kind: Literal["view", "click"],
 ) -> None:
-    if account is None or account["username"] == DEMO_USERNAME:
+    if account is None:
+        entry = [material_id, kind, int(time())]
+        history = [event for event in session.get("guest_history", []) if event[:2] != entry[:2]]
+        session["guest_history"] = [entry, *history[:7]]
+        return
+    if account["username"] == DEMO_USERNAME:
         return
     connection = _db()
     with connection:
@@ -314,9 +319,12 @@ def save_recommendation_impressions(
 
 
 def recent_interactions(account: sqlite3.Row | None) -> tuple[InteractionEvent, ...]:
-    if account is None or account["username"] == DEMO_USERNAME:
-        return ()
     cutoff = int(time() - HISTORY_WINDOW.total_seconds())
+    if account is None:
+        return tuple(InteractionEvent(mid, kind, datetime.fromtimestamp(seen, UTC))
+                     for mid, kind, seen in session.get("guest_history", []) if seen >= cutoff)
+    if account["username"] == DEMO_USERNAME:
+        return ()
     rows = _db().execute(
         """SELECT material_id, kind, MAX(occurred_at) AS latest_at
            FROM interaction_events WHERE user_id = ? AND occurred_at >= ?

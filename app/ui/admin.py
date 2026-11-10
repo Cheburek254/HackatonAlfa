@@ -10,6 +10,7 @@ from app.ui.accounts import (
 )
 from evaluation.catalog_quality import read_report as read_catalog_quality
 from evaluation.runner import EvaluationDataError, SUITE_LABELS, evaluation_scenario_counts, run_evaluation
+from evaluation.stress_report import check_subscriptions, read_report as read_stress_report
 
 admin = Blueprint("admin", __name__, url_prefix="/admin")
 PASSWORD_HINT = f"Пароль должен содержать от {PASSWORD_MIN_LENGTH} до {PASSWORD_MAX_LENGTH} символов."
@@ -65,6 +66,10 @@ def dashboard():
         catalog_quality=read_catalog_quality(
             current_app.config["CATALOG_QUALITY_PATH"], current_app.config["CATALOG_QUALITY_FINGERPRINT"],
         ),
+        stress_report=read_stress_report(
+            current_app.config["STRESS_REPORT_PATH"], current_app.config["CATALOG_QUALITY_FINGERPRINT"],
+        ),
+        subscription_check=check_subscriptions(real_catalog) if real_catalog else None,
         real_catalog_available=bool(real_catalog),
         impressions_by_day=[(day, metrics.impressions) for day, metrics in activity],
         clicks_by_day=[(day, metrics.clicks) for day, metrics in activity],

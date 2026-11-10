@@ -18,6 +18,7 @@ from app.catalog import load_catalog
 from app.contracts import InteractionEvent, Material, Profile
 from app.recommender import recommend
 from app.recommender.engine import _tokenize_stems
+from app.recommender.onboarding import ONBOARDING_ITEMS
 from evaluation.quality_data import read_quality_data
 from evaluation.runner import TOP_K, run_evaluation
 
@@ -33,7 +34,7 @@ FORMAT_TYPES = {"статья": "article", "курс": "course", "урок": "le
 
 def catalog_fingerprint(catalog: tuple[Material, ...]) -> str:
     payload = [(m.id, m.title, m.url, m.description, m.topics, m.format, m.access, m.entity_type,
-                m.stages, m.industries, m.experience_levels, m.popularity, m.rating, m.cost)
+                m.stages, m.industries, m.experience_levels, m.popularity, m.rating, m.cost, m.subscriptions)
                for m in catalog]
     return sha256(json.dumps(payload, ensure_ascii=False).encode()).hexdigest()
 
@@ -154,7 +155,12 @@ def build_quality_report(backup: Path, catalog_path: Path, sample_size: int) -> 
     cold = []
     for name, profile in cold_profiles:
         items = [materials[mid] for mid in top(profile)]
-        cold.append({"profile": name, "items": [{"title": item.title, "suitable": suitable_cold(item)} for item in items]})
+        expected = tuple(item.material_id for item in ONBOARDING_ITEMS)
+        package_matches = tuple(item.id for item in items) == expected
+        cold.append({"profile": name, "items": [
+            {"title": item.title, "suitable": package_matches if profile == Profile() else suitable_cold(item)}
+            for item in items
+        ]})
 
     return {
         "version": REPORT_VERSION, "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),

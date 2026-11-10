@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 from flask import Flask, Response, abort, redirect, render_template, request, url_for
 
 from app.catalog import DEMO_CATALOG_PATH, catalog_source, load_catalog, load_history
+from app.catalog import material_format as _format_key
 from app.contracts import Material, Profile, Recommender
 from app.ctr_report import ORDER_LABELS
 from app.database import account_database_path
@@ -22,6 +23,7 @@ from app.ui.descriptions import format_description_html
 from app.ui.impressions import issue_impression_tickets, record_impressions
 from app.recommender import recommend
 from evaluation.catalog_quality import REPORT_NAME, catalog_fingerprint
+from evaluation.stress_report import REPORT_NAME as STRESS_REPORT_NAME
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 QUICK_GOALS = ("Найти первых клиентов", "Увеличить продажи", "Разобраться в учёте")
@@ -62,17 +64,6 @@ def _material_destination(url: str) -> str:
     return url
 
 
-def _format_key(material: Material) -> str | None:
-    if material.entity_type == "calculator":
-        return "калькулятор"
-    try:
-        if urlsplit(material.url).path.startswith("/calculators/"):
-            return "калькулятор"
-    except ValueError:
-        pass
-    return material.format
-
-
 def create_app(
     recommender: Recommender = recommend, *, database_path: Path | None = None, algorithm_name: str | None = None,
 ) -> Flask:
@@ -88,6 +79,7 @@ def create_app(
     app.config["CATALOG_TITLES"] = {material.id: material.title for material in catalog}
     app.config["EVALUATION_REAL_CATALOG"] = None if is_demo_catalog else catalog
     app.config["CATALOG_QUALITY_PATH"] = None if is_demo_catalog else source.parent / REPORT_NAME
+    app.config["STRESS_REPORT_PATH"] = None if is_demo_catalog else source.parent / STRESS_REPORT_NAME
     app.config["CATALOG_QUALITY_FINGERPRINT"] = None if is_demo_catalog else catalog_fingerprint(catalog)
     app.config["CATALOG_FORMATS"] = {} if is_demo_catalog else {material.id: _format_key(material) for material in catalog}
     app.config["CATALOG_FORMAT_LABELS"] = FORMAT_LABELS
@@ -227,6 +219,7 @@ def create_app(
                 "title": material.title,
                 "description": material.description,
                 "description_html": description_html,
+                "subscriptions": material.subscriptions,
                 "url": _material_destination(material.url),
                 "open_url": open_url,
                 "csrf_token": csrf_token(),

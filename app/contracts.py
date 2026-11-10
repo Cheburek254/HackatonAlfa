@@ -22,6 +22,7 @@ class Material:
     rating: float | None = None
     cost: float | None = None
     entity_type: str | None = None
+    subscriptions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

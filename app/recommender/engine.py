@@ -16,6 +16,7 @@ from app.contracts import (
     RecommendationResult,
 )
 from app.recommender.llm import refine_with_llm_if_configured
+from app.recommender.onboarding import onboarding
 
 STOPWORDS = {
     "и", "в", "во", "на", "по", "с", "со", "к", "ко", "от", "до", "из", "за", "для", "про",
@@ -447,12 +448,17 @@ def recommend(
     explain_with_llm: bool = True,
     links_directory: Path | None = None,
     use_expert_links: bool = True,
+    expert_links: dict[str, list[str]] | None = None,
 ) -> RecommendationResult:
     """Ранжирует материалы каталога с учётом задачи, профиля, истории и популярности."""
     if not catalog or limit <= 0:
         return RecommendationResult((), "")
+    if not history and (starter := onboarding(catalog, profile, limit)) is not None:
+        return starter
 
-    rec_links = _load_recommended_links(links_directory or catalog_data_dir()) if use_expert_links else {}
+    rec_links = expert_links if expert_links is not None else (
+        _load_recommended_links(links_directory or catalog_data_dir()) if use_expert_links else {}
+    )
     constraints = _parse_hard_constraints(profile.goal)
 
     # 1. Фильтрация и дедупликация

@@ -8,6 +8,8 @@ import zlib
 from collections import defaultdict
 from pathlib import Path
 
+from app.catalog.subscriptions import subscription_memberships
+
 BASE_URL = "https://kurs.alfabank.ru"
 
 
@@ -583,6 +585,8 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
 
     materials.sort(key=lambda m: m["popularity_score"], reverse=True)
     valid_ids = {m["id"] for m in materials}
+    memberships = {mid: names for mid, names in subscription_memberships(reader).items() if mid in valid_ids}
+    (out_dir / "subscriptions.json").write_text(json.dumps(memberships, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     # Связи RecommendedItems (Id/CourseId <-> ItemId)
     rec_links: dict[str, list[str]] = defaultdict(list)

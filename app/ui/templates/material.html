@@ -5,6 +5,7 @@
         <div class="wrap">
             <p class="eyebrow">{{ material.format | upper if material.format else 'МАТЕРИАЛ' }}</p>
             <h1 id="material-title">{{ material.title }}</h1>
+            {% if material.subscriptions %}<p class="tag paid">По подписке {{ material.subscriptions | join(', ') }}</p>{% endif %}
             {% if description_html %}
             <div class="hero-copy preview-description">{{ description_html | safe }}</div>
             {% elif material.description %}

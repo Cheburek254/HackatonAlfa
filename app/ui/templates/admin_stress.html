@@ -1,0 +1,84 @@
+{% macro comparison(columns, methods) %}
+<div class="admin-table-wrap" tabindex="0" role="region" aria-label="Результаты сравнения">
+    <table class="admin-table">
+        <thead>
+            <tr><th scope="col">Метод</th>{% for col in columns %}<th scope="col">{{ col }}</th>{% endfor %}</tr>
+        </thead>
+        <tbody>
+            {% for method in methods %}
+            <tr>
+                <th scope="row">{{ method.label }}</th>
+                {% for value in method["values"] %}
+                <td>{% if value is none %}—{% elif columns[loop.index0] == "MRR@3" %}{{ "%.3f"|format(value) }}{% else %}{{ "%.1f"|format(value * 100) }}%{% endif %}</td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endmacro %}
+
+<section class="account-card" id="admin-stress" aria-labelledby="admin-stress-title">
+    <h2 id="admin-stress-title" class="account-section-title">Офлайн-проверки рекомендаций</h2>
+    {% if stress_report %}
+    <p class="account-muted">250 сценариев в пяти наборах. Дополнительно проверены 50 экспертных связей. Дата расчёта {{ stress_report.generated_at[:10] }} (UTC).</p>
+    <p class="account-muted">В новых наборах без текстового запроса BM25 получает тему и отрасль из профиля и названия до двух последних материалов из истории. Гибрид объединяет ранги и учитывает явно заданные формат, доступ и бюджет.</p>
+    {% for suite in stress_report.suites %}
+    <details class="admin-evaluation-details" {% if loop.first %}open{% endif %}>
+        <summary>{{ suite.title }} · {{ suite.overall.count }} сценариев</summary>
+        <p>{{ suite.description }}</p>
+        {{ comparison(suite.columns, suite.overall.methods) }}
+        {% if suite.groups|length > 1 %}
+        <details class="admin-evaluation-details">
+            <summary>Разбивка по группам</summary>
+            {% for group in suite.groups %}
+            <h3>{{ group.label }} · {{ group.count }}</h3>
+            {{ comparison(suite.columns, group.methods) }}
+            {% endfor %}
+        </details>
+        {% endif %}
+        {% if loop.first %}
+        {% set graph = stress_report.graph %}
+        <h3>Экспертный граф · {{ graph.count }} проверок</h3>
+        <p>В графе {{ graph.train_pairs }} пар. Скрыто {{ graph.held_out_pairs }} пар вместе с обратными связями. Hit@3 и MRR@3 рассчитаны по всему каталогу. В ловушке целевой материал конкурирует с 10 статьями без общих тегов и отраслей.
+            {% if not graph.measured_article_popularity %}Популярность статей приближена числом входящих связей в открытой части экспертного графа.{% endif %}
+        </p>
+        {{ comparison(["Hit@3", "MRR@3", "Первое место в ловушке"], graph.methods) }}
+        {% endif %}
+    </details>
+    {% endfor %}
+    <details class="admin-evaluation-details">
+        <summary>Сравнение на прежних 400 сценариях</summary>
+        {% for row in stress_report.previous %}
+        <h3>{{ row.label }} · {{ row.count }} сценариев</h3>
+        {% if row.labeled < row.count %}<p>Метрики рассчитаны на {{ row.labeled }} сценариях с размеченным ответом.</p>{% endif %}
+        {{ comparison(["Hit@3", "MRR@3"], row.methods) }}
+        {% endfor %}
+    </details>
+    {% else %}
+    <p class="account-muted">Для текущего каталога нет результатов офлайн-прогона.</p>
+    {% endif %}
+</section>
+
+<section class="account-card" id="admin-subscriptions" aria-labelledby="admin-subscriptions-title">
+    <h2 id="admin-subscriptions-title" class="account-section-title">Проверка подписки Курс+</h2>
+    {% if subscription_check %}
+    <p class="account-muted">Материалов с пометкой «По подписке Курс+» в каталоге {{ subscription_check.members }}. Оба сценария используют запрос «{{ subscription_check.goal }}». В первом доступны бесплатные материалы, во втором к ним добавляется Курс+.</p>
+    <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Проверка Курс+">
+        <table class="admin-table">
+            <thead><tr><th scope="col">Сценарий</th><th scope="col">Кандидатов</th><th scope="col">Результат</th><th scope="col">Топ-3</th></tr></thead>
+            <tbody>
+                {% for row in subscription_check.rows %}
+                <tr>
+                    <th scope="row">{{ row.label }}</th><td>{{ row.candidates }}</td>
+                    <td>{{ "Пройден" if row.passed else "Требует проверки" }}</td>
+                    <td><ol>{% for item in row["items"] %}<li>{{ item.title }}{% if item.member %} · По подписке Курс+{% endif %}</li>{% endfor %}</ol></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="account-muted">Для проверки требуется экспорт каталога с материалами Курс+.</p>
+    {% endif %}
+</section>

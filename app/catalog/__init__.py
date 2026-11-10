@@ -6,13 +6,26 @@ import sqlite3
 from contextlib import closing
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from app.contracts import InteractionEvent, Material
+from app.catalog.subscriptions import load_memberships
 
 VALID_EVENT_KINDS = {"view", "click", "complete"}
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 DEMO_CATALOG_PATH = Path(__file__).resolve().parents[2] / "fixtures" / "catalog.demo.json"
 CATALOG_FILES = ("catalog_slim.sqlite", "catalog_slim.json", "catalog.norm.json")
+
+
+def material_format(material: Material) -> str | None:
+    if material.entity_type == "calculator":
+        return "калькулятор"
+    try:
+        if urlsplit(material.url).path.startswith("/calculators/"):
+            return "калькулятор"
+    except ValueError:
+        pass
+    return material.format
 
 
 def catalog_data_dir() -> Path:
@@ -59,6 +72,7 @@ def load_catalog(path: Path | str | None = None) -> tuple[Material, ...]:
     """Загрузить экспорт каталога JSON/SQLite или стартовую фикстуру."""
     target = Path(path) if path is not None else catalog_source()
     records = _read_records(target)
+    memberships = load_memberships(target.parent)
     materials = []
     seen_ids: set[str] = set()
     for record in records:
@@ -88,6 +102,7 @@ def load_catalog(path: Path | str | None = None) -> tuple[Material, ...]:
                 rating=_optional_metric(record.get("rating", record.get("avg_rating")), maximum=5),
                 cost=_optional_metric(record.get("cost")),
                 entity_type=record.get("entity_type"),
+                subscriptions=memberships.get(mid, ()),
             )
         )
     return tuple(materials)

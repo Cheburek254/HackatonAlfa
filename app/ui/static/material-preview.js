@@ -156,6 +156,7 @@ document.addEventListener("submit", async (event) => {
 
 if (typeof materialPreview?.showModal === "function") {
     const previewTitle = materialPreview.querySelector("#preview-title");
+    const previewSubscription = materialPreview.querySelector("#preview-subscription");
     const previewDescription = materialPreview.querySelector("#preview-description");
     const materialLink = materialPreview.querySelector(".material-preview-link");
     let currentPreview;
@@ -182,6 +183,9 @@ if (typeof materialPreview?.showModal === "function") {
             }
             currentPreview = await response.json();
             previewTitle.textContent = currentPreview.title;
+            const subscriptions = currentPreview.subscriptions ?? [];
+            previewSubscription.hidden = subscriptions.length === 0;
+            previewSubscription.textContent = subscriptions.length ? `По подписке ${subscriptions.join(", ")}` : "";
             previewDescription.innerHTML = currentPreview.description_html;
             materialLink.href = currentPreview.url;
             openingLink = link;
