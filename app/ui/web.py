@@ -119,6 +119,20 @@ def format_lessons(count: int | None) -> str:
     return f"{count} {word}"
 
 
+def _pagination_items(current_page: int, total_pages: int) -> list[int | None]:
+    if total_pages <= 1:
+        return []
+    if total_pages <= 7:
+        return list(range(1, total_pages + 1))
+    pages = sorted({1, total_pages, *range(max(1, current_page - 2), min(total_pages, current_page + 2) + 1)})
+    items: list[int | None] = []
+    for p in pages:
+        if items and items[-1] is not None and p - items[-1] > 1:
+            items.append(None)
+        items.append(p)
+    return items
+
+
 def _find_next_materials(
     current_material: Material,
     all_materials: tuple[Material, ...] | list[Material],
@@ -566,17 +580,18 @@ def create_app(
         if result_order != "recommended":
             cards = [card for card in cards if getattr(card[0], result_order) is not None]
             cards.sort(key=lambda card: getattr(card[0], result_order), reverse=True)
-        page = max(1, form.get("show_page", default=1, type=int))
         page_size = form.get("selected_page_size", type=int) or form.get("page_size", type=int)
         if page_size not in PAGE_SIZES:
             page_size = RESULTS_PER_PAGE
+        total_pages = max(1, math.ceil(len(cards) / page_size)) if cards else 1
+        page = min(max(1, form.get("show_page", default=1, type=int)), total_pages)
+        shown_ids = [
+            part.strip()
+            for raw in form.getlist("shown_ids")
+            for part in raw.split(",")
+            if part.strip()
+        ]
         if page > 1 and result_order == "recommended" and recommender is recommend:
-            shown_ids = [
-                part.strip()
-                for raw in form.getlist("shown_ids")
-                for part in raw.split(",")
-                if part.strip()
-            ]
             session_seen_ids = {
                 part.strip()
                 for raw in form.getlist("seen_ids")
@@ -586,14 +601,16 @@ def create_app(
             if shown_ids:
                 cards = rerank_next_page(
                     cards,
-                    shown_ids=shown_ids,
+                    shown_ids=shown_ids[:(page - 1) * page_size],
                     session_seen_ids=session_seen_ids,
                     history=history,
                     profile=profile,
                     links_directory=source.parent,
                     db_connection=get_accounts_db(),
                 )
-        visible_cards = cards[:page * page_size]
+        page_start = (page - 1) * page_size
+        visible_cards = cards[page_start:page * page_size]
+        cumulative_shown_ids = [material.id for material, _ in cards[:page * page_size]]
         first_cards = cards[:RESULTS_PER_PAGE]
         access_counts = Counter(access_category(material) for material, _ in first_cards)
         impression_batch, impression_batch_id, impression_tickets = issue_impression_tickets(
@@ -602,6 +619,7 @@ def create_app(
             f"{format_filter}:{page_size}:{','.join(access_filters)}",
             form.get("impression_batch") if page > 1 else None,
             variant=variant,
+            start_position=page_start + 1,
         )
         is_fragment = request.headers.get("X-Recommendation-Fragment") == "1"
         daily = daily_picks(materials_by_id, profile, history, publication_dates, available,
@@ -633,12 +651,19 @@ def create_app(
             page_sizes=PAGE_SIZES,
             result=result,
             cards=visible_cards,
+            cumulative_shown_ids=cumulative_shown_ids,
             covers=covers,
             impression_batch=impression_batch,
             impression_batch_id=impression_batch_id,
             impression_tickets=impression_tickets,
             total_cards=len(cards),
-            next_page=page + 1 if len(visible_cards) < len(cards) else None,
+            current_page=page,
+            total_pages=total_pages,
+            pagination_items=_pagination_items(page, total_pages),
+            page_start=page_start + 1 if visible_cards else 0,
+            page_end=page_start + len(visible_cards),
+            prev_page=page - 1 if page > 1 else None,
+            next_page=page + 1 if page < total_pages else None,
         )
 
     return app

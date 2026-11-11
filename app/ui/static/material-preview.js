@@ -207,17 +207,22 @@ document.addEventListener("submit", async (event) => {
     const section = document.querySelector("#recommendations");
     const status = document.querySelector("#recommendation-status");
     const submitter = event.submitter;
-    const loadMore = submitter?.name === "show_page";
+    const isPageChange = submitter?.name === "show_page";
     const data = new FormData(form);
     if (submitter?.name) {
         data.append(submitter.name, submitter.value);
     }
-    if (loadMore) {
+    if (isPageChange) {
         const currentCardIds = [...section.querySelectorAll(".card")]
             .map((card) => card.dataset.materialId)
             .filter(Boolean);
-        if (currentCardIds.length) {
-            data.set("shown_ids", currentCardIds.join(","));
+        const existingShown = (data.get("shown_ids") || "")
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
+        const mergedShown = [...new Set([...existingShown, ...currentCardIds])];
+        if (mergedShown.length) {
+            data.set("shown_ids", mergedShown.join(","));
         }
         const sessionViewed = getSessionViewedIds();
         if (sessionViewed.length) {
@@ -236,9 +241,9 @@ document.addEventListener("submit", async (event) => {
             submitter.classList.add("active");
             submitter.setAttribute("aria-pressed", "true");
         }
-    } else if (loadMore) {
+    } else if (isPageChange) {
         submitter.disabled = true;
-        submitter.textContent = "Загрузка...";
+        submitter.classList.add("is-loading");
     }
     try {
         const action = submitter?.getAttribute("formaction") ?? form.getAttribute("action");
@@ -261,28 +266,6 @@ document.addEventListener("submit", async (event) => {
             throw new Error("Выдача недоступна");
         }
 
-        const previousCards = [...section.querySelectorAll(".card")];
-        const nextCards = [...next.querySelectorAll(".card")];
-        const scrollTop = window.scrollY;
-        if (loadMore && section.dataset.impressionBatch === next.dataset.impressionBatch &&
-            previousCards.length < nextCards.length &&
-            previousCards.every((card, index) => card.dataset.materialId === nextCards[index].dataset.materialId)) {
-            const appendedCards = nextCards.slice(previousCards.length);
-            section.querySelector(".card-grid").append(...appendedCards);
-            section.querySelector(".result-pagination").replaceWith(next.querySelector(".result-pagination"));
-            section.querySelector('input[name="impression_batch"]').value = next.querySelector('input[name="impression_batch"]').value;
-            const shownInput = section.querySelector('input[name="shown_ids"]');
-            const nextShownInput = next.querySelector('input[name="shown_ids"]');
-            if (shownInput && nextShownInput) {
-                shownInput.value = nextShownInput.value;
-            }
-            prepareCards();
-            window.scrollTo({ top: scrollTop, behavior: "instant" });
-            if (document.activeElement === document.body) {
-                appendedCards[0].focus({ preventScroll: true });
-            }
-            return;
-        }
         section.replaceWith(next);
         prepareCards();
 
@@ -316,9 +299,9 @@ document.addEventListener("submit", async (event) => {
                 button.classList.toggle("chip-selected", button.value === query.elements.goal.value);
             }
             next.scrollIntoView({ block: "start" });
-        } else if (loadMore) {
-            window.scrollTo({ top: scrollTop, behavior: "instant" });
-            (nextCards[previousCards.length] || next.querySelector("#results-title"))?.focus({ preventScroll: true });
+        } else if (isPageChange) {
+            next.scrollIntoView({ behavior: "smooth", block: "start" });
+            (next.querySelector(".card") || next.querySelector("#results-title"))?.focus({ preventScroll: true });
         } else {
             const matching = [...next.querySelectorAll("button")].find(
                 (button) => button.name === submitter?.name && button.value === submitter?.value,
@@ -328,7 +311,7 @@ document.addEventListener("submit", async (event) => {
     } catch {
         if (!update.signal.aborted) {
             status.textContent = "Не удалось обновить подборку. Попробуйте ещё раз.";
-            if (!loadMore) {
+            if (!isPageChange) {
                 status.scrollIntoView({ block: "nearest" });
             }
         }

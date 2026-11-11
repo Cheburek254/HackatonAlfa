@@ -32,7 +32,7 @@
                     <input type="hidden" name="format_filter" value="{{ format_filter }}">
                     <input type="hidden" name="current_order" value="{{ result_order }}">
                     <input type="hidden" name="page_size" value="{{ page_size }}">
-                    {% if cards %}<input type="hidden" name="shown_ids" value="{{ cards | map(attribute=0) | map(attribute='id') | join(',') }}">{% endif %}
+                    {% if cumulative_shown_ids %}<input type="hidden" name="shown_ids" value="{{ cumulative_shown_ids | join(',') }}">{% endif %}
                     {% if impression_batch %}<input type="hidden" name="impression_batch" value="{{ impression_batch }}">{% endif %}
                     {% if skip_profile %}<input type="hidden" name="action" value="skip_profile">{% endif %}
                     {% if use_sample_history %}<input type="hidden" name="history" value="sample">{% endif %}
@@ -103,7 +103,7 @@
                             <div class="card-meta">
                                 {% set card_format = material_format(material) %}
                                 <span class="card-meta-left">{{ card_format | capitalize if card_format else 'Материал' }}{% if material.duration %} · {{ material.duration }}{% endif %}{% if material.lesson_count %} · {{ material.lesson_count | format_lessons }}{% endif %}</span>
-                                {% if loop.first and result_order == 'recommended' and not requires_access %}<span class="first-pick">Начните с этого</span>{% endif %}
+                                {% if current_page == 1 and loop.first and result_order == 'recommended' and not requires_access %}<span class="first-pick">Начните с этого</span>{% endif %}
                             </div>
                             <h3>{{ material.title }}</h3>
                             {% if material.authors %}
@@ -139,11 +139,31 @@
                     {% endfor %}
                 </div>
                 <div class="result-pagination">
-                    <p>Показано {{ cards | length }} из {{ total_cards }}</p>
-                    {% if next_page %}
-                    <button class="button button-primary" type="submit" form="result-orders"
-                            formaction="{{ url_for('index', _anchor='result-card-' ~ (cards | length + 1)) }}"
-                            name="show_page" value="{{ next_page }}">Показать больше</button>
+                    <p>Показано {{ page_end if current_page == 1 else page_start ~ '–' ~ page_end }} из {{ total_cards }}{% if total_pages > 1 %} · Страница {{ current_page }} из {{ total_pages }}{% endif %}</p>
+                    {% if total_pages > 1 %}
+                    <nav class="pagination-nav" aria-label="Страницы подборки">
+                        <button class="pagination-btn pagination-prev" type="submit" form="result-orders"
+                                formaction="{{ url_for('index', _anchor='recommendations') }}"
+                                name="show_page" value="{{ prev_page or 1 }}"
+                                {% if not prev_page %}disabled aria-disabled="true"{% endif %}>← Назад</button>
+                        <div class="pagination-pages">
+                            {% for item in pagination_items %}
+                            {% if item is none %}
+                            <span class="pagination-ellipsis" aria-hidden="true">…</span>
+                            {% else %}
+                            <button class="pagination-btn pagination-page{{ ' active' if item == current_page else '' }}"
+                                    type="submit" form="result-orders"
+                                    formaction="{{ url_for('index', _anchor='recommendations') }}"
+                                    name="show_page" value="{{ item }}"
+                                    {% if item == current_page %}aria-current="page"{% endif %}>{{ item }}</button>
+                            {% endif %}
+                            {% endfor %}
+                        </div>
+                        <button class="pagination-btn pagination-next" type="submit" form="result-orders"
+                                formaction="{{ url_for('index', _anchor='recommendations') }}"
+                                name="show_page" value="{{ next_page or total_pages }}"
+                                {% if not next_page %}disabled aria-disabled="true"{% endif %}>Далее →</button>
+                    </nav>
                     {% endif %}
                 </div>
                 {% elif result.items %}

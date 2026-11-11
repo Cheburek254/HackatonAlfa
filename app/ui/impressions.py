@@ -30,7 +30,7 @@ def _read_ticket(signer: URLSafeTimedSerializer, ticket: str | None, *sizes: int
 
 def issue_impression_tickets(
     material_ids: Sequence[str], algorithm: str, result_order: str, selection_key: str, previous_batch: str | None,
-    variant: Variant | None = None,
+    variant: Variant | None = None, *, start_position: int = 1,
 ) -> tuple[str, str, tuple[str, ...]]:
     if not material_ids:
         return "", "", ()
@@ -44,7 +44,7 @@ def issue_impression_tickets(
     card_signer = _signer("card")
     tickets = tuple(
         card_signer.dumps([scope[0], batch_id, material_id, position, algorithm, result_order, *attribution])
-        for position, material_id in enumerate(material_ids, start=1)
+        for position, material_id in enumerate(material_ids, start=start_position)
     )
     return batch_signer.dumps([*scope, batch_id]), batch_id, tickets
 

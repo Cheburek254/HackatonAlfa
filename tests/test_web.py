@@ -408,10 +408,11 @@ class WebFlowTest(unittest.TestCase):
         default = card_ids(initial)
         self.assertEqual(len(default), 6)
         self.assertIn("Показано 6 из 7", initial)
-        self.assertIn("Показать больше", initial)
+        self.assertIn("Далее →", initial)
         expanded = client.post("/", data={"show_page": 2}).get_data(as_text=True)
-        self.assertEqual(card_ids(expanded), [*default, "operations-week-plan"])
-        self.assertNotIn("Показать больше", expanded)
+        self.assertEqual(card_ids(expanded), ["operations-week-plan"])
+        self.assertIn('class="pagination-btn pagination-next"', expanded)
+        self.assertIn('disabled aria-disabled="true">Далее →</button>', expanded)
 
         popularity = client.post("/", data={"result_order": "popularity"}).get_data(as_text=True)
         self.assertEqual(card_ids(popularity), [
@@ -510,15 +511,19 @@ class WebFlowTest(unittest.TestCase):
             client = create_app(database_path=self.database_path).test_client()
 
         first_page = client.post("/", data={"result_order": "popularity"}).get_data(as_text=True)
-        self.assertIn('formaction="/#result-card-7"', first_page)
         self.assertIn('name="current_order" value="popularity"', first_page)
-        for page, count in ((1, 6), (2, 12), (3, 14)):
+        for page, expected_ids in (
+            (1, list(range(14, 8, -1))),
+            (2, list(range(8, 2, -1))),
+            (3, [2, 1]),
+        ):
             html = first_page if page == 1 else client.post("/", data={
                 "current_order": "popularity", "show_page": page,
             }).get_data(as_text=True)
             ids = re.findall(r'class="material-link" href="/materials/item-(\d+)\?', html)
-            self.assertEqual([int(item) for item in ids], list(range(14, 14 - count, -1)))
-            self.assertEqual("Показать больше" in html, count < 14)
+            self.assertEqual([int(item) for item in ids], expected_ids)
+            has_next = 'disabled aria-disabled="true">Далее →</button>' not in html
+            self.assertEqual(has_next, page < 3)
 
     def test_impressions_preserve_positions_deduplicate_pages_and_attribute_clicks(self):
         app = create_app(stub_recommend, database_path=self.database_path, algorithm_name="demo:v1")
@@ -874,7 +879,7 @@ class WebFlowTest(unittest.TestCase):
         expanded = client.post("/", data={
             "format_filter": "калькулятор", "page_size": "12", "show_page": "2", "impression_batch": batch,
         }, headers={"X-Recommendation-Fragment": "1"}).get_data(as_text=True)
-        self.assertIn("Показано 14 из 14", expanded)
+        self.assertIn("Показано 13–14 из 14", expanded)
         self.assertIn(f'data-impression-batch="{batch_id}"', expanded)
         empty = client.post("/", data={"selected_format": "подкаст"}).get_data(as_text=True)
         self.assertIn("нет материалов выбранного формата", empty)
