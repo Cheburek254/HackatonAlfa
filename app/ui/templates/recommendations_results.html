@@ -1,4 +1,4 @@
-        <section class="results recommendations-results" id="recommendations" aria-labelledby="results-title" data-impression-batch="{{ impression_batch_id }}">
+        <section class="results recommendations-results" id="recommendations" aria-labelledby="results-title" data-impression-batch="{{ impression_batch_id }}" data-result-page="{{ current_page }}" data-page-scope="{{ page_scope }}">
             <div class="wrap">
                 <div class="results-heading">
                     <p class="eyebrow">АЛЬФА-КУРС</p>
@@ -32,7 +32,6 @@
                     <input type="hidden" name="format_filter" value="{{ format_filter }}">
                     <input type="hidden" name="current_order" value="{{ result_order }}">
                     <input type="hidden" name="page_size" value="{{ page_size }}">
-                    {% if cumulative_shown_ids %}<input type="hidden" name="shown_ids" value="{{ cumulative_shown_ids | join(',') }}">{% endif %}
                     {% if impression_batch %}<input type="hidden" name="impression_batch" value="{{ impression_batch }}">{% endif %}
                     {% if skip_profile %}<input type="hidden" name="action" value="skip_profile">{% endif %}
                     {% if use_sample_history %}<input type="hidden" name="history" value="sample">{% endif %}
@@ -145,7 +144,7 @@
                         {% if prev_page %}
                         <button class="pagination-btn pagination-prev" type="submit" form="result-orders"
                                 formaction="{{ url_for('index', _anchor='recommendations') }}"
-                                name="show_page" value="{{ prev_page }}">← Назад</button>
+                                name="show_page" value="{{ prev_page }}" aria-label="Предыдущая страница">← Назад</button>
                         {% endif %}
                         <div class="pagination-pages">
                             {% for item in pagination_items %}
@@ -156,6 +155,7 @@
                                     type="submit" form="result-orders"
                                     formaction="{{ url_for('index', _anchor='recommendations') }}"
                                     name="show_page" value="{{ item }}"
+                                    aria-label="Страница {{ item }}"
                                     {% if item == current_page %}aria-current="page"{% endif %}>{{ item }}</button>
                             {% endif %}
                             {% endfor %}
@@ -163,7 +163,7 @@
                         {% if next_page %}
                         <button class="pagination-btn pagination-next" type="submit" form="result-orders"
                                 formaction="{{ url_for('index', _anchor='recommendations') }}"
-                                name="show_page" value="{{ next_page }}">Далее →</button>
+                                name="show_page" value="{{ next_page }}" aria-label="Следующая страница">Далее →</button>
                         {% endif %}
                     </nav>
                     {% endif %}

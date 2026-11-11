@@ -145,20 +145,60 @@ if (dailyTrack) {
     arrange();
 }
 
+const catalogPages = new Map();
+const exposureTimers = new Map();
+const SKIP_EXPOSURE_MS = 1500;
+
+function rememberCatalogPage() {
+    const section = document.querySelector("#recommendations");
+    const scope = section?.dataset.pageScope;
+    if (!scope) return null;
+    if (!catalogPages.has(scope)) {
+        if (catalogPages.size >= 8) catalogPages.delete(catalogPages.keys().next().value);
+        catalogPages.set(scope, { pages: new Map(), exposed: new Set() });
+    }
+    const state = catalogPages.get(scope);
+    const ids = [...section.querySelectorAll(".card-grid .card")]
+        .map(card => card.dataset.materialId).filter(Boolean);
+    const page = section.dataset.resultPage;
+    const previous = state.pages.get(page);
+    if (page === "1" && previous && previous.join(",") !== ids.join(",")) {
+        state.pages.clear();
+        state.exposed.clear();
+    }
+    if (ids.length) state.pages.set(page, ids);
+    return state;
+}
+
 const impressionObserver = "IntersectionObserver" in window ? new IntersectionObserver((entries, observer) => {
     const grid = document.querySelector("#recommendations .card-grid");
-    if (!grid || document.visibilityState !== "visible") {
-        return;
-    }
+    if (!grid || document.visibilityState !== "visible" || materialPreview?.open) return;
+    const state = catalogPages.get(grid.closest("#recommendations").dataset.pageScope);
     const tickets = [];
     for (const entry of entries) {
-        if (entry.intersectionRatio < 0.5 || !grid.contains(entry.target) || seenCards.has(entry.target)) {
+        const card = entry.target;
+        if (entry.intersectionRatio < 0.5 || !grid.contains(card)) {
+            clearTimeout(exposureTimers.get(card));
+            exposureTimers.delete(card);
             continue;
         }
-        seenCards.add(entry.target);
-        observer.unobserve(entry.target);
-        const link = entry.target.querySelector(".material-link");
-        tickets.push(new URL(link.href).searchParams.get("impression"));
+        if (!seenCards.has(card)) {
+            seenCards.add(card);
+            const link = card.querySelector(".material-link");
+            tickets.push(new URL(link.href).searchParams.get("impression"));
+        }
+        const id = card.dataset.materialId;
+        if (!state || state.exposed.has(id)) {
+            observer.unobserve(card);
+        } else if (!exposureTimers.has(card)) {
+            exposureTimers.set(card, setTimeout(() => {
+                exposureTimers.delete(card);
+                if (card.isConnected && document.visibilityState === "visible" && !materialPreview?.open) {
+                    state.exposed.add(id);
+                    observer.unobserve(card);
+                }
+            }, SKIP_EXPOSURE_MS));
+        }
     }
     for (let start = 0; start < tickets.length; start += 16) {
         const body = new URLSearchParams({ csrf_token: grid.dataset.impressionCsrf });
@@ -171,15 +211,18 @@ const impressionObserver = "IntersectionObserver" in window ? new IntersectionOb
 
 function prepareCards() {
     const grid = document.querySelector("#recommendations .card-grid");
+    const state = rememberCatalogPage();
     if (typeof materialPreview?.showModal === "function") {
         grid?.classList.add("has-material-preview");
     }
     impressionObserver?.disconnect();
-    if (!impressionObserver || !grid || document.visibilityState !== "visible") {
+    for (const timeout of exposureTimers.values()) clearTimeout(timeout);
+    exposureTimers.clear();
+    if (!impressionObserver || !grid || document.visibilityState !== "visible" || materialPreview?.open) {
         return;
     }
     for (const card of grid.querySelectorAll(".card")) {
-        if (!seenCards.has(card)) {
+        if (!seenCards.has(card) || (state && !state.exposed.has(card.dataset.materialId))) {
             impressionObserver.observe(card);
         }
     }
@@ -213,20 +256,12 @@ document.addEventListener("submit", async (event) => {
         data.append(submitter.name, submitter.value);
     }
     if (isPageChange) {
-        const currentCardIds = [...section.querySelectorAll(".card")]
-            .map((card) => card.dataset.materialId)
-            .filter(Boolean);
-        const existingShown = (data.get("shown_ids") || "")
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean);
-        const mergedShown = [...new Set([...existingShown, ...currentCardIds])];
-        if (mergedShown.length) {
-            data.set("shown_ids", mergedShown.join(","));
-        }
-        const sessionViewed = getSessionViewedIds();
-        if (sessionViewed.length) {
-            data.set("seen_ids", sessionViewed.slice(0, 40).join(","));
+        const state = rememberCatalogPage();
+        if (state) {
+            data.set("page_scope", section.dataset.pageScope);
+            for (const [page, ids] of state.pages) data.append("visited_page", `${page}:${ids.join(",")}`);
+            data.set("exposed_ids", [...state.exposed].join(","));
+            data.set("seen_ids", getSessionViewedIds().slice(0, 40).join(","));
         }
     }
     status.textContent = "";
@@ -517,6 +552,7 @@ if (typeof materialPreview?.showModal === "function") {
             if (!materialPreview.open) {
                 openingLink = link;
                 materialPreview.showModal();
+                prepareCards();
             }
             if (previewContent) {
                 previewContent.scrollTop = 0;
@@ -548,6 +584,7 @@ if (typeof materialPreview?.showModal === "function") {
         }
     });
     materialPreview.addEventListener("close", () => {
+        prepareCards();
         if (previewEyebrow) previewEyebrow.textContent = "О МАТЕРИАЛЕ";
         openingLink?.focus({ preventScroll: true });
     });

@@ -518,55 +518,70 @@ button.is-loading {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 14px;
-    margin-top: 28px;
+    gap: 16px;
+    margin-top: 32px;
 }
 .result-pagination p {
     margin: 0;
     color: var(--muted);
     font-size: 14px;
+    text-align: center;
 }
 .pagination-nav {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: 10px;
 }
 .pagination-pages {
     display: inline-flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 6px;
+    justify-content: center;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid #dedee2;
+    border-radius: 16px;
+    background: #fff;
 }
 .pagination-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 40px;
-    min-width: 40px;
-    padding: 6px 14px;
+    gap: 8px;
+    min-height: 44px;
+    min-width: 44px;
+    padding: 8px 16px;
     border-radius: 12px;
-    border: 1px solid #d4d4db;
+    border: 1px solid #dedee2;
     background: #fff;
     color: var(--ink);
     font-size: 14px;
-    font-weight: 650;
-    cursor: pointer;
-    transition: all 0.15s ease;
+    font-weight: 700;
+    white-space: nowrap;
 }
 .pagination-page {
-    padding: 6px 12px;
+    padding-inline: 10px;
+    border-color: transparent;
+    font-variant-numeric: tabular-nums;
 }
-.pagination-btn:hover:not(:disabled) {
-    border-color: #85858d;
-    background: #f7f7fa;
+.pagination-btn:not(.pagination-next):hover:not(:disabled):not([aria-current="page"]) {
+    background: #efeff2;
 }
-.pagination-page.active,
 .pagination-page[aria-current="page"] {
     background: var(--ink);
     color: #fff;
     border-color: var(--ink);
+}
+.pagination-next {
+    border-color: #cf261c;
+    background: #cf261c;
+    color: #fff;
+}
+.pagination-next:hover:not(:disabled) {
+    border-color: #b72017;
+    background: #b72017;
 }
 .pagination-btn:disabled {
     opacity: 0.45;
@@ -576,10 +591,22 @@ button.is-loading {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 28px;
+    min-width: 22px;
     color: var(--muted);
     font-weight: 700;
     user-select: none;
+}
+@media (max-width: 560px) {
+    .result-pagination { gap: 12px; }
+    .pagination-nav { gap: 8px; }
+    .pagination-pages {
+        order: -1;
+        flex-basis: 100%;
+    }
+    .pagination-pages:has(> :nth-child(7)) {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(44px, 1fr));
+    }
 }
 .has-material-preview .card { cursor: pointer; }
 .has-material-preview .card:hover { box-shadow: 0 6px 22px #17171a14; }

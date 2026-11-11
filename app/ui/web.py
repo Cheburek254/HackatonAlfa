@@ -6,6 +6,7 @@ import re
 from collections import Counter
 from collections.abc import Callable
 from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -35,7 +36,7 @@ from app.recommender import recommend
 from app.recommender.baseline import recommend_popular_courses
 from app.recommender.daily import daily_picks
 from app.recommender.hybrid import cached_bm25, configured_bm25_weight
-from app.recommender.runtime import rerank_next_page
+from app.recommender.runtime import rank_catalog_pages
 from evaluation.catalog_quality import REPORT_NAME, catalog_fingerprint
 from evaluation.learning_report import REPORT_NAME as LEARNING_REPORT_NAME
 from evaluation.stress_report import REPORT_NAME as STRESS_REPORT_NAME
@@ -131,6 +132,17 @@ def _pagination_items(current_page: int, total_pages: int) -> list[int | None]:
             items.append(None)
         items.append(p)
     return items
+
+
+def _visited_pages(form, total_pages: int, page_size: int) -> dict[int, list[str]]:
+    pages = {}
+    for raw in form.getlist("visited_page")[:total_pages]:
+        number, separator, ids = raw.partition(":")
+        if separator and number.isascii() and number.isdecimal() and len(number) <= len(str(total_pages)):
+            page = int(number)
+            if 1 <= page <= total_pages:
+                pages.setdefault(page, ids.split(",")[:page_size])
+    return pages
 
 
 def _find_next_materials(
@@ -250,6 +262,11 @@ def create_app(
     live_data_provider: LiveDataProvider | None = None,
 ) -> Flask:
     app = Flask(__name__)
+    static = Path(app.static_folder)
+    app.jinja_env.globals["catalog_asset_versions"] = {
+        name: sha256((static / name).read_bytes()).hexdigest()[:12]
+        for name in ("recommendations.css", "material-preview.js")
+    }
     app.config["MAX_CONTENT_LENGTH"] = 4 * 1024 * 1024
     app.config["PASSWORD_CODE_SENDER"] = password_code_sender
     app.config["COURSE_PLUS_ACTIVATOR"] = course_plus_activator
@@ -591,32 +608,26 @@ def create_app(
             page_size = RESULTS_PER_PAGE
         total_pages = max(1, math.ceil(len(cards) / page_size)) if cards else 1
         page = min(max(1, form.get("show_page", default=1, type=int)), total_pages)
-        shown_ids = [
-            part.strip()
-            for raw in form.getlist("shown_ids")
-            for part in raw.split(",")
-            if part.strip()
-        ]
-        if page > 1 and result_order == "recommended" and recommender is recommend:
-            session_seen_ids = {
-                part.strip()
-                for raw in form.getlist("seen_ids")
-                for part in raw.split(",")
-                if part.strip()
-            }
-            if shown_ids:
-                cards = rerank_next_page(
+        page_scope = ""
+        if result_order == "recommended" and mode != "popular" and recommender is recommend:
+            scope = (profile, format_filter, access_filters, page_size, effective_algorithm, skip_profile,
+                     use_sample_history, variant.experiment_id if variant else None)
+            page_scope = sha256(repr(scope).encode()).hexdigest()[:24]
+            if form.get("page_scope") == page_scope:
+                cards = rank_catalog_pages(
                     cards,
-                    shown_ids=shown_ids[:(page - 1) * page_size],
-                    session_seen_ids=session_seen_ids,
+                    page=page,
+                    page_size=page_size,
+                    visited_pages=_visited_pages(form, total_pages, page_size),
+                    exposed_ids=set(form.get("exposed_ids", "").split(",")),
+                    session_seen_ids=set(form.get("seen_ids", "").split(",")[:40]),
                     history=history,
-                    profile=profile,
+                    now=now,
                     links_directory=source.parent,
                     db_connection=get_accounts_db(),
                 )
         page_start = (page - 1) * page_size
         visible_cards = cards[page_start:page * page_size]
-        cumulative_shown_ids = [material.id for material, _ in cards[:page * page_size]]
         first_cards = cards[:RESULTS_PER_PAGE]
         access_counts = Counter(access_category(material) for material, _ in first_cards)
         impression_batch, impression_batch_id, impression_tickets = issue_impression_tickets(
@@ -657,7 +668,7 @@ def create_app(
             page_sizes=PAGE_SIZES,
             result=result,
             cards=visible_cards,
-            cumulative_shown_ids=cumulative_shown_ids,
+            page_scope=page_scope,
             covers=covers,
             impression_batch=impression_batch,
             impression_batch_id=impression_batch_id,

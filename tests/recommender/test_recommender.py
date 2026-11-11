@@ -8,7 +8,7 @@ from app.contracts import InteractionEvent, Material, Profile, Recommendation
 from app.recommender import recommend
 from app.recommender.engine import _expand_synonyms, _normalize_text, _tokenize_stems
 from app.recommender.hybrid import merge_orders
-from app.recommender.runtime import rerank_next_page
+from app.recommender.runtime import rank_catalog_pages
 
 
 class RecommenderTest(unittest.TestCase):
@@ -256,7 +256,7 @@ class RecommenderTest(unittest.TestCase):
             Material("shown-tax-2", "Патент для ИП", "https://example.com/3", topics=("налоги",), format="статья"),
             Material("shown-tax-3", "Страховые взносы", "https://example.com/4", topics=("налоги",), format="статья"),
             Material("shown-hr-1", "Найм продавца", "https://example.com/5", topics=("команда",), format="статья"),
-            Material("shown-hr-2", "Мотивация отдела", "https://example.com/6", topics=("команда",), format="статья"),
+            Material("shown-mkt-2", "Объявления на Авито", "https://example.com/6", topics=("маркетинг",), format="статья"),
             # Остальной пул (претенденты на страницу 2)
             Material("cand-tax-next", "Налоговый календарь", "https://example.com/7", topics=("налоги",), format="статья", popularity=500),
             Material("cand-already-seen", "Маркетинг в соцсетях", "https://example.com/8", topics=("маркетинг",), format="курс", popularity=800),
@@ -265,14 +265,12 @@ class RecommenderTest(unittest.TestCase):
         cards = [(m, Recommendation(m.id, "Базовое объяснение.", "Следующий шаг.")) for m in materials]
         shown_ids = [m.id for m in materials[:6]]
 
-        # Пользователь открыл карточку "shown-mkt" (маркетинг), проигнорировал 3 карточки про налоги и 2 про команду,
-        # а также ранее уже смотрел "cand-already-seen" через чат/траекторию
-        reranked = rerank_next_page(
+        reranked = rank_catalog_pages(
             cards,
-            shown_ids=shown_ids,
-            session_seen_ids={"shown-mkt", "cand-already-seen"},
-            history=(InteractionEvent("shown-mkt", "view"),),
-            profile=Profile(),
+            page=2, page_size=6, visited_pages={1: shown_ids}, exposed_ids=set(shown_ids),
+            session_seen_ids={"shown-mkt", "shown-mkt-2", "cand-already-seen"},
+            history=(InteractionEvent("shown-mkt", "click"), InteractionEvent("shown-mkt-2", "click")),
+            now=datetime.now(UTC),
         )
         reranked_ids = [m.id for m, _ in reranked]
         # 1. Первые 6 карточек остаются строго на своих местах
@@ -283,6 +281,22 @@ class RecommenderTest(unittest.TestCase):
         self.assertIn("Продвижение на Авито", reranked[6][1].reason)
         # 3. Уже просмотренный материал "cand-already-seen" уходит в самый конец хвоста
         self.assertEqual(reranked_ids[-1], "cand-already-seen")
+
+    def test_runtime_locks_actual_pages_and_caps_the_rerank_window(self):
+        cards = [(Material(str(i), f"Материал {i}", f"https://example.com/{i}",
+                           topics=("налоги",) if i < 7 else ("маркетинг",)), Recommendation(str(i), "", ""))
+                 for i in range(42)]
+        pinned = {1: ["1", "0", "2", "3", "4", "5"], 5: [str(i) for i in range(24, 30)]}
+        settings = dict(page_size=6, visited_pages=pinned, session_seen_ids={"1"},
+                        history=(InteractionEvent("1", "view"),), now=datetime.now(UTC))
+        reranked = rank_catalog_pages(cards, page=2, exposed_ids={"0", "2", "6"}, **settings)
+        self.assertEqual(reranked, rank_catalog_pages(cards, page=2, exposed_ids=set(), **settings))
+        self.assertEqual([card[0].id for card in reranked[:6]], pinned[1])
+        self.assertEqual([card[0].id for card in reranked[24:30]], pinned[5])
+        self.assertEqual(reranked[24:], cards[24:])
+        jumped = rank_catalog_pages(cards, page=5, exposed_ids=set(), **settings)
+        self.assertEqual(jumped[6:], cards[6:])
+        self.assertEqual(len({material.id for material, _ in reranked}), len(cards))
 
 
 if __name__ == "__main__":

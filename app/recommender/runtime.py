@@ -1,31 +1,24 @@
-"""Рантайм-переранжирование следующих страниц пагинации на основе действий в сессии.
-
-Комбинирует:
-1. Гибридную матрицу совстречаемости (Item-to-Item Co-visitation):
-   - Prior: кураторский граф связей (`recommended_links.json`) + контентная близость тем и заголовков.
-   - Live: реальные переходы из сессий в `recommendation_impressions` и `interaction_events`.
-2. Позитивный буст от открытых в текущей сессии материалов (`view` и `click`).
-3. Пессимизацию (Implicit Negative Feedback) скипнутых тем и форматов — карточек, которые были
-   показаны на предыдущих страницах, но проигнорированы пользователем (при том что он взаимодействовал
-   с другими карточками).
-4. Исключение уже показанных на предыдущих страницах карточек (чтобы верхушка выдачи не прыгала)
-   и опускание уже просмотренных вне сетки материалов (например, из чата или траектории) в хвост.
-"""
+"""Стабильная пагинация и ограниченное переранжирование по действиям в сессии."""
 
 from collections import Counter, defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from datetime import datetime, timedelta
 from math import log1p, sqrt
 from pathlib import Path
 import sqlite3
 
 from app.catalog import catalog_data_dir, material_format
-from app.contracts import InteractionEvent, Material, Profile, Recommendation
+from app.contracts import InteractionEvent, Material, Recommendation
 from app.recommender.engine import (
     ACTION_VERB_STEMS,
     _affinity_index,
     _load_recommended_links,
     _normalize_text,
 )
+
+WINDOW_PAGES = 3
+CONFIRMATION_AGE = timedelta(minutes=30)
+Card = tuple[Material, Recommendation]
 
 
 def _live_covisitation(
@@ -80,95 +73,100 @@ def _live_covisitation(
     return co_counts
 
 
-def rerank_next_page(
-    cards: Sequence[tuple[Material, Recommendation]],
+def rank_catalog_pages(
+    cards: Sequence[Card],
     *,
-    shown_ids: Sequence[str],
+    page: int,
+    page_size: int,
+    visited_pages: Mapping[int, Sequence[str]],
+    exposed_ids: set[str],
     session_seen_ids: set[str],
     history: Sequence[InteractionEvent],
-    profile: Profile,
+    now: datetime,
     links_directory: Path | None = None,
     db_connection: sqlite3.Connection | None = None,
-) -> list[tuple[Material, Recommendation]]:
-    """Переранжирует хвост выдачи после `shown_ids` на основе действий пользователя с показанными карточками."""
-    if not cards or not shown_ids:
+) -> list[Card]:
+    """Закрепляет открытые страницы и пересчитывает окно около новой страницы."""
+    if not visited_pages:
         return list(cards)
 
     cards_by_id = {mat.id: (mat, rec) for mat, rec in cards}
-    locked_prefix: list[tuple[Material, Recommendation]] = []
-    locked_set: set[str] = set()
-    for mid in shown_ids:
-        if mid in cards_by_id and mid not in locked_set:
-            locked_prefix.append(cards_by_id[mid])
-            locked_set.add(mid)
+    pinned = {}
+    pinned_ids = set()
+    for visited_page, ids in sorted(visited_pages.items()):
+        start = (visited_page - 1) * page_size
+        for position, mid in enumerate(ids[:page_size], start):
+            if 0 <= position < len(cards) and mid in cards_by_id and mid not in pinned_ids:
+                pinned[position] = cards_by_id[mid]
+                pinned_ids.add(mid)
 
-    remaining = [(mat, rec) for mat, rec in cards if mat.id not in locked_set]
-    if len(remaining) <= 1:
-        return locked_prefix + remaining
+    remaining = iter(card for card in cards if card[0].id not in pinned_ids)
+    ordered = [pinned[position] if position in pinned else next(remaining) for position in range(len(cards))]
+    if page == 1 or page in visited_pages:
+        return ordered
 
-    # Собираем позитивные сигналы: что пользователь реально открывал (модалки) или кликал
-    clicked_ids = {ev.material_id for ev in history if ev.kind in {"click", "complete"}}
-    viewed_ids = {ev.material_id for ev in history if ev.kind == "view"} | set(session_seen_ids)
-    engaged_ids = clicked_ids | viewed_ids
+    start = (page - 1) * page_size
+    positions = [index for index in range(start, min(len(cards), start + WINDOW_PAGES * page_size))
+                 if index not in pinned]
+    if len(positions) < 2:
+        return ordered
+    previously_exposed = {mid for previous, ids in visited_pages.items() if previous < page for mid in ids}
+    confirmed = {event.material_id for event in history
+                 if event.kind in {"click", "complete"} and event.material_id in session_seen_ids
+                 and (event.occurred_at is None or now - CONFIRMATION_AGE <= event.occurred_at <= now)}
+    materials = {mid: card[0] for mid, card in cards_by_id.items()}
+    reordered = _rerank_window(
+        [ordered[index] for index in positions], materials, session_seen_ids, confirmed,
+        exposed_ids & previously_exposed, links_directory, db_connection,
+    )
+    for index, card in zip(positions, reordered, strict=True):
+        ordered[index] = card
+    return ordered
 
-    # Если пользователь ещё ни с чем не взаимодействовал — сохраняем исходный порядок остальных карточек
+
+def _rerank_window(remaining, all_materials, seen_ids, clicked_ids, exposed_ids, links_directory, db_connection):
+    engaged_ids = seen_ids & all_materials.keys()
     if not engaged_ids:
-        return locked_prefix + remaining
+        return remaining
 
-    # Карточки из показанных на предыдущих страницах, которые пользователь открыл vs пропустил (скипнул)
-    engaged_on_page = [mid for mid in locked_set if mid in engaged_ids]
-    skipped_on_page = [mid for mid in locked_set if mid not in engaged_ids]
-
-    all_materials = {mat.id: mat for mat, _ in cards}
     links = _load_recommended_links(links_directory or catalog_data_dir())
 
-    # 1. Считаем положительные темы и форматы из просмотренных/кликнутых материалов
+    # Два разных подтверждённых материала дают сильный сигнал только по общей теме.
+    clicked_topics = Counter(topic for mid in clicked_ids & engaged_ids
+                             for topic in set(map(_normalize_text, all_materials[mid].topics)) if topic)
+    established_topics = {topic for topic, count in clicked_topics.items() if count >= 2}
+    established_ids = {mid for mid in clicked_ids & engaged_ids
+                       if established_topics.intersection(map(_normalize_text, all_materials[mid].topics))}
     positive_topics: Counter[str] = Counter()
-    positive_formats: Counter[str] = Counter()
-    seed_titles: dict[str, str] = {}
+    positive_formats = set()
     for mid in engaged_ids:
-        mat = all_materials.get(mid)
-        if mat is None:
-            continue
-        weight = 2.2 if mid in clicked_ids else 1.2
-        if mid in locked_set:
-            # Действие прямо на текущей странице выдачи имеет повышенный вес
-            weight *= 1.35
-        seed_titles[mid] = mat.title
-        for t in mat.topics:
-            tn = _normalize_text(t)
-            if tn:
-                positive_topics[tn] += weight
+        mat = all_materials[mid]
+        for topic in set(map(_normalize_text, mat.topics)) - {""}:
+            positive_topics[topic] += 1.4 if topic in established_topics and mid in established_ids else (
+                0.45 if mid in clicked_ids else 0.15
+            )
         fmt = material_format(mat)
         if fmt:
-            positive_formats[fmt] += weight * 0.5
+            positive_formats.add(fmt)
 
-    # 2. Считаем скипнутые темы и форматы (только если пользователь взаимодействовал хотя бы с 1 карточкой
-    # или открыл что-то в сессии, чтобы проигнорированные карточки на экране считались осознанным скипом)
+    # Пропуск учитывается после подтверждения интереса и только для карточек из видимой области.
     skipped_topics: Counter[str] = Counter()
     skipped_formats: Counter[str] = Counter()
-    for mid in skipped_on_page:
-        mat = all_materials.get(mid)
-        if mat is None:
-            continue
-        for t in mat.topics:
-            tn = _normalize_text(t)
-            # Не штрафуем тему, если пользователь одновременно открыл другую карточку с этой же темой
-            if tn and tn not in positive_topics:
-                skipped_topics[tn] += 1.0
-        fmt = material_format(mat)
-        if fmt and fmt not in positive_formats:
-            skipped_formats[fmt] += 0.5
+    if established_ids:
+        for mid in (exposed_ids & all_materials.keys()) - engaged_ids:
+            mat = all_materials[mid]
+            for topic in set(map(_normalize_text, mat.topics)) - {""} - positive_topics.keys():
+                skipped_topics[topic] += 0.45
+            fmt = material_format(mat)
+            if fmt and fmt not in positive_formats:
+                skipped_formats[fmt] += 0.2
 
     # 3. Матрица Item-to-Item Co-visitation (Prior граф + контентная близость + Live SQLite)
-    index_records = tuple((m.id, m.title, m.topics) for m in all_materials.values())
-    titles_map, topics_map, title_idf, topic_idf = _affinity_index(index_records)
-
     covisit_scores: dict[str, tuple[float, str]] = {}
-    for seed_id in engaged_ids:
-        if seed_id not in all_materials:
-            continue
-        seed_weight = 1.6 if seed_id in clicked_ids else 1.0
+    if established_ids:
+        index_records = tuple((m.id, m.title, m.topics) for m in all_materials.values())
+        titles_map, topics_map, title_idf, topic_idf = _affinity_index(index_records)
+    for seed_id in sorted(established_ids):
         seed_title = all_materials[seed_id].title
         direct_neighbors = set(links.get(seed_id, ()))
 
@@ -191,22 +189,22 @@ def rerank_next_page(
             )
             content_sim = (shared_terms + 0.75 * shared_topics) / sqrt(4 + len(titles_map.get(cid, ())))
             graph_sim = (2.8 if cid in direct_neighbors else 0.0) + 1.5 * two_hop.get(cid, 0.0)
-            pair_score = (content_sim * 2.5 + graph_sim) * seed_weight
+            pair_score = content_sim + graph_sim
             if pair_score > covisit_scores.get(cid, (0.0, ""))[0]:
                 covisit_scores[cid] = (pair_score, seed_title)
 
-    live_co = _live_covisitation(db_connection, engaged_ids)
+    live_co = _live_covisitation(db_connection, established_ids)
 
     # 4. Следующий логический шаг по формату (Статья/Подкаст -> Курс/Вебинар -> Шаблон/Калькулятор/Чек-лист)
-    next_format_Map = {
+    next_formats = {
         "статья": {"курс", "шаблон", "чек-лист", "калькулятор"},
         "подкаст": {"курс", "статья", "чек-лист"},
         "курс": {"шаблон", "чек-лист", "калькулятор"},
         "вебинар": {"курс", "шаблон", "чек-лист"},
     }
     preferred_next_formats: set[str] = set()
-    for fmt in positive_formats:
-        preferred_next_formats.update(next_format_Map.get(fmt, set()))
+    for mid in established_ids:
+        preferred_next_formats.update(next_formats.get(material_format(all_materials[mid]), set()))
 
     # 5. Итоговое переранжирование оставшегося пула
     total_remaining = len(remaining)
@@ -216,37 +214,33 @@ def rerank_next_page(
     for rank_idx, (mat, rec) in enumerate(remaining):
         # Базовый скор от исходной позиции (плавно убывает, сохраняя релевантность запросу)
         base_rank_score = 12.0 * (1.0 - (rank_idx / max(total_remaining, 1)) * 0.65)
-        pop_tiebreak = min((mat.popularity or 0.0) / 3000.0, 1.2)
 
         mat_topics = [_normalize_text(t) for t in mat.topics if _normalize_text(t)]
         mat_fmt = material_format(mat)
 
         # Буст за совпадение с интересными темами
-        pos_topic_boost = sum(positive_topics.get(t, 0.0) for t in mat_topics) * 3.2
+        pos_topic_boost = sum(positive_topics.get(t, 0.0) for t in set(mat_topics))
+        if not established_ids:
+            pos_topic_boost = min(pos_topic_boost, 0.6)
         # Буст от Co-visitation (Item-to-Item)
         covisit_val, covisit_source = covisit_scores.get(mat.id, (0.0, ""))
         live_covisit_val = live_co.get(mat.id, 0.0)
         # Буст за развитие формата
-        fmt_progression_boost = 1.8 if mat_fmt in preferred_next_formats else 0.0
+        fmt_progression_boost = 0.7 if mat_fmt in preferred_next_formats else 0.0
 
         # Пессимизация за скипнутые темы и форматы
-        skip_topic_penalty = sum(skipped_topics.get(t, 0.0) for t in mat_topics) * 2.6
-        skip_fmt_penalty = skipped_formats.get(mat_fmt, 0.0) * 1.4
+        skip_topic_penalty = sum(skipped_topics.get(t, 0.0) for t in set(mat_topics))
+        skip_fmt_penalty = skipped_formats.get(mat_fmt, 0.0)
 
         runtime_score = (
             base_rank_score
-            + pos_topic_boost
-            + covisit_val * 2.4
-            + live_covisit_val
-            + fmt_progression_boost
-            + pop_tiebreak
-            - skip_topic_penalty
-            - skip_fmt_penalty
+            + min(5.0, pos_topic_boost + covisit_val + live_covisit_val + fmt_progression_boost)
+            - min(1.5, skip_topic_penalty + skip_fmt_penalty)
         )
 
         # Если карточка сильно поднялась благодаря рантайм-действиям, обогащаем объяснение («Почему подходит»)
         updated_rec = rec
-        if covisit_source and (pos_topic_boost >= 3.0 or covisit_val >= 1.8):
+        if covisit_source and (established_topics.intersection(mat_topics) or covisit_val >= 1.8):
             prefix = f"Подобрано на основе вашего интереса к материалу «{covisit_source}». "
             if covisit_source not in rec.reason:
                 updated_rec = Recommendation(
@@ -268,4 +262,4 @@ def rerank_next_page(
     final_tail = [(mat, rec) for _, mat, rec in reranked_unseen] + [
         (mat, rec) for _, mat, rec in reranked_already_viewed
     ]
-    return locked_prefix + final_tail
+    return final_tail

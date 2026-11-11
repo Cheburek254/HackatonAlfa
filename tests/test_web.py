@@ -568,15 +568,18 @@ class WebFlowTest(unittest.TestCase):
         with patch("app.ui.web.load_catalog", return_value=catalog):
             client = create_app(database_path=self.database_path).test_client()
 
-        # Generate >16KB payload of cumulative shown_ids (simulating late page 191)
-        large_shown_ids = ",".join(f"catalog-item-slug-number-{i:04d}" for i in range(1, 1141))
-        payload_bytes = len(large_shown_ids.encode("utf-8"))
+        first = client.get("/").get_data(as_text=True)
+        scope = re.search(r'data-page-scope="([^"]+)"', first)[1]
+        visited = [f"{page}:" + ",".join(f"catalog-item-slug-number-{i:04d}"
+                                        for i in range(page * 6 - 5, page * 6 + 1)) for page in range(1, 191)]
+        payload_bytes = sum(len(entry.encode("utf-8")) for entry in visited)
         self.assertGreater(payload_bytes, 16 * 1024)
 
         # Navigating to the last page (191) with payload exceeding 8KB must succeed (HTTP 200, not 413)
         response = client.post("/", data={
             "show_page": 191,
-            "shown_ids": large_shown_ids,
+            "visited_page": visited,
+            "page_scope": scope,
             "page_size": 6,
         })
         self.assertEqual(response.status_code, 200)
@@ -590,7 +593,8 @@ class WebFlowTest(unittest.TestCase):
         # Navigating to an intermediate late page (190) also succeeds with large payload
         back_response = client.post("/", data={
             "show_page": 190,
-            "shown_ids": large_shown_ids,
+            "visited_page": visited,
+            "page_scope": scope,
             "page_size": 6,
         })
         self.assertEqual(back_response.status_code, 200)
@@ -598,6 +602,29 @@ class WebFlowTest(unittest.TestCase):
         self.assertIn("Страница 190 из 191", back_html)
         self.assertIn("Далее →", back_html)
         self.assertIn("← Назад", back_html)
+
+    def test_catalog_keeps_only_visited_pages_for_each_filter_scope(self):
+        catalog = tuple(Material(f"item-{i}", f"Маркетинг {i}", f"https://example.com/{i}",
+                                 topics=("маркетинг",), format="статья") for i in range(36))
+        with patch("app.ui.web.load_catalog", return_value=catalog):
+            client = create_app(database_path=self.database_path).test_client()
+        form = {"goal": "Маркетинг", "page_size": 6}
+
+        def request_page(page, **state):
+            html = client.post("/", data={**form, "show_page": page, **state},
+                               headers={"X-Recommendation-Fragment": "1"}).get_data(as_text=True)
+            return re.search(r'data-page-scope="([^"]*)"', html)[1], re.findall(r'data-material-id="([^"]+)"', html)
+
+        scope, first = request_page(1)
+        scope_after_jump, fifth = request_page(5, page_scope=scope, visited_page=["1:" + ",".join(first)])
+        self.assertEqual(scope, scope_after_jump)
+        visited = ["1:" + ",".join(first), "5:" + ",".join(fifth)]
+        _, second = request_page(2, page_scope=scope, visited_page=visited)
+        self.assertTrue(set(second).isdisjoint(first + fifth))
+        self.assertEqual(request_page(5, page_scope=scope, visited_page=visited)[1], fifth)
+        self.assertEqual(request_page(1, page_scope=scope, visited_page=visited)[1], first)
+        other, _ = request_page(1, page_scope=scope, visited_page=visited, selected_page_size=12)
+        self.assertNotEqual(other, scope)
 
     def test_impressions_preserve_positions_deduplicate_pages_and_attribute_clicks(self):
         app = create_app(stub_recommend, database_path=self.database_path, algorithm_name="demo:v1")

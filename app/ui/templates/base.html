@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="{% block theme_color %}#111111{% endblock %}">
     <title>{% block title %}Подборка для бизнеса — Альфа-Курс{% endblock %}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='recommendations.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='recommendations.css', v=catalog_asset_versions['recommendations.css']) }}">
 </head>
 <body{% block body_attributes %}{% endblock %}>
     {% block header %}
@@ -80,7 +80,7 @@
                 </div>
             </div>
         </dialog>
-        <script src="{{ url_for('static', filename='material-preview.js') }}" defer></script>
+        <script src="{{ url_for('static', filename='material-preview.js', v=catalog_asset_versions['material-preview.js']) }}" defer></script>
         {% include "chat_widget.html" %}
         <script src="{{ url_for('static', filename='chat-widget.js') }}" defer></script>
     {% endif %}
