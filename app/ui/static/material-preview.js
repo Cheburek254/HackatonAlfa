@@ -1,6 +1,26 @@
 const materialPreview = document.querySelector("#material-preview");
 const seenCards = new WeakSet();
 const dailyTrack = document.querySelector("#daily-track");
+const VIEWED_STORAGE_KEY = "alfa_viewed_materials";
+
+function getSessionViewedIds() {
+    try {
+        const raw = sessionStorage.getItem(VIEWED_STORAGE_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed.filter((id) => typeof id === "string" && id) : [];
+    } catch {
+        return [];
+    }
+}
+
+function addSessionViewedId(materialId) {
+    if (!materialId) return;
+    try {
+        const existing = getSessionViewedIds().filter((id) => id !== materialId);
+        existing.unshift(materialId);
+        sessionStorage.setItem(VIEWED_STORAGE_KEY, JSON.stringify(existing.slice(0, 50)));
+    } catch {}
+}
 
 if (dailyTrack) {
     const dragHint = document.querySelector("#daily-drag-hint");
@@ -192,6 +212,18 @@ document.addEventListener("submit", async (event) => {
     if (submitter?.name) {
         data.append(submitter.name, submitter.value);
     }
+    if (loadMore) {
+        const currentCardIds = [...section.querySelectorAll(".card")]
+            .map((card) => card.dataset.materialId)
+            .filter(Boolean);
+        if (currentCardIds.length) {
+            data.set("shown_ids", currentCardIds.join(","));
+        }
+        const sessionViewed = getSessionViewedIds();
+        if (sessionViewed.length) {
+            data.set("seen_ids", sessionViewed.slice(0, 40).join(","));
+        }
+    }
     status.textContent = "";
     section.setAttribute("aria-busy", "true");
     if (submitter?.classList?.contains("format-chip")) {
@@ -239,6 +271,11 @@ document.addEventListener("submit", async (event) => {
             section.querySelector(".card-grid").append(...appendedCards);
             section.querySelector(".result-pagination").replaceWith(next.querySelector(".result-pagination"));
             section.querySelector('input[name="impression_batch"]').value = next.querySelector('input[name="impression_batch"]').value;
+            const shownInput = section.querySelector('input[name="shown_ids"]');
+            const nextShownInput = next.querySelector('input[name="shown_ids"]');
+            if (shownInput && nextShownInput) {
+                shownInput.value = nextShownInput.value;
+            }
             prepareCards();
             window.scrollTo({ top: scrollTop, behavior: "instant" });
             if (document.activeElement === document.body) {
@@ -318,29 +355,9 @@ if (typeof materialPreview?.showModal === "function") {
     const previewNextSub = previewNextSteps?.querySelector(".next-steps-sub");
     const previewNextGrid = materialPreview.querySelector("#preview-next-steps-grid");
     const materialLink = materialPreview.querySelector(".material-preview-link");
-    const VIEWED_STORAGE_KEY = "alfa_viewed_materials";
     let currentPreview;
     let openingLink;
     let isLoading = false;
-
-    function getSessionViewedIds() {
-        try {
-            const raw = sessionStorage.getItem(VIEWED_STORAGE_KEY);
-            const parsed = raw ? JSON.parse(raw) : [];
-            return Array.isArray(parsed) ? parsed.filter((id) => typeof id === "string" && id) : [];
-        } catch {
-            return [];
-        }
-    }
-
-    function addSessionViewedId(materialId) {
-        if (!materialId) return;
-        try {
-            const existing = getSessionViewedIds().filter((id) => id !== materialId);
-            existing.unshift(materialId);
-            sessionStorage.setItem(VIEWED_STORAGE_KEY, JSON.stringify(existing.slice(0, 50)));
-        } catch {}
-    }
 
     function formatLessons(count) {
         if (!count || count <= 0) return "";

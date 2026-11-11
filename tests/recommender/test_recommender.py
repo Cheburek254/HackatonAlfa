@@ -3,9 +3,10 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from app.catalog import load_catalog, load_history
-from app.contracts import InteractionEvent, Material, Profile
+from app.contracts import InteractionEvent, Material, Profile, Recommendation
 from app.recommender import recommend
 from app.recommender.engine import _expand_synonyms, _normalize_text, _tokenize_stems
+from app.recommender.runtime import rerank_next_page
 
 
 class RecommenderTest(unittest.TestCase):
@@ -218,6 +219,42 @@ class RecommenderTest(unittest.TestCase):
         )
         self.assertEqual(len(res.items), 6)
         self.assertTrue(all(item.reason and item.next_step for item in res.items))
+
+    def test_runtime_rerank_next_page_boosts_engaged_covisitation_penalizes_skips_and_demotes_seen(self):
+        materials = (
+            # Первая шестёрка (показана на странице 1)
+            Material("shown-mkt", "Продвижение на Авито", "https://example.com/1", topics=("маркетинг",), format="статья"),
+            Material("shown-tax-1", "Декларация УСН", "https://example.com/2", topics=("налоги",), format="статья"),
+            Material("shown-tax-2", "Патент для ИП", "https://example.com/3", topics=("налоги",), format="статья"),
+            Material("shown-tax-3", "Страховые взносы", "https://example.com/4", topics=("налоги",), format="статья"),
+            Material("shown-hr-1", "Найм продавца", "https://example.com/5", topics=("команда",), format="статья"),
+            Material("shown-hr-2", "Мотивация отдела", "https://example.com/6", topics=("команда",), format="статья"),
+            # Остальной пул (претенденты на страницу 2)
+            Material("cand-tax-next", "Налоговый календарь", "https://example.com/7", topics=("налоги",), format="статья", popularity=500),
+            Material("cand-already-seen", "Маркетинг в соцсетях", "https://example.com/8", topics=("маркетинг",), format="курс", popularity=800),
+            Material("cand-mkt-course", "Курс по привлечению клиентов с Авито", "https://example.com/9", topics=("маркетинг",), format="курс", popularity=100),
+        )
+        cards = [(m, Recommendation(m.id, "Базовое объяснение.", "Следующий шаг.")) for m in materials]
+        shown_ids = [m.id for m in materials[:6]]
+
+        # Пользователь открыл карточку "shown-mkt" (маркетинг), проигнорировал 3 карточки про налоги и 2 про команду,
+        # а также ранее уже смотрел "cand-already-seen" через чат/траекторию
+        reranked = rerank_next_page(
+            cards,
+            shown_ids=shown_ids,
+            session_seen_ids={"shown-mkt", "cand-already-seen"},
+            history=(InteractionEvent("shown-mkt", "view"),),
+            profile=Profile(),
+        )
+        reranked_ids = [m.id for m, _ in reranked]
+        # 1. Первые 6 карточек остаются строго на своих местах
+        self.assertEqual(reranked_ids[:6], shown_ids)
+        # 2. На 7-е место поднимается свежий курс по маркетингу (несмотря на меньшую популярность),
+        #    а скипнутые налоги опускаются ниже
+        self.assertEqual(reranked_ids[6], "cand-mkt-course")
+        self.assertIn("Продвижение на Авито", reranked[6][1].reason)
+        # 3. Уже просмотренный материал "cand-already-seen" уходит в самый конец хвоста
+        self.assertEqual(reranked_ids[-1], "cand-already-seen")
 
 
 if __name__ == "__main__":

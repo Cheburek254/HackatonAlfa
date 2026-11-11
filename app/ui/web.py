@@ -21,9 +21,9 @@ from app.ctr_report import ORDER_LABELS
 from app.live_data import LiveDataProvider
 from app.database import account_database_path
 from app.ui.accounts import (
-    DEMO_PASSWORD_CODE, DEMO_USERNAME, PROFILE_FIELDS, account_avatar, check_csrf, configure_accounts, csrf_token,
-    current_account, password_code_pending, profile_values, recent_interactions, recommendation_mode, record_interaction, saved_profile,
-    update_profile,
+    DEMO_PASSWORD_CODE, DEMO_USERNAME, PROFILE_FIELDS, _db as get_accounts_db, account_avatar, check_csrf,
+    configure_accounts, csrf_token, current_account, password_code_pending, profile_values, recent_interactions,
+    recommendation_mode, record_interaction, saved_profile, update_profile,
 )
 from app.ui.admin import admin
 from app.ui.chat import chat_bp
@@ -35,6 +35,7 @@ from app.recommender import recommend
 from app.recommender.baseline import recommend_popular_courses
 from app.recommender.daily import daily_picks
 from app.recommender.hybrid import cached_bm25, configured_bm25_weight
+from app.recommender.runtime import rerank_next_page
 from evaluation.catalog_quality import REPORT_NAME, catalog_fingerprint
 from evaluation.learning_report import REPORT_NAME as LEARNING_REPORT_NAME
 from evaluation.stress_report import REPORT_NAME as STRESS_REPORT_NAME
@@ -569,6 +570,29 @@ def create_app(
         page_size = form.get("selected_page_size", type=int) or form.get("page_size", type=int)
         if page_size not in PAGE_SIZES:
             page_size = RESULTS_PER_PAGE
+        if page > 1 and result_order == "recommended" and recommender is recommend:
+            shown_ids = [
+                part.strip()
+                for raw in form.getlist("shown_ids")
+                for part in raw.split(",")
+                if part.strip()
+            ]
+            session_seen_ids = {
+                part.strip()
+                for raw in form.getlist("seen_ids")
+                for part in raw.split(",")
+                if part.strip()
+            }
+            if shown_ids:
+                cards = rerank_next_page(
+                    cards,
+                    shown_ids=shown_ids,
+                    session_seen_ids=session_seen_ids,
+                    history=history,
+                    profile=profile,
+                    links_directory=source.parent,
+                    db_connection=get_accounts_db(),
+                )
         visible_cards = cards[:page * page_size]
         first_cards = cards[:RESULTS_PER_PAGE]
         access_counts = Counter(access_category(material) for material, _ in first_cards)
