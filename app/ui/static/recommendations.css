@@ -1497,6 +1497,10 @@ button.is-loading {
 .chat-list li {
     margin-bottom: 4px;
 }
+.chat-result-cards { margin: 10px 0 0; padding-inline-start: 24px; }
+.chat-result-cards li { padding: 6px 8px; border-bottom: 1px solid #dddde3; }
+.chat-result-cards li:last-child { border-bottom: 0; }
+.chat-result-cards small { display: block; color: var(--muted); }
 
 .chat-quick-replies {
     display: flex;

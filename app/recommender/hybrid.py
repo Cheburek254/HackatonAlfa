@@ -17,10 +17,10 @@ FUSION_DEPTH, RRF_OFFSET = 50, 20
 DEFAULT_BM25_WEIGHT = 0.25
 
 
-def configured_bm25_weight() -> float:
-    weight = float(os.environ.get("ALFA_BM25_WEIGHT", str(DEFAULT_BM25_WEIGHT)))
+def configured_bm25_weight(variable: str = "ALFA_BM25_WEIGHT") -> float:
+    weight = float(os.environ.get(variable, str(DEFAULT_BM25_WEIGHT)))
     if not 0 <= weight <= 1:
-        raise ValueError("ALFA_BM25_WEIGHT must be between 0 and 1")
+        raise ValueError(f"{variable} must be between 0 and 1")
     return weight
 
 FORMAT_WORDS = {

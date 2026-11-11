@@ -69,6 +69,16 @@ CREATE TABLE IF NOT EXISTS auth_attempts (
     attempts INTEGER NOT NULL,
     expires INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS chat_responses (
+    id TEXT PRIMARY KEY,
+    created_at INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    intent TEXT NOT NULL,
+    elapsed_ms INTEGER NOT NULL,
+    card_count INTEGER NOT NULL,
+    opened_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS chat_responses_created_at ON chat_responses (created_at);
 CREATE TABLE IF NOT EXISTS account_details (
     user_id INTEGER PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE,
     first_name TEXT NOT NULL,
@@ -501,7 +511,7 @@ def _password_access_allowed() -> bool:
     )
 
 
-def _consume_attempts(scopes: tuple[tuple[str, int], ...]) -> bool:
+def _consume_attempts(scopes: tuple[tuple[str, int], ...], *, window: int = ATTEMPT_WINDOW) -> bool:
     now = int(time())
     connection = _db()
     with connection:
@@ -511,7 +521,7 @@ def _consume_attempts(scopes: tuple[tuple[str, int], ...]) -> bool:
                 """INSERT INTO auth_attempts (scope, attempts, expires) VALUES (?, 1, ?)
                    ON CONFLICT(scope) DO UPDATE SET attempts = attempts + 1
                    RETURNING attempts""",
-                (scope, now + ATTEMPT_WINDOW),
+                (scope, now + window),
             ).fetchone()[0]
             if attempts > limit:
                 return False

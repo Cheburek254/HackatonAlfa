@@ -265,7 +265,7 @@ def create_app(
     static = Path(app.static_folder)
     app.jinja_env.globals["catalog_asset_versions"] = {
         name: sha256((static / name).read_bytes()).hexdigest()[:12]
-        for name in ("recommendations.css", "material-preview.js")
+        for name in ("recommendations.css", "material-preview.js", "chat-widget.js")
     }
     app.config["MAX_CONTENT_LENGTH"] = 4 * 1024 * 1024
     app.config["PASSWORD_CODE_SENDER"] = password_code_sender
@@ -273,6 +273,7 @@ def create_app(
     app.config["LIVE_DATA_PROVIDER"] = live_data_provider
     bm25_weight = configured_bm25_weight()
     app.config["BM25_WEIGHT"] = bm25_weight
+    app.config["CHAT_BM25_WEIGHT"] = configured_bm25_weight("ALFA_CHAT_BM25_WEIGHT")
     source = catalog_source()
     is_demo_catalog = source == DEMO_CATALOG_PATH
     catalog = load_catalog(source)

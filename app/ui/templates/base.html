@@ -82,7 +82,7 @@
         </dialog>
         <script src="{{ url_for('static', filename='material-preview.js', v=catalog_asset_versions['material-preview.js']) }}" defer></script>
         {% include "chat_widget.html" %}
-        <script src="{{ url_for('static', filename='chat-widget.js') }}" defer></script>
+        <script src="{{ url_for('static', filename='chat-widget.js', v=catalog_asset_versions['chat-widget.js']) }}" defer></script>
     {% endif %}
 </body>
 </html>

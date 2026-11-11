@@ -15,6 +15,7 @@ from app.ui.accounts import (
     set_course_plus, set_recommendation_mode,
 )
 from app.ui.admin_summary import build_assessments
+from app.ui.chat_metrics import chat_statistics
 from app.ui.experiments import end_experiment, experiments, group_metrics, running_experiment, start_experiment
 from evaluation.catalog_quality import read_report as read_catalog_quality
 from evaluation.learning_report import read_report as read_learning_report
@@ -227,6 +228,7 @@ def analytics():
         impressions_by_day=[(day, metrics.impressions) for day, metrics in activity],
         clicks_by_day=[(day, metrics.clicks) for day, metrics in activity],
         ctr_by_day=[(day, metrics.ctr) for day, metrics in activity],
+        chat_metrics=chat_statistics(),
     )
 
 

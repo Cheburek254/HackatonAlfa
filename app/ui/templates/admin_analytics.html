@@ -37,6 +37,19 @@
     </figure>
 {% endmacro %}
 {% block admin_content %}
+<section class="account-card" aria-labelledby="chat-metrics-title">
+    <h2 id="chat-metrics-title" class="account-section-title">Чат · последние 30 дней</h2>
+    {% if chat_metrics.responses %}
+    <dl class="admin-kpis">
+        <div><dt>Ответы</dt><dd>{{ chat_metrics.responses }}</dd></div>
+        <div><dt>Время ответа p95</dt><dd>{{ chat_metrics.p95_ms }} мс</dd></div>
+        <div><dt>Резервные ответы на подбор</dt><dd>{{ chat_metrics.fallback }} из {{ chat_metrics.searches }}</dd></div>
+        <div><dt>Ответы с открытием карточки</dt><dd>{{ chat_metrics.opened }} из {{ chat_metrics.with_cards }}</dd></div>
+    </dl>
+    {% else %}
+    <p class="admin-empty">Данные появятся после первых ответов чата.</p>
+    {% endif %}
+</section>
 <section class="account-card" id="admin-report" aria-labelledby="admin-report-title">
     <h2 id="admin-report-title" class="account-section-title">Отчёт по рекомендациям</h2>
     <p class="account-muted">CTR — доля показов, после которых открыли материал. Повторные переходы с одного показа учитываются один раз. Тестовый аккаунт исключён.</p>

@@ -7,7 +7,9 @@ from unittest.mock import patch
 
 from app.contracts import InteractionEvent, Material
 from app.recommender.hybrid import merge_orders
-from app.ui.chat import _fallback_reply, _linkify_materials
+from app.ui.accounts import set_recommendation_mode
+from app.ui.chat import CHAT_CLARIFICATION, _fallback_reply, _linkify_materials
+from app.ui.chat_metrics import chat_statistics
 from app.ui.web import create_app
 
 
@@ -17,6 +19,7 @@ class ChatApiTest(unittest.TestCase):
         self.enterContext(patch.dict("os.environ", {"ALFA_CATALOG_DIR": ""}))
         self.enterContext(patch("app.catalog.DATA_DIR", Path(temporary)))
         self.credentials = self.enterContext(patch("app.ui.chat._load_env_credentials", return_value=("", "")))
+        self.openrouter = self.enterContext(patch("app.ui.chat._load_openrouter_credentials", return_value=("", "")))
         self.app = create_app(database_path=Path(temporary) / "accounts.sqlite3")
         self.app.config["TESTING"] = True
         self.client = self.app.test_client()
@@ -42,19 +45,14 @@ class ChatApiTest(unittest.TestCase):
         data = response.get_json()
         self.assertFalse(data.get("ok"))
 
-    def test_fallback_replies_cover_core_business_domains_and_contain_links(self):
-        start_reply = _fallback_reply("С чего начать бизнес и как открыть ИП?")
-        self.assertIn("ИП", start_reply)
-        self.assertIn("шаг", start_reply.lower())
-        self.assertIn("/materials/", start_reply)
-
-        sales_reply = _fallback_reply("Как поднять продажи на Wildberries и Ozon?")
-        self.assertIn("продаж", sales_reply.lower())
-        self.assertIn("/materials/", sales_reply)
-
-        tax_reply = _fallback_reply("Какой налог выбрать для УСН?")
-        self.assertIn("УСН", tax_reply)
-        self.assertIn("/materials/", tax_reply)
+    def test_fallback_only_uses_selected_catalog_cards(self):
+        card = Material("guide", "Учёт на УСН", "https://example.com/guide", description="<p>Проверка расходов.</p>")
+        reply = _fallback_reply([card])
+        self.assertIn("Проверка расходов.", reply)
+        self.assertNotIn("<p>", reply)
+        self.assertEqual(reply.count("/materials/"), 1)
+        self.assertIn("/materials/guide", reply)
+        self.assertEqual(_fallback_reply([]), CHAT_CLARIFICATION)
 
     def test_linkify_materials_converts_known_titles(self):
         text = "Советую курс «Маркетплейсы: с чего начать и как преуспеть» для старта."
@@ -62,10 +60,88 @@ class ChatApiTest(unittest.TestCase):
         converted = _linkify_materials(text, [material])
         self.assertIn("[Маркетплейсы: с чего начать и как преуспеть](/materials/course)", converted)
 
-    def test_fallback_reply_personalization(self):
-        profile = {"industry": "общепит", "stage": "запуск"}
-        reply = _fallback_reply("Как поднять продажи?", profile=profile)
-        self.assertIn("общепит", reply.lower())
+    def test_help_and_unclear_messages_skip_search_and_providers(self):
+        with patch("app.ui.chat._find_relevant_materials") as search, patch("app.ui.chat._load_env_credentials") as provider:
+            for query, intent, snippet in (
+                ("У меня не открывается курс по налогам", "support", "Какой материал"),
+                ("Что открывает подписка Курс+?", "subscription", "покупаются отдельно"),
+                ("Как поменять пароль?", "account", "Код появится в форме демо"),
+                ("Как войти в аккаунт?", "account", "/login"),
+                ("Россия Путин Победа", "clarification", CHAT_CLARIFICATION),
+                ("Какая погода завтра?", "clarification", CHAT_CLARIFICATION),
+                ("Привет!", "greeting", "Чем помочь?"),
+            ):
+                with self.subTest(query=query):
+                    response = self.client.post("/api/chat", json={"message": query})
+                    self.assertEqual(response.json["intent"], intent)
+                    self.assertIn(snippet, response.json["reply"])
+                    self.assertEqual(response.json["cards"], [])
+            search.assert_not_called()
+            provider.assert_not_called()
+
+    def test_card_memory_preserves_display_order_across_help_and_details(self):
+        catalog = self.app.config["CHAT_CATALOG"] = tuple(
+            Material(mid, title, f"https://example.com/{mid}", access="free", description=f"Описание {title}")
+            for mid, title in (("a", "Акт сверки"), ("b", "Шаблон сверки"), ("c", "Разбор сверки"))
+        )
+        with patch("app.ui.chat._find_relevant_materials", return_value=list(catalog)) as search:
+            first = self.client.post("/api/chat", json={"message": "Подбери документы для сверки"}).json
+            self.assertEqual([card["id"] for card in first["cards"]], ["a", "b", "c"])
+            token = first["card_context"]
+            help_turn = self.client.post("/api/chat", json={"message": "Что такое Курс+?", "card_context": token}).json
+            self.assertEqual(help_turn["card_context"], token)
+            for query, expected in (("Расскажи про второй материал", "b"), ("А про третий", "c")):
+                turn = self.client.post("/api/chat", json={"message": query, "card_context": token}).json
+                self.assertEqual(turn["intent"], "card_detail")
+                self.assertEqual(turn["cards"][0]["id"], expected)
+                self.assertEqual(turn["card_context"], token)
+            other_guest = self.app.test_client().post("/api/chat", json={
+                "message": "Расскажи про второй материал", "card_context": token,
+            }).json
+            self.assertEqual(other_guest["cards"], [])
+            self.assertIn("Сначала попросите", other_guest["reply"])
+            search.assert_called_once()
+
+    def test_chat_rate_limit_and_catalog_independence(self):
+        with self.app.app_context():
+            set_recommendation_mode("popular")
+        self.app.config["CHAT_BM25_WEIGHT"] = 0.4
+        card = Material("draft", "Акт сверки", "https://example.com/draft", access="free")
+        with patch("app.ui.chat.CHAT_REQUESTS_PER_MINUTE", 1), \
+             patch("app.ui.chat._find_relevant_materials", return_value=[card]) as search:
+            first = self.client.post("/api/chat", json={"message": "Нужен акт сверки"})
+            self.assertEqual(first.json["cards"][0]["id"], "draft")
+            self.assertEqual(search.call_args.kwargs["bm25_weight"], 0.4)
+            limited = self.client.post("/api/chat", json={"message": "Нужен акт сверки"})
+            self.assertEqual(limited.status_code, 429)
+            self.assertEqual(limited.headers["Retry-After"], "60")
+            search.assert_called_once()
+
+    def test_provider_fallback_budget_and_open_metrics(self):
+        self.credentials.return_value = ("mock", "gemini")
+        self.openrouter.return_value = ("mock", "router")
+        card = Material("draft", "Акт сверки", "https://example.com/draft", access="free")
+        with patch("app.ui.chat._find_relevant_materials", return_value=[card]), \
+             patch("app.ui.chat._call_gemini", return_value=None) as gemini, \
+             patch("app.ui.chat._call_openrouter", return_value=None) as router:
+            response = self.client.post("/api/chat", json={"message": "Нужен акт сверки", "history": [
+                {"role": "user", "text": "Нужен акт сверки"},
+            ]}).json
+        self.assertEqual(response["source"], "fallback")
+        self.assertEqual(gemini.call_args.args[3], [])
+        self.assertEqual(gemini.call_args.kwargs["deadline"], router.call_args.kwargs["deadline"])
+        self.assertFalse(gemini.call_args.kwargs["retry_default"])
+        for _ in range(2):
+            self.assertEqual(self.client.post("/api/chat/card-open", json={
+                "material_id": "draft", "click_context": response["click_context"],
+            }).status_code, 204)
+        self.assertEqual(self.client.post("/api/chat/card-open", json={
+            "material_id": "unlisted", "click_context": response["click_context"],
+        }).status_code, 403)
+        with self.app.app_context():
+            stats = chat_statistics()
+        self.assertEqual((stats["responses"], stats["fallback"], stats["opened"]), (1, 1, 1))
+        self.assertIsNotNone(stats["p95_ms"])
 
     def test_chat_endpoint_returns_json_reply(self):
         response = self.client.post("/api/chat", json={"message": "Привет"})
@@ -90,9 +166,10 @@ class ChatApiTest(unittest.TestCase):
 
     def test_chat_uses_entitled_catalog_and_filters_model_links(self):
         self.app.config["CHAT_CATALOG"] = (
-            Material("free", "Бесплатный курс по продажам", "https://example.com/free", access="free"),
-            Material("plus", "Подписочный курс по продажам", "https://example.com/plus", access="paid", subscriptions=("Курс+",)),
-            Material("paid", "Платный курс по продажам", "https://example.com/paid", access="paid"),
+            Material("free", "Бесплатный курс по продажам", "https://example.com/free", access="free", format="курс"),
+            Material("plus", "Подписочный курс по продажам", "https://example.com/plus", access="paid",
+                     format="курс", subscriptions=("Курс+",)),
+            Material("paid", "Платный курс по продажам", "https://example.com/paid", access="paid", format="курс"),
         )
         self.credentials.return_value = ("mock", "gemini-3.5-flash-lite")
         reply = "• [Бесплатный](/materials/free)\n• [Подписочный](/materials/plus)\n• [Платный](/materials/paid)"

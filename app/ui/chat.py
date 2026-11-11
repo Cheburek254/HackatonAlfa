@@ -4,25 +4,58 @@ import json
 import logging
 import os
 import re
+import secrets
 import urllib.error
 import urllib.request
 from collections.abc import Sequence
+from hashlib import sha256
 from pathlib import Path
+from time import monotonic, time
 
 from flask import Blueprint, current_app, jsonify, request, session
+from itsdangerous import BadData, URLSafeTimedSerializer
 
+from app.catalog import material_format
 from app.catalog.subscriptions import entitled_catalog
 from app.contracts import InteractionEvent, Profile
 from app.recommender import recommend
-from app.recommender.baseline import recommend_popular_courses
-from app.recommender.hybrid import DEFAULT_BM25_WEIGHT, acceptable, cached_bm25, constraints, merge_orders
-from app.ui.accounts import current_account, recent_interactions, recommendation_mode, saved_profile
-from app.ui.experiments import experiment_variant
+from app.recommender.hybrid import DEFAULT_BM25_WEIGHT, acceptable, constraints, material_text_terms, tokens
+from app.ui.accounts import _consume_attempts, _db, csrf_token, current_account, recent_interactions, saved_profile
+from app.ui.chat_help import help_reply
+from app.ui.chat_metrics import record_open, record_response
+from app.ui.descriptions import clean_plain_text
 
 logger = logging.getLogger(__name__)
 
 chat_bp = Blueprint("chat", __name__, url_prefix="/api")
 MATERIAL_LINK = re.compile(r"\[[^\]\n]+\]\(/materials/([a-zA-Z0-9_-]+)\)")
+CARD_REFERENCE = re.compile(
+    r"^(?:а\s+)?(?:(?:расскажи(?:те)?(?: подробнее)?|подробнее|покажи(?:те)?|что известно)\s+)?"
+    r"(?:(?:о|об|про)\s+)?(?P<ordinal>[1-5](?:[-‑]?(?:й|м|ю|я|ую|ом))?|"
+    r"перв\w*|втор\w*|трет\w*|четв[её]рт\w*|пят\w*)"
+    r"(?:\s+(?:материал\w*|стать\w*|курс\w*|карточк\w*|шаблон\w*|вебинар\w*|подкаст\w*|вариант\w*))?[?!. ]*$"
+)
+CARD_CONTEXT_AGE = 86400
+CHAT_REQUESTS_PER_MINUTE = 16
+CHAT_MODEL_REQUESTS_PER_MINUTE = 120
+CHAT_PROVIDER_BUDGET = 8.0
+CHAT_CLARIFICATION = "Не понял ваш запрос, уточните."
+GREETING = re.compile(r"^(?:привет(?:ствую)?|здравствуй(?:те)?|доброе утро|добрый (?:день|вечер)|спасибо|благодарю)[!,.? ]*$")
+BUSINESS_QUERY = re.compile(
+    r"\b(?:бизнес\w*|предприним\w*|ип|ооо|налог\w*|усн|ндс|ндфл|патент\w*|финанс\w*|"
+    r"бухгалтер\w*|уч[её]т\w*|маркетинг\w*|продаж\w*|клиент\w*|реклам\w*|маркетплейс\w*|"
+    r"поставк\w*|поставщик\w*|договор\w*|отч[её]т\w*|сотрудник\w*|зарплат\w*|розниц\w*|"
+    r"авито|озон|ozon|wildberries|wb|командиров\w*|плат[её]ж\w*|касс\w*|сверк\w*|гпх|сoут|соут|"
+    r"регламент\w*|закуп\w*|цен\w*|прибыл\w*|рентабельн\w*|дтс|кадр\w*|воронк\w*|"
+    r"задолжен\w*|контрагент\w*|свери\w*|концесси\w*|франшиз\w*|"
+    r"стартап\w*|товар\w*|скидк\w*|подряд\w*|производств\w*|команд\w*|себестоимост\w*)\b"
+)
+SEARCH_REQUEST = re.compile(r"\b(?:подбери\w*|посоветуй\w*|найди\w*|ищу|нуж\w*|дайте|скачать|курс\w*|стать\w*|"
+                            r"бланк\w*|шаблон\w*|калькулятор\w*|вебинар\w*|подкаст\w*|как|зачем)\b")
+GENERIC_QUERY_TERMS = frozenset(tokens(
+    "пожалуйста расскажи подробно курс курсы статья статьи шаблон бланк калькулятор материал материалы "
+    "покажи подбери подобрать посоветуй ищу дайте нужен нужна нужно узнать научиться понять завтра сегодня"
+))
 
 BASE_SYSTEM_PROMPT = (
     "Ты — виртуальный помощник демонстрационного проекта по подбору материалов «Альфа-Курса». "
@@ -35,15 +68,10 @@ BASE_SYSTEM_PROMPT = (
     "3. Порекомендуй подходящие материалы с платформы «Альфа-Курс».\n"
     "4. Для платных материалов не раскрывай закрытые уроки, а назови практическую пользу и предложи перейти к изучению на платформе.\n"
     "5. Поддерживай деловой, конструктивный и надежный тон Альфа-Банка.\n"
-    "6. Рекомендуй материалы только из переданного списка. Для них используй указанные ссылки Markdown.\n\n"
-    "[Техническая помощь и устройство платформы «Альфа-Курс»]:\n"
-    "Если пользователь задает вопрос по работе сайта или аккаунту, отвечай строго по этим правилам со ссылками Markdown:\n"
-    "• Смена пароля: перейти в раздел [Настройки профиля](/profile/settings#password-settings) в блок «Смена пароля». Ввести текущий пароль, новый (от 8 символов) и подтвердить 6-значным кодом из письма на почте. После смены пароля нужно войти заново.\n"
-    "• Профиль бизнеса: страницы [Мой профиль](/profile) и [Редактирование профиля](/profile/settings) — здесь можно настроить стадию, сферу бизнеса, опыт, размер команды, контакты или фото аватара.\n"
-    "• Вход и регистрация: вход в аккаунт — [/login](/login), регистрация — [/register](/register).\n"
-    "• Подписка «Курс+»: открывает неограниченный доступ ко всем платным курсам и премиум-материалам каталога.\n"
-    "• Каталог и подбор: на главной странице можно ввести свою задачу в поиск, выбрать быстрый чипс цели или отфильтровать материалы по форматам (курсы, статьи, шаблоны, чек-листы, вебинары, подкасты, калькуляторы) и типу доступа (бесплатные, платные, Курс+).\n"
-    "• Новый диалог: очистить историю чата можно кнопкой обновления в правом верхнем углу окна чата."
+    "6. Рекомендуй материалы только из переданного списка. Для них используй указанные ссылки Markdown.\n"
+    "7. Курс+ открывает материалы с пометкой «По подписке Курс+». Остальные платные материалы приобретаются отдельно. "
+    "Для вопросов о профиле, подписке и работе сайта используй справку приложения и не выдумывай инструкции.\n"
+    "8. Если вопрос неясен, попроси уточнить. Не приписывай пользователю задачу или проект, которые он не упоминал."
 )
 
 def _load_env_credentials() -> tuple[str, str]:
@@ -102,7 +130,6 @@ def _find_relevant_materials(
     limit: int = 6,
     *,
     bm25_weight: float = DEFAULT_BM25_WEIGHT,
-    bm25_adaptive: bool = False,
     history: Sequence[InteractionEvent] = (),
     links_directory: Path | None = None,
 ) -> list:
@@ -118,17 +145,9 @@ def _find_relevant_materials(
         rec_profile = Profile(goal=query, **{field: profile.get(field) for field in (
             "industry", "stage", "experience", "team_size", "learning_topic", "preferred_format",
         )})
-        if bm25_adaptive:
-            result = recommend(catalog, rec_profile, history, max(30, limit), explain_with_llm=False,
-                               links_directory=links_directory, bm25_weight=bm25_weight, bm25_adaptive=True)
-            hybrid_ids = tuple(item.material_id for item in result.items if acceptable(materials_map[item.material_id], filters))
-        else:
-            bm25_ids = cached_bm25(tuple(catalog))(query) if bm25_weight else ()
-            core_res = recommend(catalog, rec_profile, (), 30, explain_with_llm=False)
-            core_ids = tuple(r.material_id for r in core_res.items)
-            valid_bm25 = tuple(mid for mid in bm25_ids if acceptable(materials_map[mid], filters))
-            valid_core = tuple(mid for mid in core_ids if acceptable(materials_map[mid], filters))
-            hybrid_ids = merge_orders((valid_core, valid_bm25), weights=(1 - bm25_weight, bm25_weight))
+        result = recommend(catalog, rec_profile, history, max(30, limit), explain_with_llm=False,
+                           links_directory=links_directory, bm25_weight=bm25_weight, bm25_adaptive=True)
+        hybrid_ids = tuple(item.material_id for item in result.items if acceptable(materials_map[item.material_id], filters))
         if hybrid_ids:
             ordered = [materials_map[mid] for mid in hybrid_ids]
             ordered.sort(key=lambda item: item.title.casefold() in viewed_set)
@@ -227,7 +246,7 @@ def _build_system_prompt(
             title = getattr(m, "title", "")
             mid = getattr(m, "id", "")
             fmt = getattr(m, "format", "материал")
-            desc = (getattr(m, "description", "") or "").strip()
+            desc = clean_plain_text(getattr(m, "description", ""))
             if desc:
                 cand_lines.append(f"{i}. [{title}](/materials/{mid}) ({fmt}): {desc[:160]}")
             else:
@@ -235,7 +254,8 @@ def _build_system_prompt(
         prompt += (
             "\n[Рекомендуемые материалы платформы «Альфа-Курс» для ссылки в ответе]:\n"
             + "\n".join(cand_lines)
-            + "\nИспользуй только ссылки из этого списка. Если пользователь просит рассказать о конкретном материале или номере (например «расскажи о 1 статье»), кратко объясни его суть и дай ссылку.\n"
+            + "\nИнтерфейс покажет карточки отдельно и в этом порядке. Объясни, с чего начать. "
+            "Используй только ссылки из списка, когда упоминаешь конкретный материал.\n"
         )
 
     return prompt
@@ -275,9 +295,76 @@ def _keep_available_links(reply: str, allowed_ids: set[str], candidates: list) -
     return reply
 
 
-def _call_gemini(api_key: str, model: str, message: str, history: list[dict], system_prompt: str = BASE_SYSTEM_PROMPT) -> str | None:
+def _memory_signer():
+    return URLSafeTimedSerializer(current_app.secret_key, salt="chat-cards-v1")
+
+
+def _click_signer():
+    return URLSafeTimedSerializer(current_app.secret_key, salt="chat-open-v1")
+
+
+def _remembered_cards(token, subject):
+    if not isinstance(token, str) or not token or len(token) > 2048:
+        return ()
+    try:
+        state = _memory_signer().loads(token, max_age=CARD_CONTEXT_AGE)
+    except BadData:
+        return ()
+    return tuple(state["ids"]) if state["subject"] == subject else ()
+
+
+def _card_position(message):
+    match = CARD_REFERENCE.fullmatch(message.casefold())
+    if not match:
+        return None
+    ordinal = match["ordinal"]
+    if ordinal[0].isascii() and ordinal[0].isdigit():
+        return int(ordinal[0]) - 1
+    return ("пер", "вто", "тре", "чет", "пят").index(ordinal[:3])
+
+
+def _card_details(material):
+    title = material.title.replace("[", "(").replace("]", ")")
+    description = clean_plain_text(material.description)
+    if len(description) > 500:
+        description = description[:500].rsplit(" ", 1)[0].rstrip(".,;:") + "…"
+    details = [value for value in (material.format, material.duration,
+                                   f"Уроков: {material.lesson_count}" if material.lesson_count else None) if value]
+    lines = [f"[{title}](/materials/{material.id})"]
+    if details:
+        lines.append(" · ".join(details))
+    if description:
+        lines.append(description)
+    return "\n\n".join(lines)
+
+
+def _chat_subject(account):
+    return f"user:{account['id']}" if account else "guest:" + sha256(csrf_token().encode()).hexdigest()
+
+
+def _supported_candidates(message, candidates):
+    terms = set(tokens(message)) - GENERIC_QUERY_TERMS
+    if not terms:
+        return []
+    business = BUSINESS_QUERY.search(message.casefold())
+    supported = []
+    for material in candidates:
+        headings, text = material_text_terms(material.title, material.description, material.topics)
+        if business and (terms & headings or len(terms & text) >= 2):
+            supported.append(material)
+        elif not business and len(terms & headings) >= 2:
+            supported.append(material)
+    return supported
+
+
+def _provider_timeout(deadline, limit):
+    return limit if deadline is None else min(limit, max(0.0, deadline - monotonic()))
+
+
+def _call_gemini(api_key: str, model: str, message: str, history: list[dict], system_prompt: str = BASE_SYSTEM_PROMPT,
+                 *, deadline: float | None = None, retry_default: bool = True) -> str | None:
     candidate_models = [model] if model else ["gemini-3.5-flash-lite"]
-    if "gemini-3.5-flash-lite" not in candidate_models:
+    if retry_default and "gemini-3.5-flash-lite" not in candidate_models:
         candidate_models.append("gemini-3.5-flash-lite")
 
     contents = []
@@ -301,6 +388,9 @@ def _call_gemini(api_key: str, model: str, message: str, history: list[dict], sy
     data = json.dumps(payload).encode("utf-8")
 
     for current_model in candidate_models:
+        timeout = _provider_timeout(deadline, 4.0)
+        if timeout < 0.25:
+            return None
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{current_model}:generateContent"
         req = urllib.request.Request(
             url,
@@ -309,7 +399,7 @@ def _call_gemini(api_key: str, model: str, message: str, history: list[dict], sy
         )
 
         try:
-            with urllib.request.urlopen(req, timeout=9) as response:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
                 res_data = json.loads(response.read().decode("utf-8"))
                 candidates = res_data.get("candidates") or []
                 if candidates:
@@ -332,8 +422,10 @@ def _call_openrouter(
     message: str,
     history: list[dict],
     system_prompt: str = BASE_SYSTEM_PROMPT,
+    *, deadline: float | None = None,
 ) -> str | None:
-    if not api_key:
+    timeout = _provider_timeout(deadline, 4.0)
+    if not api_key or timeout < 0.25:
         return None
     url = "https://openrouter.ai/api/v1/chat/completions"
     messages = [{"role": "system", "content": system_prompt}]
@@ -364,161 +456,39 @@ def _call_openrouter(
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=12) as response:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
             res_data = json.loads(response.read().decode("utf-8"))
             choices = res_data.get("choices") or []
             if choices:
                 msg_obj = choices[0].get("message", {})
-                content = msg_obj.get("content") or msg_obj.get("reasoning") or ""
+                content = msg_obj.get("content") or ""
                 if content:
                     return content.strip()
     except urllib.error.HTTPError as exc:
-        err_body = ""
-        try:
-            err_body = exc.read().decode("utf-8")
-        except Exception:
-            pass
-        logger.warning("HTTP ошибка OpenRouter API (%s, code %s): %s", model, exc.code, err_body[:200])
+        logger.warning("HTTP ошибка OpenRouter API (%s, code %s)", model, exc.code)
     except Exception as exc:
         logger.warning("Ошибка при обращении к OpenRouter API (%s): %s", model, exc)
     return None
 
 
-def _fallback_reply(
-    message: str,
-    profile: dict | None = None,
-    viewed_titles: list[str] | None = None,
-    candidates: list | None = None,
-) -> str:
-    msg = message.casefold()
-    prof = profile or {}
-    viewed = viewed_titles or []
-    cand = candidates or []
-
-    # Персонализированный префикс, если есть профиль или история
-    prefix = ""
-    if viewed:
-        prefix = f"Вижу, что вы уже ознакомились с материалом **«{viewed[0]}»**. "
-    elif prof.get("industry"):
-        prefix = f"С учетом вашей сферы деятельности (**{prof['industry']}**): "
-
-    if any(w in msg for w in ("прода", "охват", "трафик", "клиент", "конверс", "маркетплейс", "wildberries", "ozon", "wb", "ctr", "реклам", "товар", "носк", "одежд", "лид")):
-        return (
-            f"{prefix}Для увеличения охватов и роста продаж товаров рекомендуем сфокусироваться на трех ключевых действиях:\n\n"
-            "1. **Оптимизация точки контакта (визуал и CTR):** сочная инфографика, качественные фото и четкое позиционирование (для товарного бизнеса — комплекты по 3–5 штук, состав) повышают кликабельность в выдаче.\n"
-            "2. **SEO и поисковые алгоритмы:** заполните все доступные характеристики в карточке, чтобы алгоритм маркетплейса выдавал товар по широкому пулу запросов.\n"
-            "3. **Платный трафик с контролем юнит-экономики:** запустите автоматические рекламные кампании на тест и отслеживайте окупаемость каждого вложенного рубля.\n\n"
-            "На платформе «Альфа-Курс» вам помогут:\n"
-            "• Практический курс [«Маркетплейсы: с чего начать и как преуспеть»](/materials/d0aa4598-3da2-478b-bbf8-bda81b231b58)\n"
-            "• Практический курс [«Бизнес на Авито: лёгкая продажа товаров»](/materials/a8184af0-7007-4bc3-98c1-1ff55c949a97)\n"
-            "• Готовый инструмент [«Калькулятор юнит-экономики и процентов»](/materials/c25dc6f4-de0e-4f66-95cc-53b92612da34)"
-        )
-
-    if any(w in msg for w in ("начать", "старт", "открыть", "ип", "ооо", "регистрац", "с чего")):
-        return (
-            f"{prefix}Чтобы грамотно запустить бизнес без лишних рисков, двигайтесь по проверенным шагам:\n\n"
-            "1. **Анализ спроса (CustDev):** пообщайтесь с первыми 10 потенциальными клиентами до закупки товара или аренды.\n"
-            "2. **Юнит-экономика:** заранее посчитайте маржинальность с учетом налогов, логистики и комиссии.\n"
-            "3. **Регистрация:** сравните доступные формы и налоговые режимы с учётом вида деятельности, доходов и расходов.\n\n"
-            "На «Альфа-Курсе» рекомендуем изучить:\n"
-            "• Вводный курс [«Просто о сложном: первые шаги в бизнесе»](/materials/3d17b03e-0e69-44cf-aa04-110e92437016)\n"
-            "• Практический курс [«Как самозанятому стать ИП»](/materials/2155a4c8-2293-4b16-b928-cf72f2de72b5)\n"
-            "• Курс [«ИПэшники: строим некринжовый бизнес»](/materials/552c492d-fac3-43f6-97f4-7a2d2625744c)"
-        )
-
-    if any(w in msg for w in ("налог", "усн", "патент", "бухгалтер", "ддс", "учет", "отчетност", "касс")):
-        return (
-            f"{prefix}По финансовому и налоговому учету главные правила безопасности бизнеса:\n\n"
-            "1. **Разделяйте личные финансы и деньги бизнеса:** не оплачивайте личные покупки напрямую с расчетного счета без вывода дохода.\n"
-            "2. **Контролируйте ДДС:** фиксируйте движение денежных средств еженедельно, чтобы вовремя заметить риск кассового разрыва.\n"
-            "3. **Выбор режима:** если рассматриваете УСН, сравните варианты на ваших доходах и подтверждённых расходах. Ставки и условия проверьте по актуальным данным для вашего региона.\n\n"
-            "На платформе «Альфа-Курс» используйте готовые инструменты:\n"
-            "• Практический шаблон [«Калькулятор НДФЛ»](/materials/9766af8e-1923-4313-a4a8-e78a218d4b81)\n"
-            "• Практический шаблон [«Калькулятор НДС»](/materials/d39c24d8-102e-4829-af72-ed57c1bcbff2)\n"
-            "• Обучающий курс [«Самое важное o 115-ФЗ»](/materials/1c402043-808d-4604-9f45-0565ed4f79ba)"
-        )
-
-    if any(w in msg for w in ("моё обучение", "мое обучение", "где учиться", "профиль", "прогресс")):
-        history_note = ""
-        if viewed:
-            history_note = f"\n\nНедавно вы просматривали: **{', '.join(viewed[:3])}**."
-        return (
-            "Ваша персональная история обучения и сохраненные материалы собраны в разделе [«Профиль»](/profile).\n\n"
-            "Там можно настроить сферу, стадию бизнеса и цели, чтобы персональные рекомендации на платформе стали еще точнее."
-            f"{history_note}"
-        )
-
-    if any(w in msg for w in ("парол", "сменить пароль", "изменить пароль", "восстанов")):
-        return (
-            "Чтобы изменить пароль, перейдите в [Настройки профиля](/profile/settings#password-settings) в блок «Смена пароля».\n\n"
-            "1. Укажите текущий пароль.\n"
-            "2. Введите новый пароль (не менее 8 символов) и подтвердите его.\n"
-            "3. Нажмите «Получить код» и введите 6-значный код подтверждения из письма на вашей почте.\n\n"
-            "После смены пароля потребуется войти в аккаунт заново."
-        )
-
-    if any(w in msg for w in ("техническ", "ошибк", "не открыва", "поддержк", "проблем", "повис")):
-        return (
-            "Если страница или материал не загружаются:\n\n"
-            "1. Обновите страницу (Ctrl+F5 или Cmd+Shift+R).\n"
-            "2. Убедитесь в стабильности интернет-соединения.\n"
-            "3. При сохранении проблемы напишите в поддержку Альфа-Банка, специалисты оперативно помогут решить вопрос."
-        )
-
-    # Проверка запроса на подробности о конкретном материале из списка (например: "расскажи о 1 статье")
-    item_match = re.search(
-        r"(?:расскажи|подробн\w*|что в|о чем|покажи|прочитай|разбер\w*)\s+(?:о|об|про)?\s*"
-        r"(?:(\d+)\s*(?:материал\w*|стать\w*|курс\w*|шаблон\w*)?|(перв\w*|втор\w*|трет\w*|четверт\w*|пят\w*)\s*(?:материал\w*|стать\w*|курс\w*|шаблон\w*)?)",
-        msg,
-    )
-    if item_match and cand:
-        idx = None
-        if item_match.group(1):
-            try:
-                idx = int(item_match.group(1)) - 1
-            except ValueError:
-                idx = None
-        elif item_match.group(2):
-            words_map = {"перв": 0, "втор": 1, "трет": 2, "четверт": 3, "пят": 4}
-            for w, i in words_map.items():
-                if item_match.group(2).startswith(w):
-                    idx = i
-                    break
-        if idx is not None and 0 <= idx < len(cand):
-            target = cand[idx]
-            desc = getattr(target, "description", "") or "Практический обучающий материал от экспертов «Альфа-Курса»."
-            lessons = getattr(target, "lessons", ()) or ()
-            lessons_info = ""
-            if lessons:
-                lessons_info = f"\n\nВ программе курса ({len(lessons)} уроков): " + ", ".join(getattr(l, "title", str(l)) for l in lessons[:3]) + "..."
-            return (
-                f"Материал **[«{target.title}»](/materials/{target.id})** ({getattr(target, 'format', 'материал')}):\n\n"
-                f"{desc}{lessons_info}\n\n"
-                f"Изучить материал можно здесь: [«{target.title}»](/materials/{target.id})."
-            )
-
-    # Если есть подходящие кандидаты под нестандартный запрос
-    if cand:
-        cand_links = "\n".join(
-            f"• [{getattr(m, 'title', '')}](/materials/{getattr(m, 'id', '')}) ({getattr(m, 'format', 'материал')})"
-            for m in cand[:3]
-        )
-        return (
-            f"{prefix}На платформе «Альфа-Курс» собраны проверенные практические материалы для развития вашего дела.\n\n"
-            f"По вашей теме рекомендуем ознакомиться со следующими материалами:\n{cand_links}\n\n"
-            "Опишите подробнее вашу текущую задачу, и я предложу конкретные шаги!"
-        )
-
-    return (
-        f"{prefix}Рад помочь! На «Альфа-Курсе» мы помогаем предпринимателям решать практические бизнес-задачи без лишней теории.\n\n"
-        "Рекомендуем начать с базового курса [«Просто о сложном: первые шаги в бизнесе»](/materials/3d17b03e-0e69-44cf-aa04-110e92437016) "
-        "или курса [«Маркетплейсы: с чего начать и как преуспеть»](/materials/d0aa4598-3da2-478b-bbf8-bda81b231b58).\n\n"
-        "Напишите мне, какой у вас бизнес (розница, услуги, производство) и какая цель — я сразу подберу следующие шаги!"
-    )
+def _fallback_reply(candidates):
+    if not candidates:
+        return CHAT_CLARIFICATION
+    first = candidates[0]
+    description = clean_plain_text(first.description)
+    intro = "Подобрал материалы по вашей задаче. Начните с первого в подборке."
+    if description:
+        intro += "\n\n" + description[:240].strip()
+    links = "\n".join(f"• [{item.title}](/materials/{item.id})" for item in candidates)
+    return f"{intro}\n\n{links}"
 
 
 @chat_bp.route("/chat", methods=["POST"])
 def chat():
+    started = monotonic()
+    request.max_content_length = 24 * 1024
+    if request.content_length and request.content_length > request.max_content_length:
+        return jsonify(ok=False, error="Сообщение слишком длинное."), 413
     data = request.get_json(silent=True)
     if not isinstance(data, dict) or not isinstance(data.get("message"), str):
         return jsonify({"ok": False, "error": "Ожидалось текстовое сообщение"}), 400
@@ -532,12 +502,54 @@ def chat():
 
     if not message:
         return jsonify({"ok": False, "error": "Пустое сообщение"}), 400
+    if history and history[-1] == {"role": "user", "text": message}:
+        history.pop()
 
-    # Сбор персонального контекста пользователя
     account = current_account()
+    subject = _chat_subject(account)
+    if not _consume_attempts(((f"chat:{subject}", CHAT_REQUESTS_PER_MINUTE),), window=60):
+        return jsonify(ok=False, error="Слишком много сообщений. Попробуйте через минуту."), 429, {"Retry-After": "60"}
+    token = data.get("card_context")
+    remembered = _remembered_cards(token, subject)
+
+    def respond(reply, source, intent, *, materials=(), replace_context=False):
+        ids = tuple(item.id for item in materials)
+        cards = [{"id": item.id, "title": item.title, "format": material_format(item), "url": f"/materials/{item.id}",
+                  "description": clean_plain_text(item.description)[:160]} for item in materials]
+        context = token if remembered else None
+        if replace_context and ids:
+            context = _memory_signer().dumps({"subject": subject, "ids": ids})
+        turn_id = secrets.token_urlsafe(16)
+        record_response(turn_id, source, intent, round((monotonic() - started) * 1000), len(cards))
+        click_context = _click_signer().dumps({"subject": subject, "ids": ids, "turn": turn_id}) if ids else None
+        return jsonify(ok=True, reply=reply, source=source, intent=intent, cards=cards, card_context=context,
+                       click_context=click_context)
+
+    if help_response := help_reply(message, account):
+        intent, reply = help_response
+        return respond(reply, "help", intent)
+    if GREETING.fullmatch(message.casefold()):
+        return respond("Могу подобрать учебные материалы или помочь с аккаунтом и Курс+. Чем помочь?",
+                       "local", "greeting")
+
     profile = saved_profile(account) or {}
     has_plus = bool(account and account["has_course_plus"])
     catalog = entitled_catalog(current_app.config["CHAT_CATALOG"], has_plus)
+    if (position := _card_position(message)) is not None:
+        if not remembered:
+            return respond("Сначала попросите подборку, а затем укажите номер карточки.", "memory", "card_detail")
+        if position >= len(remembered):
+            return respond(f"В последней подборке было карточек: {len(remembered)}. Укажите номер из этого списка.",
+                           "memory", "card_detail")
+        material = next((item for item in catalog if item.id == remembered[position]), None)
+        if material is None:
+            return respond("Эта карточка сейчас недоступна. Укажите другой номер или попросите новую подборку.",
+                           "memory", "card_detail")
+        return respond(_card_details(material), "memory", "card_detail", materials=(material,))
+
+    if not (set(tokens(message)) - GENERIC_QUERY_TERMS and
+            (BUSINESS_QUERY.search(message.casefold()) or SEARCH_REQUEST.search(message.casefold()))):
+        return respond(CHAT_CLARIFICATION, "local", "clarification")
 
     # Сбор истории взаимодействий пользователя с материалами
     interactions = recent_interactions(account)
@@ -555,26 +567,21 @@ def chat():
                 seen.add(title)
                 viewed_titles.append(title)
 
-    # Подбор наиболее релевантных материалов каталога под вопрос и профиль
-    variant = experiment_variant(account)
-    mode = variant.mode if variant else recommendation_mode()
-    weight = variant.bm25_weight if variant else current_app.config["BM25_WEIGHT"]
-    if mode == "popular":
-        by_id = {m.id: m for m in catalog}
-        candidates = [by_id[item.material_id] for item in recommend_popular_courses(catalog, 5).items]
-    else:
-        candidates = _find_relevant_materials(
-            message, profile, catalog, viewed_titles, limit=5,
-            bm25_weight=weight if mode == "hybrid" else 0.0,
-            bm25_adaptive=mode == "hybrid" and (variant is None or variant.bm25_adaptive),
-            history=interactions[::-1], links_directory=current_app.config["CATALOG_LINKS_DIR"],
-        )
+    candidates = _find_relevant_materials(
+        message, profile, catalog, viewed_titles, limit=5, bm25_weight=current_app.config["CHAT_BM25_WEIGHT"],
+        history=interactions[::-1], links_directory=current_app.config["CATALOG_LINKS_DIR"],
+    )
+    candidates = _supported_candidates(message, candidates)
+    if not candidates:
+        return respond(CHAT_CLARIFICATION, "local", "clarification")
 
     api_key, model = _load_env_credentials()
     openrouter_key, openrouter_model = _load_openrouter_credentials()
     reply = None
+    source = "fallback"
 
-    if api_key or openrouter_key:
+    if (api_key or openrouter_key) and _consume_attempts((("chat:model:global", CHAT_MODEL_REQUESTS_PER_MINUTE),), window=60):
+        deadline = monotonic() + CHAT_PROVIDER_BUDGET
         system_prompt = _build_system_prompt(
             profile=profile,
             has_plus=has_plus,
@@ -582,14 +589,34 @@ def chat():
             candidates=candidates,
         )
         if api_key:
-            reply = _call_gemini(api_key, model, message, history, system_prompt=system_prompt)
-        if not reply and openrouter_key:
-            reply = _call_openrouter(openrouter_key, openrouter_model, message, history, system_prompt=system_prompt)
+            reply = _call_gemini(api_key, model, message, history, system_prompt=system_prompt, deadline=deadline,
+                                 retry_default=not openrouter_key)
+            if reply:
+                source = "gemini"
+        if not reply and openrouter_key and _provider_timeout(deadline, 4.0) >= 0.25:
+            reply = _call_openrouter(openrouter_key, openrouter_model, message, history, system_prompt=system_prompt,
+                                     deadline=deadline)
+            if reply:
+                source = "openrouter"
 
     if not reply:
-        reply = _fallback_reply(message, profile=profile, viewed_titles=viewed_titles, candidates=candidates)
+        reply = _fallback_reply(candidates)
 
-    # Автоматическое преобразование названий материалов в кликабельные ссылки
-    reply = _keep_available_links(_linkify_materials(reply, candidates), set(catalog_titles), candidates)
+    reply = _keep_available_links(_linkify_materials(reply, candidates), {item.id for item in candidates}, candidates)
+    return respond(reply, source, "material_search", materials=candidates, replace_context=True)
 
-    return jsonify({"ok": True, "reply": reply})
+
+@chat_bp.post("/chat/card-open")
+def chat_card_open():
+    request.max_content_length = 4 * 1024
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or not isinstance(token := data.get("click_context"), str) or len(token) > 2048:
+        return "", 400
+    try:
+        state = _click_signer().loads(token, max_age=CARD_CONTEXT_AGE)
+    except BadData:
+        return "", 400
+    if state["subject"] != _chat_subject(current_account()) or data.get("material_id") not in state["ids"]:
+        return "", 403
+    record_open(state["turn"])
+    return "", 204

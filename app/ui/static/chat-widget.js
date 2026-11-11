@@ -27,6 +27,8 @@
     input.style.overflowY = "hidden";
 
     const history = [];
+    let cardContext = null;
+    let activeRequest = null;
 
     function autoResize() {
         input.style.height = "auto";
@@ -107,14 +109,42 @@
         return result.join("");
     }
 
-    function appendMessage(text, role, shouldSave = true) {
+    function appendMessage(text, role, shouldSave = true, { cards = [], clickContext = null } = {}) {
         const msgDiv = document.createElement("div");
         msgDiv.className = `chat-message chat-message-${role}`;
         const bubble = document.createElement("div");
         bubble.className = "message-bubble";
 
         if (role === "assistant" || role === "model") {
-            bubble.innerHTML = formatReplyText(text);
+            const validCards = Array.isArray(cards) ? cards.filter(card => card &&
+                typeof card.id === "string" && /^[a-zA-Z0-9_-]+$/.test(card.id) && typeof card.title === "string") : [];
+            const cardIds = new Set(validCards.map(card => card.id));
+            const prose = text.split("\n").filter(line => {
+                const match = line.trim().match(/^(?:[•*-]\s+|\d+\.\s+)?\[([^\]]+)\]\(\/materials\/([a-zA-Z0-9_-]+)\)(?:\s*\([^)]*\))?\s*$/);
+                return !match || !cardIds.has(match[2]);
+            }).join("\n");
+            bubble.innerHTML = formatReplyText(prose);
+            if (typeof clickContext === "string") bubble.dataset.chatClickContext = clickContext;
+            if (validCards.length) {
+                const list = document.createElement("ol");
+                list.className = "chat-result-cards";
+                list.setAttribute("aria-label", "Подобранные материалы");
+                for (const card of validCards) {
+                    const item = document.createElement("li");
+                    const link = document.createElement("a");
+                    link.className = "chat-material-link";
+                    link.href = `/materials/${card.id}`;
+                    link.textContent = card.title;
+                    item.append(link);
+                    if (card.format) {
+                        const format = document.createElement("small");
+                        format.textContent = card.format;
+                        item.append(format);
+                    }
+                    list.append(item);
+                }
+                bubble.append(list);
+            }
         } else {
             bubble.textContent = text;
         }
@@ -132,7 +162,8 @@
         try {
             const quick = document.getElementById("chat-quick-replies");
             sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
-                history: history,
+                history: history.slice(-24),
+                cardContext,
                 quickHidden: !quick || quick.style.display === "none",
             }));
         } catch (e) {
@@ -165,9 +196,11 @@
             }
 
             history.length = 0;
+            cardContext = typeof data.cardContext === "string" ? data.cardContext : null;
             for (const item of data.history) {
+                if (!item || typeof item.text !== "string") continue;
                 const role = item.role === "user" ? "user" : "assistant";
-                appendMessage(item.text, role, false);
+                appendMessage(item.text, role, false, item);
                 history.push(item);
             }
 
@@ -181,6 +214,9 @@
     }
 
     function resetChat() {
+        activeRequest?.abort();
+        activeRequest = null;
+        cardContext = null;
         try {
             sessionStorage.removeItem(STORAGE_KEY);
         } catch (e) {}
@@ -282,9 +318,26 @@
 
     bindQuickReplies();
 
+    messagesEl.addEventListener("click", (event) => {
+        const link = event.target.closest?.("a.chat-material-link");
+        const token = link?.closest("[data-chat-click-context]")?.dataset.chatClickContext;
+        const material = link?.getAttribute("href")?.match(/^\/materials\/([a-zA-Z0-9_-]+)$/);
+        if (!token || !material) return;
+        fetch("/api/chat/card-open", {
+            method: "POST", keepalive: true,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ click_context: token, material_id: material[1] }),
+        }).catch(() => {});
+    });
+
     async function sendMessage(text) {
         const query = (text || "").trim();
-        if (!query) return;
+        if (!query || activeRequest) return;
+
+        const request = new AbortController();
+        activeRequest = request;
+        const timeout = setTimeout(() => request.abort(), 12000);
+        const previous = history.slice(-6).map(({ role, text }) => ({ role, text }));
 
         hideQuickReplies();
 
@@ -305,29 +358,38 @@
         try {
             const res = await fetch("/api/chat", {
                 method: "POST",
+                signal: request.signal,
                 headers: {
                     "Content-Type": "application/json",
                     "Accept": "application/json",
                 },
-                body: JSON.stringify({ message: query, history: history.slice(-6) }),
+                body: JSON.stringify({ message: query, history: previous, card_context: cardContext }),
             });
 
+            const data = await res.json();
+            if (activeRequest !== request) return;
             if (!res.ok) {
-                throw new Error("Ошибка связи с сервером");
+                appendMessage(data.error || "Не удалось отправить сообщение. Попробуйте ещё раз.", "assistant", false);
+                return;
             }
 
-            const data = await res.json();
             const reply = data.reply || "Извините, не удалось сформировать ответ. Попробуйте еще раз.";
-            appendMessage(reply, "assistant", false);
-            history.push({ role: "model", text: reply });
+            cardContext = typeof data.card_context === "string" ? data.card_context : null;
+            const entry = { role: "model", text: reply, cards: data.cards, clickContext: data.click_context };
+            appendMessage(reply, "assistant", false, entry);
+            history.push(entry);
             saveState();
         } catch (err) {
+            if (activeRequest !== request) return;
             appendMessage(
-                "Извините, сейчас сервер обновляется. Попробуйте повторить запрос через пару секунд.",
+                "Не удалось получить ответ вовремя. Попробуйте отправить сообщение ещё раз.",
                 "assistant",
                 false
             );
         } finally {
+            clearTimeout(timeout);
+            if (activeRequest !== request) return;
+            activeRequest = null;
             if (typingIndicator) {
                 typingIndicator.style.display = "none";
             }
