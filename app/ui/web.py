@@ -250,7 +250,7 @@ def create_app(
     live_data_provider: LiveDataProvider | None = None,
 ) -> Flask:
     app = Flask(__name__)
-    app.config["MAX_CONTENT_LENGTH"] = 8 * 1024
+    app.config["MAX_CONTENT_LENGTH"] = 4 * 1024 * 1024
     app.config["PASSWORD_CODE_SENDER"] = password_code_sender
     app.config["COURSE_PLUS_ACTIVATOR"] = course_plus_activator
     app.config["LIVE_DATA_PROVIDER"] = live_data_provider

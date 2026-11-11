@@ -409,10 +409,14 @@ class WebFlowTest(unittest.TestCase):
         self.assertEqual(len(default), 6)
         self.assertIn("Показано 6 из 7", initial)
         self.assertIn("Далее →", initial)
+        self.assertNotIn("← Назад", initial)
+        self.assertNotIn('pagination-prev', initial)
         expanded = client.post("/", data={"show_page": 2}).get_data(as_text=True)
         self.assertEqual(card_ids(expanded), ["operations-week-plan"])
-        self.assertIn('class="pagination-btn pagination-next"', expanded)
-        self.assertIn('disabled aria-disabled="true">Далее →</button>', expanded)
+        self.assertNotIn('pagination-next', expanded)
+        self.assertNotIn('Далее →', expanded)
+        self.assertIn('pagination-prev', expanded)
+        self.assertIn('← Назад', expanded)
 
         popularity = client.post("/", data={"result_order": "popularity"}).get_data(as_text=True)
         self.assertEqual(card_ids(popularity), [
@@ -522,8 +526,50 @@ class WebFlowTest(unittest.TestCase):
             }).get_data(as_text=True)
             ids = re.findall(r'class="material-link" href="/materials/item-(\d+)\?', html)
             self.assertEqual([int(item) for item in ids], expected_ids)
-            has_next = 'disabled aria-disabled="true">Далее →</button>' not in html
+            has_next = 'Далее →' in html
             self.assertEqual(has_next, page < 3)
+            has_prev = '← Назад' in html
+            self.assertEqual(has_prev, page > 1)
+
+    def test_late_page_navigation_large_payload_succeeds_without_entity_too_large(self):
+        total_items = 1146
+        catalog = tuple(
+            Material(f"catalog-item-slug-number-{index:04d}", f"Материал {index}", f"https://example.com/{index}", popularity=index)
+            for index in range(1, total_items + 1)
+        )
+        with patch("app.ui.web.load_catalog", return_value=catalog):
+            client = create_app(database_path=self.database_path).test_client()
+
+        # Generate >16KB payload of cumulative shown_ids (simulating late page 191)
+        large_shown_ids = ",".join(f"catalog-item-slug-number-{i:04d}" for i in range(1, 1141))
+        payload_bytes = len(large_shown_ids.encode("utf-8"))
+        self.assertGreater(payload_bytes, 16 * 1024)
+
+        # Navigating to the last page (191) with payload exceeding 8KB must succeed (HTTP 200, not 413)
+        response = client.post("/", data={
+            "show_page": 191,
+            "shown_ids": large_shown_ids,
+            "page_size": 6,
+        })
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn("Страница 191 из 191", html)
+        self.assertNotIn("Далее →", html)
+        self.assertNotIn('pagination-next', html)
+        self.assertIn("← Назад", html)
+        self.assertIn('pagination-prev', html)
+
+        # Navigating to an intermediate late page (190) also succeeds with large payload
+        back_response = client.post("/", data={
+            "show_page": 190,
+            "shown_ids": large_shown_ids,
+            "page_size": 6,
+        })
+        self.assertEqual(back_response.status_code, 200)
+        back_html = back_response.get_data(as_text=True)
+        self.assertIn("Страница 190 из 191", back_html)
+        self.assertIn("Далее →", back_html)
+        self.assertIn("← Назад", back_html)
 
     def test_impressions_preserve_positions_deduplicate_pages_and_attribute_clicks(self):
         app = create_app(stub_recommend, database_path=self.database_path, algorithm_name="demo:v1")

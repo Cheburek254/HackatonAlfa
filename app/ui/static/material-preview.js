@@ -320,6 +320,10 @@ document.addEventListener("submit", async (event) => {
             section.removeAttribute("aria-busy");
             activeUpdate = undefined;
         }
+        if (submitter) {
+            submitter.disabled = false;
+            submitter.classList.remove("is-loading");
+        }
     }
 });
 

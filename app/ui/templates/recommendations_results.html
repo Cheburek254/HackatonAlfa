@@ -142,10 +142,11 @@
                     <p>Показано {{ page_end if current_page == 1 else page_start ~ '–' ~ page_end }} из {{ total_cards }}{% if total_pages > 1 %} · Страница {{ current_page }} из {{ total_pages }}{% endif %}</p>
                     {% if total_pages > 1 %}
                     <nav class="pagination-nav" aria-label="Страницы подборки">
+                        {% if prev_page %}
                         <button class="pagination-btn pagination-prev" type="submit" form="result-orders"
                                 formaction="{{ url_for('index', _anchor='recommendations') }}"
-                                name="show_page" value="{{ prev_page or 1 }}"
-                                {% if not prev_page %}disabled aria-disabled="true"{% endif %}>← Назад</button>
+                                name="show_page" value="{{ prev_page }}">← Назад</button>
+                        {% endif %}
                         <div class="pagination-pages">
                             {% for item in pagination_items %}
                             {% if item is none %}
@@ -159,10 +160,11 @@
                             {% endif %}
                             {% endfor %}
                         </div>
+                        {% if next_page %}
                         <button class="pagination-btn pagination-next" type="submit" form="result-orders"
                                 formaction="{{ url_for('index', _anchor='recommendations') }}"
-                                name="show_page" value="{{ next_page or total_pages }}"
-                                {% if not next_page %}disabled aria-disabled="true"{% endif %}>Далее →</button>
+                                name="show_page" value="{{ next_page }}">Далее →</button>
+                        {% endif %}
                     </nav>
                     {% endif %}
                 </div>
