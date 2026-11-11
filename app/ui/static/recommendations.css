@@ -27,7 +27,7 @@ button { cursor: pointer; }
 a { color: inherit; }
 :focus-visible { outline: 3px solid #ff7b70; outline-offset: 4px; }
 
-.wrap { width: min(100% - 64px, 1160px); margin-inline: auto; }
+.wrap { width: min(100% - clamp(32px, 5vw, 64px), 1320px); margin-inline: auto; }
 .site-header { border-bottom: 1px solid #292929; }
 .masthead, .footer-content {
     min-height: 74px;
@@ -103,7 +103,7 @@ h1 {
     font-size: 17px;
     line-height: 1.5;
 }
-.hero-art { display: block; width: 100%; height: auto; margin-top: -24px; }
+.hero-art { display: block; width: 100%; max-width: 520px; height: auto; margin-top: -24px; justify-self: end; }
 .goal-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
 .goal-row input, .profile-fields select {
     width: 100%;
@@ -384,15 +384,20 @@ h1 {
     color: var(--ink);
 }
 .results-heading { margin-bottom: 24px; }
-.recommendations-results > .wrap { width: min(100% - clamp(36px, 6vw, 64px), 1240px); }
 html:has(.recommendations-results) { overflow-anchor: none; }
 .results-heading .eyebrow { margin-bottom: 9px; color: var(--muted); }
-.daily-picks { padding-block: 26px 30px; border-radius: 0; }
-.daily-picks > .wrap { width: min(100% - clamp(32px, 4vw, 104px), 1920px); }
-.daily-picks .eyebrow { margin-bottom: 8px; color: var(--muted); }
+.daily-picks { padding-block: 16px 20px; background: transparent; }
+.daily-picks-card {
+    color-scheme: light;
+    background: var(--paper);
+    color: var(--ink);
+    border-radius: 32px;
+    padding: clamp(20px, 2.5vw, 28px) clamp(20px, 3vw, 32px);
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.22);
+}
+.daily-picks-card .eyebrow { margin-bottom: 8px; color: var(--muted); }
 .daily-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 20px; margin-bottom: 14px; }
-.daily-heading h2 { font-size: clamp(25px, 3vw, 36px); }
-.daily-search-link { font-weight: 650; }
+.daily-heading h2 { font-size: clamp(25px, 3vw, 36px); color: var(--ink); }
 .daily-carousel { position: relative; }
 .daily-track { display: grid; grid-auto-flow: column; grid-auto-columns: clamp(174px, 19%, 338px); gap: 10px; margin: 0; padding: 4px 3px; overflow-x: auto; list-style: none; scrollbar-width: none; }
 .daily-track::-webkit-scrollbar { display: none; }
@@ -1118,7 +1123,6 @@ button.is-loading {
 }
 
 @media (min-width: 1000px) {
-    .recommendations-results > .wrap { width: min(100% - clamp(32px, 4vw, 104px), 1920px); }
     .recommendations-results .card-grid { gap: clamp(18px, 1.4vw, 28px); }
     .recommendations-results .card-cover { min-height: 0; aspect-ratio: 1.95; }
 }

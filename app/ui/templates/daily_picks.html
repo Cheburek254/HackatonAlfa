@@ -1,12 +1,12 @@
-<section id="daily-picks" class="results daily-picks" aria-labelledby="daily-title">
+<section id="daily-picks" class="daily-picks" aria-labelledby="daily-title">
     <div class="wrap">
-        <p class="eyebrow">ПОДБОРКА НА СЕГОДНЯ</p>
-        <div class="daily-heading">
-            <h2 id="daily-title">Что почитать и послушать</h2>
-            <a class="daily-search-link" href="#goal">Перейти к поиску ↓</a>
-        </div>
-        <div class="daily-carousel">
-            <ul class="daily-track" id="daily-track" aria-label="Статьи и подкасты на сегодня" tabindex="0">
+        <div class="daily-picks-card">
+            <p class="eyebrow">ПОДБОРКА НА СЕГОДНЯ</p>
+            <div class="daily-heading">
+                <h2 id="daily-title">Что почитать и послушать</h2>
+            </div>
+            <div class="daily-carousel">
+                <ul class="daily-track" id="daily-track" aria-label="Статьи и подкасты на сегодня" tabindex="0">
                 {% for start, end in [(0, 3), (3, none)] %}
                 {% for kind, format in [('article', 'Статья'), ('podcast', 'Подкаст')] %}
                 {% for pick in daily[kind][start:end] %}
