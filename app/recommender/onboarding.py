@@ -23,7 +23,47 @@ def onboarding(catalog: Sequence[Material], profile: Profile, limit: int) -> Rec
     available = {item.id for item in catalog if item.access == "free" and not item.subscriptions}
     if not all(item.material_id in available for item in ONBOARDING_ITEMS):
         return None
+    if limit <= len(ONBOARDING_ITEMS):
+        return RecommendationResult(
+            ONBOARDING_ITEMS[:limit], "Онбординг-пакет: вводный курс, обзорная статья и практический калькулятор.",
+            "Чем вы хотите заняться в первую очередь?",
+        )
+
+    from app.recommender.engine import _build_card_explanation
+
+    by_id = {item.id: item for item in catalog}
+    seen_ids = {item.material_id for item in ONBOARDING_ITEMS}
+    seen_urls = {by_id[mid].url for mid in seen_ids if mid in by_id}
+    rest_materials: list[Material] = []
+    for mat in catalog:
+        if not mat.id or not mat.title.strip() or not mat.url.strip():
+            continue
+        if mat.id in seen_ids or mat.url in seen_urls:
+            continue
+        seen_ids.add(mat.id)
+        seen_urls.add(mat.url)
+        rest_materials.append(mat)
+
+    rest_materials.sort(key=lambda m: (m.popularity or 0.0, m.rating or 0.0), reverse=True)
+    empty_signals = {
+        "matched_goal_topics": [],
+        "goal_direct": False,
+        "matched_learning_topic": False,
+        "stage_matched": False,
+        "industry_matched": False,
+        "exp_matched": False,
+        "fmt_matched": False,
+        "history_continuation_from": None,
+    }
+    extra_items = tuple(
+        Recommendation(
+            mat.id,
+            *_build_card_explanation(mat, profile, empty_signals, is_cold_start=True, is_weak_match=False),
+        )
+        for mat in rest_materials[: limit - len(ONBOARDING_ITEMS)]
+    )
     return RecommendationResult(
-        ONBOARDING_ITEMS[:limit], "Онбординг-пакет: вводный курс, обзорная статья и практический калькулятор.",
+        ONBOARDING_ITEMS + extra_items,
+        "Онбординг-пакет: вводный курс, обзорная статья, практический калькулятор и самые популярные материалы каталога.",
         "Чем вы хотите заняться в первую очередь?",
     )
