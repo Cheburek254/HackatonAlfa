@@ -122,89 +122,110 @@ def _find_next_materials(
     current_material: Material,
     all_materials: tuple[Material, ...] | list[Material],
     allowed_access: set[str] | tuple[str, ...] | None = None,
+    seen_ids: set[str] | None = None,
     limit: int = 3,
-) -> list[dict]:
+) -> tuple[list[dict], bool]:
     """Находит наиболее подходящие материалы для продолжения траектории обучения."""
     curr_topics = set(current_material.topics or ())
     curr_stages = set(current_material.stages or ())
     curr_industries = set(current_material.industries or ())
     curr_format = (current_material.format or "").lower()
+    seen = set(seen_ids or ())
 
-    candidates = []
-    paid_followups = []
-    for m in all_materials:
-        if m.id == current_material.id:
-            continue
-        category = access_category(m)
-        needs_access = allowed_access is not None and category not in allowed_access
-        paid_followup = (
-            needs_access and category in {"paid", "subscription"} and access_category(current_material) == "free"
-            and (m.entity_type == "course" or _format_key(m) == "курс")
-            and bool(curr_topics.intersection(m.topics))
-            and (not curr_stages or not m.stages or bool(curr_stages.intersection(m.stages)))
-            and (not curr_industries or not m.industries or bool(curr_industries.intersection(m.industries)))
-        )
-        if needs_access and not paid_followup:
-            continue
+    def _collect(exclude_seen: bool) -> tuple[list[tuple[float, str, Material, bool]], list[tuple[float, str, Material, bool]]]:
+        candidates = []
+        paid_followups = []
+        for m in all_materials:
+            if m.id == current_material.id:
+                continue
+            is_seen = m.id in seen
+            if exclude_seen and is_seen:
+                continue
+            category = access_category(m)
+            needs_access = allowed_access is not None and category not in allowed_access
+            paid_followup = (
+                needs_access and category in {"paid", "subscription"} and access_category(current_material) == "free"
+                and (m.entity_type == "course" or _format_key(m) == "курс")
+                and bool(curr_topics.intersection(m.topics))
+                and (not curr_stages or not m.stages or bool(curr_stages.intersection(m.stages)))
+                and (not curr_industries or not m.industries or bool(curr_industries.intersection(m.industries)))
+            )
+            if needs_access and not paid_followup:
+                continue
 
-        score = 0.0
-        m_topics = set(m.topics or ())
-        common_topics = curr_topics & m_topics
-        if common_topics:
-            score += len(common_topics) * 20.0
+            score = 0.0
+            m_topics = set(m.topics or ())
+            common_topics = curr_topics & m_topics
+            if common_topics:
+                score += len(common_topics) * 20.0
 
-        common_industries = curr_industries & set(m.industries or ())
-        if common_industries:
-            score += len(common_industries) * 6.0
+            common_industries = curr_industries & set(m.industries or ())
+            if common_industries:
+                score += len(common_industries) * 6.0
 
-        common_stages = curr_stages & set(m.stages or ())
-        if common_stages:
-            score += len(common_stages) * 4.0
+            common_stages = curr_stages & set(m.stages or ())
+            if common_stages:
+                score += len(common_stages) * 4.0
 
-        m_format = (m.format or "").lower()
-        if curr_format in ("статья", "видео", "лонгрид", "подкаст"):
-            if "курс" in m_format:
-                score += 10.0
-            elif m_format in ("инструмент", "шаблон", "чек-лист", "таблица", "калькулятор"):
-                score += 8.0
-        elif "курс" in curr_format:
+            m_format = (m.format or "").lower()
+            if curr_format in ("статья", "видео", "лонгрид", "подкаст"):
+                if "курс" in m_format:
+                    score += 10.0
+                elif m_format in ("инструмент", "шаблон", "чек-лист", "таблица", "калькулятор"):
+                    score += 8.0
+            elif "курс" in curr_format:
+                if m_format in ("инструмент", "шаблон", "чек-лист", "таблица", "калькулятор"):
+                    score += 10.0
+                elif "курс" in m_format:
+                    score += 4.0
+            elif m_format != curr_format:
+                score += 3.0
+
+            if m.rating:
+                score += float(m.rating) * 1.0
+            if m.popularity:
+                score += math.log1p(float(m.popularity)) * 1.5
+
             if m_format in ("инструмент", "шаблон", "чек-лист", "таблица", "калькулятор"):
-                score += 10.0
-            elif "курс" in m_format:
-                score += 4.0
-        elif m_format != curr_format:
-            score += 3.0
+                step_label = "Практический инструмент"
+            elif "курс" in m_format and curr_format not in ("курс",):
+                step_label = "Углубленный курс"
+            elif m_format in ("видео",):
+                step_label = "Видеоразбор"
+            elif common_topics:
+                step_label = "Следующий шаг"
+            else:
+                step_label = "Рекомендуем изучить"
 
-        if m.rating:
-            score += float(m.rating) * 1.0
-        if m.popularity:
-            score += math.log1p(float(m.popularity)) * 1.5
+            if paid_followup:
+                topic = min(common_topics)
+                paid_followups.append((score, f"Углубление по теме «{topic}»", m, is_seen))
+            else:
+                candidates.append((score, step_label, m, is_seen))
+        return candidates, paid_followups
 
-        if m_format in ("инструмент", "шаблон", "чек-лист", "таблица", "калькулятор"):
-            step_label = "Практический инструмент"
-        elif "курс" in m_format and curr_format not in ("курс",):
-            step_label = "Углубленный курс"
-        elif m_format in ("видео",):
-            step_label = "Видеоразбор"
-        elif common_topics:
-            step_label = "Следующий шаг"
-        else:
-            step_label = "Рекомендуем изучить"
-
-        if paid_followup:
-            topic = min(common_topics)
-            paid_followups.append((score, f"Углубление по теме «{topic}»", m))
-        else:
-            candidates.append((score, step_label, m))
-
+    candidates, paid_followups = _collect(exclude_seen=True)
     candidates.sort(key=lambda item: item[0], reverse=True)
     next_items = candidates[:limit]
     if limit > 1 and paid_followups and all(access_category(row[2]) == "free" for row in next_items):
         next_items = next_items[:limit - 1] + [max(paid_followups, key=lambda row: row[0])]
-    return [
-        {"material": m, "step_label": label}
-        for _, label, m in next_items
-    ]
+
+    all_seen = False
+    if not next_items and seen:
+        all_seen = True
+        candidates, paid_followups = _collect(exclude_seen=False)
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        next_items = candidates[:limit]
+        if limit > 1 and paid_followups and all(access_category(row[2]) == "free" for row in next_items):
+            next_items = next_items[:limit - 1] + [max(paid_followups, key=lambda row: row[0])]
+
+    return (
+        [
+            {"material": m, "step_label": label, "viewed": is_seen}
+            for _, label, m, is_seen in next_items
+        ],
+        all_seen,
+    )
 
 
 def create_app(
@@ -384,10 +405,18 @@ def create_app(
         allowed_access = available_access(account and account["has_course_plus"]) if not is_demo_catalog else None
         category = access_category(material)
         access_required = allowed_access is not None and category in {"paid", "subscription"} and category not in allowed_access
-        next_materials = _find_next_materials(material, catalog, allowed_access=allowed_access, limit=3)
+        seen_ids = {event.material_id for event in recent_interactions(account)}
+        for seen_param in request.args.getlist("seen"):
+            seen_ids.update(part.strip() for part in seen_param.split(",") if part.strip())
+        seen_ids.discard(material_id)
+        next_materials, next_all_seen = _find_next_materials(
+            material, catalog, allowed_access=allowed_access, seen_ids=seen_ids, limit=3,
+        )
         if request.accept_mimetypes.best == "application/json":
             return {
+                "id": material.id,
                 "title": material.title,
+                "format": material.format,
                 "description": material.description,
                 "description_html": description_html,
                 "subscriptions": material.subscriptions,
@@ -399,12 +428,20 @@ def create_app(
                 "url": _material_destination(material.url),
                 "open_url": open_url,
                 "csrf_token": csrf_token(),
+                "next_all_seen": next_all_seen,
                 "next_materials": [
                     {
                         "id": item["material"].id,
+                        "url": url_for("material_page", material_id=item["material"].id),
                         "title": item["material"].title,
                         "format": item["material"].format,
+                        "duration": item["material"].duration,
+                        "description": clean_plain_text(item["material"].description or "")[:110],
+                        "access": item["material"].access,
+                        "cost": item["material"].cost,
+                        "subscriptions": item["material"].subscriptions,
                         "step_label": item["step_label"],
+                        "viewed": item["viewed"],
                     }
                     for item in next_materials
                 ],
@@ -416,6 +453,7 @@ def create_app(
             open_url=open_url,
             lessons=lessons,
             next_materials=next_materials,
+            next_all_seen=next_all_seen,
             access_required=access_required,
         )
 

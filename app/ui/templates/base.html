@@ -47,6 +47,40 @@
         </div>
     </footer>{% endblock %}
     {% if request.endpoint in chat_pages %}
+        <dialog id="material-preview" class="material-preview" aria-labelledby="preview-title" aria-describedby="preview-description">
+            <div class="material-preview-content">
+                <form method="dialog" class="material-preview-close">
+                    <button class="button" type="submit" aria-label="Закрыть" autofocus>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                    </button>
+                </form>
+                <p id="preview-eyebrow" class="eyebrow">О МАТЕРИАЛЕ</p>
+                <h2 id="preview-title"></h2>
+                <p id="preview-authors" class="material-authors" hidden></p>
+                <p id="preview-subscription" class="tag paid" hidden></p>
+                <p id="preview-access-note" class="account-muted" hidden>Условия покупки или подписки можно проверить на Альфа-Курсе.</p>
+                <div id="preview-description" class="preview-description"></div>
+                <details id="preview-program" class="course-program" hidden>
+                    <summary></summary>
+                    <ol></ol>
+                </details>
+                <section id="preview-next-steps" class="material-next-steps" aria-labelledby="preview-next-steps-heading" hidden>
+                    <div class="next-steps-header">
+                        <span class="next-steps-pill">Траектория обучения</span>
+                        <h3 id="preview-next-steps-heading" class="next-steps-title">Рекомендуем изучить следующим шагом</h3>
+                        <p class="next-steps-sub">Материалы, которые логически развивают эту тему и помогут закрепить знания на практике:</p>
+                    </div>
+                    <div id="preview-next-steps-grid" class="next-steps-grid"></div>
+                </section>
+                <div class="material-preview-actions">
+                    <a class="button button-primary material-preview-link" target="_blank" rel="noopener noreferrer">Открыть материал <span aria-hidden="true">↗</span></a>
+                </div>
+            </div>
+        </dialog>
+        <script src="{{ url_for('static', filename='material-preview.js') }}" defer></script>
         {% include "chat_widget.html" %}
         <script src="{{ url_for('static', filename='chat-widget.js') }}" defer></script>
     {% endif %}

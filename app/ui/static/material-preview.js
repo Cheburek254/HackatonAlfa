@@ -304,6 +304,7 @@ document.addEventListener("submit", async (event) => {
 });
 
 if (typeof materialPreview?.showModal === "function") {
+    const previewContent = materialPreview.querySelector(".material-preview-content");
     const previewEyebrow = materialPreview.querySelector("#preview-eyebrow");
     const previewTitle = materialPreview.querySelector("#preview-title");
     const previewAuthors = materialPreview.querySelector("#preview-authors");
@@ -311,10 +312,35 @@ if (typeof materialPreview?.showModal === "function") {
     const previewAccess = materialPreview.querySelector("#preview-access-note");
     const previewDescription = materialPreview.querySelector("#preview-description");
     const previewProgram = materialPreview.querySelector("#preview-program");
+    const previewNextSteps = materialPreview.querySelector("#preview-next-steps");
+    const previewNextPill = previewNextSteps?.querySelector(".next-steps-pill");
+    const previewNextTitle = previewNextSteps?.querySelector(".next-steps-title");
+    const previewNextSub = previewNextSteps?.querySelector(".next-steps-sub");
+    const previewNextGrid = materialPreview.querySelector("#preview-next-steps-grid");
     const materialLink = materialPreview.querySelector(".material-preview-link");
+    const VIEWED_STORAGE_KEY = "alfa_viewed_materials";
     let currentPreview;
     let openingLink;
     let isLoading = false;
+
+    function getSessionViewedIds() {
+        try {
+            const raw = sessionStorage.getItem(VIEWED_STORAGE_KEY);
+            const parsed = raw ? JSON.parse(raw) : [];
+            return Array.isArray(parsed) ? parsed.filter((id) => typeof id === "string" && id) : [];
+        } catch {
+            return [];
+        }
+    }
+
+    function addSessionViewedId(materialId) {
+        if (!materialId) return;
+        try {
+            const existing = getSessionViewedIds().filter((id) => id !== materialId);
+            existing.unshift(materialId);
+            sessionStorage.setItem(VIEWED_STORAGE_KEY, JSON.stringify(existing.slice(0, 50)));
+        } catch {}
+    }
 
     function formatLessons(count) {
         if (!count || count <= 0) return "";
@@ -353,25 +379,115 @@ if (typeof materialPreview?.showModal === "function") {
         }
     }
 
+    function renderNextSteps(nextMaterials, allSeen = false) {
+        if (!previewNextSteps || !previewNextGrid) {
+            return;
+        }
+        const items = Array.isArray(nextMaterials) ? nextMaterials : [];
+        previewNextSteps.hidden = items.length === 0;
+        if (previewNextPill) {
+            previewNextPill.textContent = allSeen ? "Все шаги просмотрены" : "Траектория обучения";
+        }
+        if (previewNextTitle) {
+            previewNextTitle.textContent = allSeen
+                ? "Вы уже посмотрели все материалы по этой траектории"
+                : "Рекомендуем изучить следующим шагом";
+        }
+        if (previewNextSub) {
+            previewNextSub.textContent = allSeen
+                ? "Можно вернуться к ключевым материалам темы или подобрать новую задачу в поиске:"
+                : "Материалы, которые логически развивают эту тему и помогут закрепить знания на практике:";
+        }
+        previewNextGrid.replaceChildren();
+        for (const item of items) {
+            const card = document.createElement("a");
+            card.className = "next-material-card";
+            card.href = item.url || `/materials/${item.id}`;
+
+            const badges = document.createElement("div");
+            badges.className = "next-card-badges";
+
+            const stepBadge = document.createElement("span");
+            stepBadge.className = "next-step-badge";
+            const baseLabel = item.step_label || "Следующий шаг";
+            stepBadge.textContent = item.viewed ? `Уже просмотрено · ${baseLabel}` : baseLabel;
+
+            const formatBadge = document.createElement("span");
+            formatBadge.className = "next-format-badge";
+            const fmtParts = [(item.format || "МАТЕРИАЛ").toUpperCase()];
+            if (item.duration) {
+                fmtParts.push(item.duration.toUpperCase());
+            }
+            formatBadge.textContent = fmtParts.join(" · ");
+
+            badges.append(stepBadge, formatBadge);
+            card.append(badges);
+
+            const title = document.createElement("h4");
+            title.className = "next-card-title";
+            title.textContent = item.title || "";
+            card.append(title);
+
+            if (item.description) {
+                const desc = document.createElement("p");
+                desc.className = "next-card-desc";
+                desc.textContent = item.description.length >= 110 ? `${item.description.slice(0, 107).trimEnd()}...` : item.description;
+                card.append(desc);
+            }
+
+            const bottom = document.createElement("div");
+            bottom.className = "next-card-bottom";
+
+            const tag = document.createElement("span");
+            if (Array.isArray(item.subscriptions) && item.subscriptions.length > 0) {
+                tag.className = "tag paid";
+                tag.textContent = "По подписке Курс+";
+            } else if (item.access === "paid") {
+                tag.className = "tag paid";
+                tag.textContent = item.cost != null ? `${Number(item.cost).toLocaleString("ru-RU").replace(/\s/g, "\u202f")} ₽` : "Платно";
+            } else {
+                tag.className = "tag";
+                tag.textContent = "Бесплатно";
+            }
+
+            const linkText = document.createElement("span");
+            linkText.className = "next-card-link-text";
+            linkText.textContent = "К материалу\u00a0→";
+
+            bottom.append(tag, linkText);
+            card.append(bottom);
+            previewNextGrid.append(card);
+        }
+    }
+
     document.addEventListener("click", async (event) => {
         if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
             return;
         }
-        const link = event.target.closest("#recommendations .card, #daily-picks .card")?.querySelector(".material-link");
-        if (!link || (!event.target.closest(".material-link") && window.getSelection()?.toString())) {
+        const directMaterialLink = event.target.closest('a[href^="/materials/"], a[href*="/materials/"]');
+        const cardLink = event.target.closest("#recommendations .card, #daily-picks .card")?.querySelector(".material-link");
+        const link = directMaterialLink || cardLink;
+        if (!link || (!directMaterialLink && window.getSelection()?.toString())) {
             return;
         }
         event.preventDefault();
-        if (isLoading || materialPreview.open) {
+        if (isLoading) {
             return;
         }
         isLoading = true;
         try {
-            const response = await fetch(link.href, { headers: { Accept: "application/json" } });
+            const fetchUrl = new URL(link.href, window.location.origin);
+            const seenList = getSessionViewedIds();
+            if (seenList.length) {
+                fetchUrl.searchParams.set("seen", seenList.slice(0, 30).join(","));
+            }
+            const response = await fetch(fetchUrl, { headers: { Accept: "application/json" } });
             if (!response.ok) {
                 throw new Error("Не удалось загрузить материал");
             }
             currentPreview = await response.json();
+            const materialId = currentPreview.id || fetchUrl.pathname.split("/materials/")[1]?.split("/")[0];
+            addSessionViewedId(materialId);
             if (previewEyebrow) {
                 const parts = [];
                 if (currentPreview.format) parts.push(currentPreview.format.toUpperCase());
@@ -392,9 +508,15 @@ if (typeof materialPreview?.showModal === "function") {
             previewAccess.hidden = !currentPreview.access_required;
             previewDescription.innerHTML = currentPreview.description_html;
             renderProgram(currentPreview.lessons ?? []);
+            renderNextSteps(currentPreview.next_materials ?? [], Boolean(currentPreview.next_all_seen));
             materialLink.href = currentPreview.url;
-            openingLink = link;
-            materialPreview.showModal();
+            if (!materialPreview.open) {
+                openingLink = link;
+                materialPreview.showModal();
+            }
+            if (previewContent) {
+                previewContent.scrollTop = 0;
+            }
         } catch {
             window.location.assign(link.href);
         } finally {

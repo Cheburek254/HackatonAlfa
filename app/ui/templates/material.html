@@ -34,15 +34,15 @@
                 {% if next_materials %}
                 <section class="material-next-steps" aria-labelledby="next-steps-heading">
                     <div class="next-steps-header">
-                        <span class="next-steps-pill">Траектория обучения</span>
-                        <h2 id="next-steps-heading" class="next-steps-title">Рекомендуем изучить следующим шагом</h2>
-                        <p class="next-steps-sub">Материалы, которые логически развивают эту тему и помогут закрепить знания на практике:</p>
+                        <span class="next-steps-pill">{{ 'Все шаги просмотрены' if next_all_seen else 'Траектория обучения' }}</span>
+                        <h2 id="next-steps-heading" class="next-steps-title">{{ 'Вы уже посмотрели все материалы по этой траектории' if next_all_seen else 'Рекомендуем изучить следующим шагом' }}</h2>
+                        <p class="next-steps-sub">{{ 'Можно вернуться к ключевым материалам темы или подобрать новую задачу в поиске:' if next_all_seen else 'Материалы, которые логически развивают эту тему и помогут закрепить знания на практике:' }}</p>
                     </div>
                     <div class="next-steps-grid">
                         {% for item in next_materials %}
                         <a class="next-material-card" href="{{ url_for('material_page', material_id=item.material.id) }}">
                             <div class="next-card-badges">
-                                <span class="next-step-badge">{{ item.step_label }}</span>
+                                <span class="next-step-badge">{{ 'Уже просмотрено · ' ~ item.step_label if item.viewed else item.step_label }}</span>
                                 <span class="next-format-badge">{{ item.material.format | upper if item.material.format else 'МАТЕРИАЛ' }}{% if item.material.duration %} · {{ item.material.duration | upper }}{% endif %}</span>
                             </div>
                             <h3 class="next-card-title">{{ item.material.title }}</h3>

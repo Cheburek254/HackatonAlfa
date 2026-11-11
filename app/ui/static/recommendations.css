@@ -519,7 +519,7 @@ button.is-loading {
 .has-material-preview .card { cursor: pointer; }
 .has-material-preview .card:hover { box-shadow: 0 6px 22px #17171a14; }
 .material-preview {
-    width: min(780px, calc(100vw - 32px));
+    width: min(860px, calc(100vw - 32px));
     max-height: min(88vh, 840px);
     margin: auto;
     padding: 0;
