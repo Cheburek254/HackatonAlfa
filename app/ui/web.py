@@ -102,6 +102,22 @@ def _display_phone(value: str) -> str:
     return value
 
 
+def format_lessons(count: int | None) -> str:
+    if not count or count <= 0:
+        return ""
+    rem10 = count % 10
+    rem100 = count % 100
+    if 11 <= rem100 <= 19:
+        word = "уроков"
+    elif rem10 == 1:
+        word = "урок"
+    elif 2 <= rem10 <= 4:
+        word = "урока"
+    else:
+        word = "уроков"
+    return f"{count} {word}"
+
+
 def _find_next_materials(
     current_material: Material,
     all_materials: tuple[Material, ...] | list[Material],
@@ -246,6 +262,7 @@ def create_app(
     app.jinja_env.globals["material_format"] = _format_key
     app.jinja_env.globals["material_access_category"] = access_category
     app.jinja_env.filters["clean_text"] = clean_plain_text
+    app.jinja_env.filters["format_lessons"] = format_lessons
 
     @app.get("/health")
     def health():
@@ -377,6 +394,8 @@ def create_app(
                 "access_required": access_required,
                 "lessons": lessons,
                 "authors": material.authors,
+                "duration": material.duration,
+                "lesson_count": material.lesson_count,
                 "url": _material_destination(material.url),
                 "open_url": open_url,
                 "csrf_token": csrf_token(),

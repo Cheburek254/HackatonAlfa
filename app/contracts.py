@@ -24,6 +24,8 @@ class Material:
     entity_type: str | None = None
     subscriptions: tuple[str, ...] = ()
     authors: tuple[str, ...] = ()
+    duration: str | None = None
+    lesson_count: int | None = None
 
 
 @dataclass(frozen=True)

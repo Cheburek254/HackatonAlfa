@@ -101,7 +101,7 @@
                         <div class="card-content">
                             <div class="card-meta">
                                 {% set card_format = material_format(material) %}
-                                <span>{{ card_format | capitalize if card_format else 'Материал' }}</span>
+                                <span class="card-meta-left">{{ card_format | capitalize if card_format else 'Материал' }}{% if material.duration %} · {{ material.duration }}{% endif %}{% if material.lesson_count %} · {{ material.lesson_count | format_lessons }}{% endif %}</span>
                                 {% if loop.first and result_order == 'recommended' and not requires_access %}<span class="first-pick">Начните с этого</span>{% endif %}
                             </div>
                             <h3>{{ material.title }}</h3>

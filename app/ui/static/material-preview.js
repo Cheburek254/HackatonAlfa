@@ -304,6 +304,7 @@ document.addEventListener("submit", async (event) => {
 });
 
 if (typeof materialPreview?.showModal === "function") {
+    const previewEyebrow = materialPreview.querySelector("#preview-eyebrow");
     const previewTitle = materialPreview.querySelector("#preview-title");
     const previewAuthors = materialPreview.querySelector("#preview-authors");
     const previewSubscription = materialPreview.querySelector("#preview-subscription");
@@ -315,10 +316,20 @@ if (typeof materialPreview?.showModal === "function") {
     let openingLink;
     let isLoading = false;
 
+    function formatLessons(count) {
+        if (!count || count <= 0) return "";
+        const rem10 = count % 10;
+        const rem100 = count % 100;
+        if (rem100 >= 11 && rem100 <= 19) return `${count} уроков`;
+        if (rem10 === 1) return `${count} урок`;
+        if (rem10 >= 2 && rem10 <= 4) return `${count} урока`;
+        return `${count} уроков`;
+    }
+
     function renderProgram(lessons) {
         previewProgram.hidden = lessons.length === 0;
         previewProgram.open = lessons.length > 0;
-        previewProgram.querySelector("summary").textContent = `Программа курса · ${lessons.length}`;
+        previewProgram.querySelector("summary").textContent = `Программа курса · ${formatLessons(lessons.length) || lessons.length}`;
         const list = previewProgram.querySelector("ol");
         list.replaceChildren();
         let section;
@@ -361,6 +372,16 @@ if (typeof materialPreview?.showModal === "function") {
                 throw new Error("Не удалось загрузить материал");
             }
             currentPreview = await response.json();
+            if (previewEyebrow) {
+                const parts = [];
+                if (currentPreview.format) parts.push(currentPreview.format.toUpperCase());
+                if (currentPreview.duration) parts.push(currentPreview.duration.toUpperCase());
+                if (currentPreview.lesson_count) {
+                    const lessonsStr = formatLessons(currentPreview.lesson_count);
+                    if (lessonsStr) parts.push(lessonsStr.toUpperCase());
+                }
+                previewEyebrow.textContent = parts.length ? parts.join(" · ") : "О МАТЕРИАЛЕ";
+            }
             previewTitle.textContent = currentPreview.title;
             const authors = currentPreview.authors ?? [];
             previewAuthors.hidden = authors.length === 0;
@@ -400,5 +421,8 @@ if (typeof materialPreview?.showModal === "function") {
             materialPreview.close();
         }
     });
-    materialPreview.addEventListener("close", () => openingLink?.focus({ preventScroll: true }));
+    materialPreview.addEventListener("close", () => {
+        if (previewEyebrow) previewEyebrow.textContent = "О МАТЕРИАЛЕ";
+        openingLink?.focus({ preventScroll: true });
+    });
 }

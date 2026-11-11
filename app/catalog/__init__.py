@@ -51,8 +51,10 @@ def _read_records(path: Path) -> list[dict]:
         columns = {row["name"] for row in connection.execute("PRAGMA table_info(materials)")}
         entity_type = "entity_type" if "entity_type" in columns else "NULL AS entity_type"
         authors = "authors_json" if "authors_json" in columns else "'[]' AS authors_json"
+        duration = "duration" if "duration" in columns else "NULL AS duration"
+        lesson_count = "lesson_count" if "lesson_count" in columns else "NULL AS lesson_count"
         rows = connection.execute(
-            f"""SELECT id, title, url, description, format, access, cost, popularity_score, avg_rating, {entity_type}, {authors},
+            f"""SELECT id, title, url, description, format, access, cost, popularity_score, avg_rating, {entity_type}, {authors}, {duration}, {lesson_count},
                       topics_json, stages_json, industries_json, experience_levels_json
                FROM materials ORDER BY popularity_score DESC, rowid"""
         ).fetchall()
@@ -86,6 +88,10 @@ def load_catalog(path: Path | str | None = None) -> tuple[Material, ...]:
         access_raw = record.get("access", "unknown")
         access = access_raw if access_raw in ("free", "paid", "unknown") else "unknown"
         authors = dict.fromkeys(name.strip() for name in (record.get("authors") or ()) if isinstance(name, str) and name.strip())
+        raw_duration = record.get("duration")
+        duration = str(raw_duration).strip() if raw_duration and str(raw_duration).strip() else None
+        raw_lessons = record.get("lesson_count")
+        lesson_count = int(raw_lessons) if isinstance(raw_lessons, (int, float)) and raw_lessons > 0 else None
         materials.append(
             Material(
                 id=mid,
@@ -106,6 +112,8 @@ def load_catalog(path: Path | str | None = None) -> tuple[Material, ...]:
                 entity_type=record.get("entity_type"),
                 subscriptions=memberships.get(mid, ()),
                 authors=tuple(authors),
+                duration=duration,
+                lesson_count=lesson_count,
             )
         )
     return tuple(materials)

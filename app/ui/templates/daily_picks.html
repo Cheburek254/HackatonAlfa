@@ -13,7 +13,7 @@
                 {% set material = pick.material %}
                 <li class="card daily-card daily-color-{{ loop.index }}" data-daily-kind="{{ kind }}">
                     <a class="material-link daily-tile-link" href="{{ url_for('material_page', material_id=material.id) }}" draggable="false">
-                        <span class="daily-type">{{ format }}</span>
+                        <span class="daily-type">{{ format }}{% if material.duration %} · {{ material.duration }}{% endif %}</span>
                         <h3>{{ material.title }}</h3>
                         <p class="daily-reason">{{ pick.reason }}</p>
                         {% if pick.published %}<time datetime="{{ pick.published.isoformat() }}">{{ pick.published.strftime('%d.%m.%Y') }}</time>{% endif %}

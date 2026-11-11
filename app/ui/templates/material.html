@@ -4,7 +4,7 @@
     <section class="material-page" aria-labelledby="material-title">
         <div class="wrap">
             <article class="material-card">
-                <p class="material-card-eyebrow">{{ material.format | upper if material.format else 'МАТЕРИАЛ' }}</p>
+                <p class="material-card-eyebrow">{{ material.format | upper if material.format else 'МАТЕРИАЛ' }}{% if material.duration %} · {{ material.duration | upper }}{% endif %}{% if material.lesson_count %} · {{ (material.lesson_count | format_lessons) | upper }}{% endif %}</p>
                 <h1 id="material-title" class="material-card-title">{{ material.title }}</h1>
                 {% if material.authors %}<p class="material-authors">Авторы · {{ material.authors | join(', ') }}</p>{% endif %}
                 {% if material.subscriptions %}<p class="tag paid">По подписке {{ material.subscriptions | join(', ') }}</p>{% endif %}
@@ -16,7 +16,7 @@
                 {% endif %}
                 {% if lessons %}
                 <details class="course-program" open>
-                    <summary>Программа курса · {{ lessons | length }}</summary>
+                    <summary>Программа курса · {{ (lessons | length | format_lessons) if lessons else '' }}</summary>
                     <ol>
                         {% for lesson in lessons %}
                         <li>
@@ -43,7 +43,7 @@
                         <a class="next-material-card" href="{{ url_for('material_page', material_id=item.material.id) }}">
                             <div class="next-card-badges">
                                 <span class="next-step-badge">{{ item.step_label }}</span>
-                                <span class="next-format-badge">{{ item.material.format | upper if item.material.format else 'МАТЕРИАЛ' }}</span>
+                                <span class="next-format-badge">{{ item.material.format | upper if item.material.format else 'МАТЕРИАЛ' }}{% if item.material.duration %} · {{ item.material.duration | upper }}{% endif %}</span>
                             </div>
                             <h3 class="next-card-title">{{ item.material.title }}</h3>
                             {% if item.material.description %}
