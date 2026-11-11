@@ -279,6 +279,15 @@ h1 {
 .account-values dt { color: var(--muted); font-size: 13px; }
 .account-values dd { margin: 0; font-weight: 650; overflow-wrap: anywhere; }
 .account-edit { max-width: 850px; }
+.account-content { display: grid; gap: 16px; }
+.account-settings-content > #course-plus { max-width: 850px; }
+.account-content > :is(.account-grid, .account-edit, .logout-form, .account-section-title) { margin-top: 0; }
+.account-content > :is(#course-plus, #profile-history) h2 { margin: 0; font-size: 23px; }
+#course-plus form { margin-top: 12px; }
+.profile-history-list { list-style: none; margin: 12px 0 0; padding: 0; }
+.profile-history-list li { display: grid; gap: 4px; padding-block: 10px; border-top: 1px solid #e5e5e8; }
+.profile-history-list a { font-weight: 650; text-underline-offset: 3px; overflow-wrap: anywhere; }
+.profile-history-list span { color: var(--muted); font-size: 14px; }
 .account-photo-field { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; margin-block: 17px 20px; }
 .account-photo-field .account-avatar { width: 66px; height: 66px; font-size: 24px; }
 .account-photo-field > div { min-width: 0; }

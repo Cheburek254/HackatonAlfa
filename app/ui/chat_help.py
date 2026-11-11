@@ -42,8 +42,12 @@ def help_reply(message, account):
         marker in text for marker in ("сотрудник", "хранить", "генератор")
     )):
         if any(word in text for word in ("забыл", "восстанов", "сбросить", "не помню")):
-            return "account", ("Для самостоятельной смены нужен текущий пароль. Если забыли его, "
-                               f"обратитесь к администратору демо. После восстановления [войдите]({login}).")
+            forgot = url_for("accounts.forgot_password")
+            if current_app.config["PASSWORD_CODE_SENDER"] is None:
+                return "account", (f"Откройте [восстановление пароля]({forgot}), чтобы пройти демо с кодом 000 000. "
+                                   "Для восстановления доступа к аккаунту обратитесь к администратору демо.")
+            return "account", (f"Откройте [восстановление пароля]({forgot}), введите логин и почту из профиля. "
+                               "По коду из письма сможете задать новый пароль.")
         if account and account["username"] == DEMO_USERNAME:
             return "account", ("У общего тестового аккаунта пароль не меняется. "
                                f"[Создайте личный аккаунт]({url_for('accounts.register')}), чтобы задать свой пароль.")

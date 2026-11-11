@@ -32,6 +32,7 @@ from app.ui.avatars import AVATAR_MAX_BYTES, AVATAR_MAX_MB, prepare_avatar
 from app.ui.descriptions import clean_plain_text, format_description_html
 from app.ui.experiments import experiment_variant, track_experiment_activity
 from app.ui.impressions import issue_impression_tickets, record_impressions
+from app.ui.password_recovery import smtp_code_sender
 from app.recommender import recommend
 from app.recommender.baseline import recommend_popular_courses
 from app.recommender.daily import daily_picks
@@ -268,7 +269,7 @@ def create_app(
         for name in ("recommendations.css", "material-preview.js", "chat-widget.js")
     }
     app.config["MAX_CONTENT_LENGTH"] = 4 * 1024 * 1024
-    app.config["PASSWORD_CODE_SENDER"] = password_code_sender
+    app.config["PASSWORD_CODE_SENDER"] = password_code_sender or smtp_code_sender()
     app.config["COURSE_PLUS_ACTIVATOR"] = course_plus_activator
     app.config["LIVE_DATA_PROVIDER"] = live_data_provider
     bm25_weight = configured_bm25_weight()
@@ -343,6 +344,16 @@ def create_app(
         is_demo = account["username"] == DEMO_USERNAME
         names = [account[field] for field in ("first_name", "last_name") if account[field]]
         initials = "".join(name[0] for name in names) or account["username"][:2]
+        history = []
+        if not settings and not is_demo:
+            shown = set()
+            for event in recent_interactions(account):
+                material = materials_by_id.get(event.material_id)
+                if material and event.material_id not in shown:
+                    history.append((material, event.kind, event.occurred_at))
+                    shown.add(event.material_id)
+                    if len(history) == 30:
+                        break
         return render_template(
             "profile.html",
             account=account,
@@ -358,6 +369,7 @@ def create_app(
             identity_values=account if details is None else details,
             avatar_max_mb=AVATAR_MAX_MB,
             error=error,
+            profile_history=history,
             saved=request.args.get("saved") == "1" and not settings,
             password_code_pending=settings and not is_demo and password_code_pending(account),
             demo_password_code=DEMO_PASSWORD_CODE if app.config["PASSWORD_CODE_SENDER"] is None else None,

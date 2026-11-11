@@ -16,7 +16,7 @@ from app.contracts import Material, Profile, Recommendation, RecommendationResul
 from app.ctr_report import DailyActivity, Metrics, read_daily_activity, read_report, read_top_cards
 from app.live_data import LiveDataSnapshot
 from app.recommender.hybrid import merge_orders
-from app.ui.accounts import create_admin_account
+from app.ui.accounts import create_admin_account, current_account, record_interaction
 from app.ui.experiments import DAY, end_experiment, group_metrics, start_experiment
 from app.ui.stub import recommend as stub_recommend
 from app.ui.web import create_app
@@ -35,7 +35,7 @@ class WebFlowTest(unittest.TestCase):
         directory = self.enterContext(TemporaryDirectory())
         self.database_path = Path(directory) / "accounts.sqlite3"
         self.enterContext(patch("app.catalog.DATA_DIR", Path(directory)))
-        self.enterContext(patch.dict("os.environ", {"ALFA_CATALOG_DIR": "", "ALFA_LLM_API_KEY": ""}))
+        self.enterContext(patch.dict("os.environ", {"ALFA_CATALOG_DIR": "", "ALFA_LLM_API_KEY": "", "ALFA_SMTP_HOST": ""}))
         self.app = create_app(self.recommend, database_path=self.database_path)
         self.client = self.app.test_client()
 
@@ -68,6 +68,64 @@ class WebFlowTest(unittest.TestCase):
         self.assertIn("Сверьте план запуска", page)
         self.assertIn("Что уже сделали?", page)
         self.assertIn('href="/materials/start-checklist?impression=', page)
+
+    def test_profile_history_shows_only_current_account_activity(self):
+        self.assertEqual(self.register("history-owner").status_code, 303)
+        with self.client:
+            self.client.get("/profile")
+            account = current_account()
+            record_interaction(account, "start-checklist", "view")
+        page = self.client.get("/profile").get_data(as_text=True)
+        self.assertIn('id="profile-history"', page)
+        self.assertIn('href="/materials/start-checklist"', page)
+        self.assertIn("Просмотр карточки", page)
+        self.assertIn("МСК", page)
+        other = self.app.test_client()
+        self.assertEqual(self.post_form("/register", {**self.business, "username": "history-other",
+                                                     "password": self.password}, client=other).status_code, 303)
+        empty = other.get("/profile").get_data(as_text=True)
+        self.assertIn("История появится после первого просмотра", empty)
+        self.assertNotIn('href="/materials/start-checklist"', empty)
+
+    def test_forgot_password_uses_saved_email_and_revokes_sessions(self):
+        mail = []
+        self.app.config["PASSWORD_CODE_SENDER"] = lambda recipient, code: mail.append((recipient, code))
+        self.assertEqual(self.register("recovery-owner").status_code, 303)
+        email = "account@example.com"
+        self.assertEqual(self.post_form("/profile/settings", {**self.business, "email": email}).status_code, 303)
+        guest = self.app.test_client()
+        other = self.app.test_client()
+        for browser, address in ((other, "wrong@example.com"), (guest, email)):
+            response = self.post_form("/forgot-password", {"username": "recovery-owner", "email": address}, client=browser)
+            self.assertEqual(response.location, "/reset-password")
+        self.assertEqual(len(mail), 1)
+        self.assertEqual(mail[0][0], email)
+        code = mail[0][1]
+        self.assertNotEqual(code, "000000")
+        form = {"new_password": "An updated passphrase!", "confirm_password": "An updated passphrase!"}
+        self.assertEqual(self.post_form("/reset-password", {**form, "email_code": code}, client=other).status_code, 400)
+        self.assertEqual(self.post_form("/reset-password", {**form, "email_code": "000000"}, client=guest).status_code, 400)
+        result = self.post_form("/reset-password", {**form, "email_code": code}, client=guest)
+        self.assertEqual(result.location, "/login")
+        self.assertEqual(self.client.get("/profile").location, "/login")
+        self.assertEqual(guest.get("/reset-password").location, "/forgot-password")
+        self.assertEqual(self.post_form("/login", {"username": "recovery-owner", "password": form["new_password"]},
+                                        client=guest).status_code, 303)
+
+    def test_demo_recovery_accepts_grouped_code_without_changing_account_password(self):
+        self.assertEqual(self.register("demo-recovery-owner").status_code, 303)
+        guest = self.app.test_client()
+        response = self.post_form("/forgot-password", {"username": "demo-recovery-owner", "email": "owner@example.com"},
+                                  client=guest)
+        self.assertEqual(response.location, "/reset-password")
+        self.assertIn("000 000", guest.get(response.location).get_data(as_text=True))
+        new_password = "Simulated password change!"
+        result = self.post_form("/reset-password", {"email_code": "000 000", "new_password": new_password,
+                                                    "confirm_password": new_password}, client=guest)
+        self.assertEqual(result.location, "/login")
+        self.assertIn("Демо восстановления завершено", guest.get(result.location).get_data(as_text=True))
+        self.assertEqual(self.post_form("/login", {"username": "demo-recovery-owner", "password": self.password},
+                                        client=guest).status_code, 303)
 
     def test_admin_ranking_mode_applies_to_guests_and_accounts_and_survives_restart(self):
         app = create_app(database_path=self.database_path)
@@ -1005,12 +1063,12 @@ class WebFlowTest(unittest.TestCase):
         self.assertEqual(other.get("/profile").status_code, 200)
         form["current_password"] = self.password
         self.assertEqual(self.post_form(send_code, form, page=settings).location, "/profile/settings#password-settings")
-        self.assertIn("<strong>000000</strong>", self.client.get(settings).get_data(as_text=True))
+        self.assertIn("<strong>000 000</strong>", self.client.get(settings).get_data(as_text=True))
         self.assertEqual(self.post_form(path, {"email_code": "000000"}, client=other, page=settings).location,
                          "/profile/settings#password-settings")
         self.assertEqual(self.post_form(path, {"email_code": "999999"}, page=settings).location,
                          "/profile/settings#password-settings")
-        self.assertEqual(self.post_form(path, {"email_code": "000000"}, page=settings).location, "/login")
+        self.assertEqual(self.post_form(path, {"email_code": "000 000"}, page=settings).location, "/login")
         self.assertEqual(other.get("/profile").location, "/login")
         self.assertEqual(self.post_form("/login", credentials).status_code, 401)
         self.assertEqual(self.post_form("/login", {**credentials, "password": form["new_password"]}).status_code, 303)

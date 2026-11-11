@@ -48,6 +48,7 @@ HISTORY_WINDOW = timedelta(days=90)
 HISTORY_LIMIT = 100
 DEMO_USERNAME = "demo"
 DEMO_PASSWORD_CODE = "000000"
+PASSWORD_CODE_PATTERN = re.compile(r"[0-9]{3} ?[0-9]{3}")
 PASSWORD_CODE_LIFETIME = 600
 auth = Blueprint("accounts", __name__)
 
@@ -140,6 +141,14 @@ CREATE TABLE IF NOT EXISTS password_change_codes (
     code_digest TEXT NOT NULL,
     old_password_hash TEXT NOT NULL,
     new_password_hash TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS password_recovery_codes (
+    request_id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL UNIQUE REFERENCES users (id) ON DELETE CASCADE,
+    email TEXT NOT NULL,
+    expires INTEGER NOT NULL,
+    code_digest TEXT NOT NULL,
+    old_password_hash TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS account_sessions_expires ON account_sessions (expires);
 CREATE TABLE IF NOT EXISTS interaction_events (
@@ -752,8 +761,8 @@ def change_password():
         if pending is None:
             flash("Запросите новый код для этого сеанса.", "error")
             return redirect(destination, code=303)
-        if not re.fullmatch(r"[0-9]{6}", code) or not secrets.compare_digest(
-            pending["code_digest"], _password_code_digest(pending["nonce"], code),
+        if not PASSWORD_CODE_PATTERN.fullmatch(code) or not secrets.compare_digest(
+            pending["code_digest"], _password_code_digest(pending["nonce"], code.replace(" ", "")),
         ):
             flash("Код указан неверно.", "error")
             return redirect(destination, code=303)

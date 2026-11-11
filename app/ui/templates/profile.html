@@ -48,6 +48,7 @@
                 <nav class="account-tabs" aria-label="Разделы профиля">
                     <a href="{{ url_for('profile_page') }}"{% if not settings %} aria-current="page"{% endif %}>Обзор</a>
                     {% if not is_demo %}
+                    <a href="{{ url_for('profile_page', _anchor='profile-history') }}">История</a>
                     <a href="{{ url_for('profile_settings') }}"{% if settings %} aria-current="page"{% endif %}>Настройки профиля</a>
                     {% endif %}
                     {% if account.is_admin %}
@@ -57,7 +58,7 @@
             </div>
         </section>
         <section class="results account-body">
-            <div class="wrap">
+            <div class="wrap account-content{% if settings %} account-settings-content{% endif %}">
                 {% if saved %}<p class="account-notice" role="status">Профиль сохранён.</p>{% endif %}
                 {% if settings %}
                 <h2 class="account-section-title">Настройки профиля</h2>
@@ -120,10 +121,10 @@
                     <form method="post" action="{{ url_for('accounts.change_password') }}">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <p class="account-muted">Подтвердите смену пароля для {{ account.email }}. Код действует 10 минут.</p>
-                        {% if demo_password_code %}<p>Демо-режим · код <strong>{{ demo_password_code }}</strong></p>{% endif %}
+                        {% if demo_password_code %}<p>Демо-режим · код <strong>{{ demo_password_code[:3] }} {{ demo_password_code[3:] }}</strong></p>{% endif %}
                         <label>Код из письма
                             <input type="text" name="email_code" inputmode="numeric" autocomplete="one-time-code"
-                                   required minlength="6" maxlength="6" pattern="[0-9]{6}" placeholder="______">
+                                   required minlength="6" maxlength="7" pattern="[0-9]{3} ?[0-9]{3}">
                         </label>
                         <button class="button button-primary" type="submit">Подтвердить смену пароля</button>
                     </form>
@@ -159,6 +160,24 @@
                     </section>
                     {% endif %}
                 </div>
+                {% if not is_demo %}
+                <section class="account-card" id="profile-history" aria-labelledby="profile-history-title">
+                    <h2 id="profile-history-title">История материалов</h2>
+                    <p class="account-muted">Последние просмотры и переходы в вашем аккаунте.</p>
+                    {% if profile_history %}
+                    <ul class="profile-history-list">
+                        {% for material, kind, occurred_at in profile_history %}
+                        <li>
+                            <a href="{{ url_for('material_page', material_id=material.id) }}">{{ material.title }}</a>
+                            <span>{{ 'Переход к материалу' if kind == 'click' else 'Просмотр карточки' }}{% if occurred_at %} · <time datetime="{{ occurred_at.isoformat() }}">{{ occurred_at.isoformat() | report_msk }}</time>{% endif %}</span>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                    {% else %}
+                    <p class="account-muted">История появится после первого просмотра. <a href="{{ url_for('index') }}">Перейти к подборке</a>.</p>
+                    {% endif %}
+                </section>
+                {% endif %}
                 {% endif %}
                 <section class="account-card" id="course-plus" aria-labelledby="course-plus-title">
                     <h2 class="account-section-title" id="course-plus-title">Подписка Курс+</h2>
