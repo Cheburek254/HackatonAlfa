@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS ab_experiments (
     share_a INTEGER NOT NULL CHECK (share_a BETWEEN 1 AND 99),
     traffic INTEGER NOT NULL CHECK (traffic BETWEEN 1 AND 100),
     bm25_weight REAL NOT NULL CHECK (bm25_weight BETWEEN 0 AND 1),
+    bm25_adaptive INTEGER NOT NULL DEFAULT 0 CHECK (bm25_adaptive IN (0, 1)),
     seed TEXT NOT NULL,
     started_at INTEGER NOT NULL,
     ended_at INTEGER
@@ -204,6 +205,10 @@ def configure_accounts(app: Flask, database_path: Path) -> None:
                 connection.execute("ALTER TABLE account_details ADD COLUMN email TEXT NOT NULL DEFAULT ''")
             if "phone" not in detail_columns:
                 connection.execute("ALTER TABLE account_details ADD COLUMN phone TEXT NOT NULL DEFAULT ''")
+            experiment_columns = {row["name"] for row in connection.execute("PRAGMA table_info(ab_experiments)")}
+            if "bm25_adaptive" not in experiment_columns:
+                connection.execute("ALTER TABLE ab_experiments ADD COLUMN bm25_adaptive INTEGER NOT NULL DEFAULT 0 "
+                                   "CHECK (bm25_adaptive IN (0, 1))")
             impression_columns = {row["name"] for row in connection.execute("PRAGMA table_info(recommendation_impressions)")}
             for name, statement in (
                 ("experiment_id", "ALTER TABLE recommendation_impressions ADD COLUMN experiment_id INTEGER"),

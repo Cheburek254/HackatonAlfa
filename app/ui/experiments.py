@@ -25,6 +25,7 @@ class Variant:
     subject: str
     mode: str
     bm25_weight: float
+    bm25_adaptive: bool = False
 
 
 @dataclass(frozen=True)
@@ -49,8 +50,8 @@ def experiments() -> tuple[Row, ...]:
 def start_experiment(mode_a: str, mode_b: str, share_a: int, traffic: int, weight: float) -> bool:
     with _db() as connection:
         cursor = connection.execute(
-            """INSERT INTO ab_experiments (mode_a, mode_b, share_a, traffic, bm25_weight, seed, started_at)
-               SELECT ?, ?, ?, ?, ?, ?, ?
+            """INSERT INTO ab_experiments (mode_a, mode_b, share_a, traffic, bm25_weight, bm25_adaptive, seed, started_at)
+               SELECT ?, ?, ?, ?, ?, 1, ?, ?
                WHERE NOT EXISTS (SELECT 1 FROM ab_experiments WHERE ended_at IS NULL)""",
             (mode_a, mode_b, share_a, traffic, weight, secrets.token_hex(16), int(time())),
         )
@@ -163,7 +164,8 @@ def experiment_variant(account: Row | None) -> Variant | None:
     if enrollment is None or enrollment["arm"] == "outside":
         return None
     mode = experiment["mode_a" if enrollment["arm"] == "A" else "mode_b"]
-    return Variant(experiment_id, enrollment["subject"], mode, experiment["bm25_weight"])
+    return Variant(experiment_id, enrollment["subject"], mode, experiment["bm25_weight"],
+                   bool(experiment["bm25_adaptive"]))
 
 
 def track_experiment_activity(response: Response) -> Response:

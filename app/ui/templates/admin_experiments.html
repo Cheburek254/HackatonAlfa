@@ -48,7 +48,7 @@
     {% if selected %}
     <p><strong>№{{ selected.id }} · {{ 'идёт' if selected.ended_at is none else 'завершён' }}</strong>
         · запущен {{ format_time(selected.started_at) }}{% if selected.ended_at is not none %} · завершён {{ format_time(selected.ended_at) }}{% endif %}</p>
-    <p class="account-muted">В эксперименте {{ selected.traffic }}% трафика. Плановое распределение A/B — {{ selected.share_a }}/{{ 100 - selected.share_a }}{% if 'hybrid' in (selected.mode_a, selected.mode_b) %}. Вес BM25 — {{ '%g' | format(100 * selected.bm25_weight) }}%{% endif %}.</p>
+    <p class="account-muted">В эксперименте {{ selected.traffic }}% трафика. Плановое распределение A/B — {{ selected.share_a }}/{{ 100 - selected.share_a }}{% if 'hybrid' in (selected.mode_a, selected.mode_b) %}. {% if selected.bm25_adaptive %}Адаптивный BM25, базовый вес{% else %}Фиксированный вес BM25{% endif %} — {{ '%g' | format(100 * selected.bm25_weight) }}%{% endif %}.</p>
     <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Сравнение групп A и B">
         <table class="admin-table">
             <thead><tr><th scope="col">Группа</th><th scope="col">Алгоритм</th><th scope="col">Назначено</th><th scope="col">Участники с показами</th><th scope="col">Показы</th><th scope="col">Переходы</th><th scope="col">CTR</th><th scope="col">Открытие описания</th><th scope="col">Удержание D7</th></tr></thead>

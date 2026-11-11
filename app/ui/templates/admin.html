@@ -10,6 +10,7 @@
 <section class="account-card" id="admin-ranking-mode" aria-labelledby="admin-ranking-title">
     <h2 class="account-section-title" id="admin-ranking-title">Алгоритм рекомендаций</h2>
     <p class="account-muted">Общий режим для гостей и аккаунтов. Применяется при следующем запросе к каталогу или чату.</p>
+    <p class="account-muted">В режиме BM25 + recommend доля BM25 повышается для конкретных запросов. Для новичков и перехода от теории к практике используется базовый вес.</p>
     {% if experiment_running %}<p class="account-notice">Идёт A/B-тест. Его участникам выдаётся алгоритм их группы.</p>{% endif %}
     <a href="{{ url_for('admin.experiment_dashboard') }}">Управление A/B-тестом</a>
     {% for message in get_flashed_messages(category_filter=['ranking_success']) %}

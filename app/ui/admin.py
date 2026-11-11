@@ -1,5 +1,6 @@
 """Закрытая сводка по рекомендациям и управление доступом к ней."""
 
+import json
 from datetime import UTC, datetime, timedelta, timezone
 
 import click
@@ -23,6 +24,10 @@ from evaluation.stress_report import read_report as read_stress_report
 admin = Blueprint("admin", __name__, url_prefix="/admin")
 PASSWORD_HINT = f"Пароль должен содержать от {PASSWORD_MIN_LENGTH} до {PASSWORD_MAX_LENGTH} символов."
 MSK = timezone(timedelta(hours=3))
+ADAPTIVE_REPORTS = {
+    "adaptive-bm25.json": "Новая разметка",
+    "adaptive-bm25-hard.json": "Сложные конкретные запросы",
+}
 
 
 @admin.before_request
@@ -47,9 +52,9 @@ def _test_reports():
     fingerprint = config["CATALOG_QUALITY_FINGERPRINT"]
     weight = config["BM25_WEIGHT"]
     return {
-        "catalog_quality": read_catalog_quality(config["CATALOG_QUALITY_PATH"], fingerprint, weight),
-        "stress_report": read_stress_report(config["STRESS_REPORT_PATH"], fingerprint, weight),
-        "learning_report": read_learning_report(config["LEARNING_REPORT_PATH"], fingerprint, weight),
+        "catalog_quality": read_catalog_quality(config["CATALOG_QUALITY_PATH"], fingerprint, weight, adaptive=True),
+        "stress_report": read_stress_report(config["STRESS_REPORT_PATH"], fingerprint, weight, adaptive=True),
+        "learning_report": read_learning_report(config["LEARNING_REPORT_PATH"], fingerprint, weight, adaptive=True),
     }
 
 
@@ -58,7 +63,26 @@ def _ranking_summary(suite):
     if directory is None:
         return None
     fingerprint = current_app.config["CATALOG_QUALITY_FINGERPRINT"] if suite == "real" else None
-    return read_summary(directory / f"ranking-{suite}.json", suite, current_app.config["BM25_WEIGHT"], fingerprint)
+    return read_summary(directory / f"ranking-{suite}.json", suite, current_app.config["BM25_WEIGHT"], fingerprint,
+                        adaptive=True)
+
+
+def _adaptive_comparisons():
+    config = current_app.config
+    directory = config["EVALUATION_SUMMARY_DIR"]
+    if directory is None:
+        return {}
+    reports = {}
+    for filename, title in ADAPTIVE_REPORTS.items():
+        try:
+            report = json.loads((directory / filename).read_text(encoding="utf-8"))
+            modes = report["modes"]
+            if (report["catalog_fingerprint"] == config["CATALOG_QUALITY_FINGERPRINT"]
+                    and modes["adaptive"]["settings"][0] == config["BM25_WEIGHT"]):
+                reports[title] = report
+        except (OSError, ValueError, TypeError, KeyError, IndexError):
+            continue
+    return reports
 
 
 def _report_datetime(value):
@@ -94,7 +118,8 @@ def dashboard():
     overview = Metrics(sum(row.impressions for row in totals.values()), sum(row.clicks for row in totals.values()))
     reports = _test_reports()
     real_summary = _ranking_summary("real")
-    latest = _latest_report_time((*reports.values(), real_summary, _ranking_summary("demo")))
+    latest = _latest_report_time((*reports.values(), *_adaptive_comparisons().values(), real_summary,
+                                  _ranking_summary("demo")))
     return render_template(
         "admin.html", heading="Сводка рекомендаций", intro="Основные показатели и оценка последних офлайн-прогонов.",
         overview=overview,
@@ -165,7 +190,8 @@ def experiment_dashboard():
 def tests():
     summaries = {suite: snapshot for suite in SUITE_LABELS if (snapshot := _ranking_summary(suite))}
     reports = _test_reports()
-    latest = _latest_report_time((*reports.values(), *summaries.values()))
+    adaptive_comparisons = _adaptive_comparisons()
+    latest = _latest_report_time((*reports.values(), *summaries.values(), *adaptive_comparisons.values()))
     detailed_suite = request.args.get("details")
     return render_template(
         "admin_tests.html", heading="Тесты рекомендаций",
@@ -173,6 +199,7 @@ def tests():
         report_date=_msk(latest) if latest else None, titles=current_app.config["CATALOG_TITLES"],
         evaluation_suites=SUITE_LABELS, detailed_suite=detailed_suite,
         bm25_weight=current_app.config["BM25_WEIGHT"], comparison_summaries=summaries,
+        adaptive_comparisons=adaptive_comparisons,
         subscription_check=(reports["catalog_quality"] or {}).get("subscription_examples"), **reports,
     )
 

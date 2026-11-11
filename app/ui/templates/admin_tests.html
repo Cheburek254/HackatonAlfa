@@ -22,6 +22,7 @@
 {% block admin_content %}
 <nav class="admin-section-links" aria-label="Наборы тестов">
     <a href="#admin-evaluation">Сравнение ранжирования</a>
+    {% if adaptive_comparisons %}<a href="#admin-adaptive">Проверки адаптивного BM25</a>{% endif %}
     <a href="#admin-catalog-quality">Качество каталога</a>
     <a href="#admin-stress">Офлайн-проверки</a>
     <a href="#admin-learning">Сложные сценарии</a>
@@ -30,7 +31,7 @@
 <section class="account-card" id="admin-evaluation" aria-labelledby="admin-evaluation-title">
     <h2 id="admin-evaluation-title" class="account-section-title">Тесты рекомендаций</h2>
     <p class="account-muted">{% if report_date %}Последнее тестирование · <strong>{{ report_date }}</strong>{% else %}Для текущего каталога пока нет сохранённых прогонов.{% endif %}</p>
-    <p class="account-muted">Сравниваем топ популярных курсов, персональный recommend и смешанный режим. Вес BM25 — {{ '%g' | format(100 * bm25_weight) }}%, вес recommend — {{ '%g' | format(100 * (1 - bm25_weight)) }}%.</p>
+    <p class="account-muted">Сохранённые прогоны сравнивают топ популярных курсов, персональный recommend и адаптивный гибрид с базовой долей BM25 {{ '%g' | format(100 * bm25_weight) }}%.</p>
     <p class="account-muted">Hit@3 и MRR@3 оценивают первое попадание. Precision@3 показывает долю подходящих карточек в тройке, nDCG@3 учитывает их позиции, MAP@3 усредняет точность на позициях попаданий.</p>
     {% for suite, report in comparison_summaries.items() %}
     <h3>{{ evaluation_suites[suite] }} · сохранённый прогон</h3>
@@ -59,6 +60,28 @@
     {% endif %}
     {% endfor %}
 </section>
+
+{% if adaptive_comparisons %}
+<section class="account-card" id="admin-adaptive" aria-labelledby="admin-adaptive-title">
+    <h2 id="admin-adaptive-title" class="account-section-title">Проверки адаптивного BM25</h2>
+    {% set labels = {'fixed_25': 'Фиксированный 25%', 'fixed_749_tuned': 'Фиксированный 74,9% с подобранными параметрами', 'adaptive': 'Адаптивный BM25'} %}
+    {% for title, report in adaptive_comparisons.items() %}
+    <h3>{{ title }}</h3>
+    <p class="account-muted">Время прогона · {{ report.generated_at | report_msk }}</p>
+    <div class="admin-table-wrap" tabindex="0" role="region" aria-label="{{ title }}">
+        <table class="admin-table">
+            <thead><tr><th scope="col">Режим</th><th scope="col">Hit@3</th><th scope="col">MRR@3</th><th scope="col">nDCG@3</th><th scope="col">Просадки по порогам</th></tr></thead>
+            <tbody>
+            {% for mode, label in labels.items() %}
+            {% set row = report.modes[mode] %}
+            <tr><th scope="row">{{ label }}</th><td>{{ row.new.hits }}/{{ row.new.cases }} ({{ '%.1f' | format(100 * row.new.hit_at_3) | replace('.', ',') }}%)</td><td>{{ '%.4f' | format(row.new.mrr_at_3) | replace('.', ',') }}</td><td>{{ '%.4f' | format(row.new.ndcg_at_3) | replace('.', ',') }}</td><td>{{ row.regressions | length }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endfor %}
+</section>
+{% endif %}
 
 {% include "admin_catalog_quality.html" %}
 {% include "admin_stress.html" %}

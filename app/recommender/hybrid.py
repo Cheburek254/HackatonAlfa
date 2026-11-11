@@ -83,19 +83,36 @@ def tokens(text):
     normalized = _normalize_text(re.sub("<[^>]*>", " ", text))
     return [_stem_ru(word) for word in normalized.split() if word not in STOPWORDS and len(word) >= 2]
 
-def make_bm25(catalog):
+
+@lru_cache(maxsize=8192)
+def material_text_terms(title, description, topics):
+    headings = frozenset(tokens(title)) | frozenset(tokens(" ".join(topics)))
+    return headings, headings | frozenset(tokens(description))
+
+
+@lru_cache(maxsize=12)
+def rare_query_terms(catalog):
+    frequencies = Counter(term for material in catalog
+                          for term in material_text_terms(material.title, material.description, material.topics)[1])
+    return frozenset(term for term, count in frequencies.items() if count <= max(2, len(catalog) // 10))
+
+
+def make_bm25(catalog, *, field_weights=FIELD_WEIGHTS, length_penalty=B, saturation=K1):
     indexes = []
-    for field, weight in zip((lambda m: m.title, lambda m: m.description, lambda m: " ".join(m.topics)), FIELD_WEIGHTS):
+    for field, weight in zip((lambda m: m.title, lambda m: m.description, lambda m: " ".join(m.topics)),
+                             field_weights, strict=True):
+        if not weight:
+            continue
         docs = [tokens(field(m)) for m in catalog]
         avg_len = sum(map(len, docs)) / len(docs) or 1
         frequencies = Counter(term for doc in docs for term in set(doc))
         index = defaultdict(list)
         for material, doc in zip(catalog, docs):
-            normalizer = K1 * (1 - B + B * len(doc) / avg_len)
+            normalizer = saturation * (1 - length_penalty + length_penalty * len(doc) / avg_len)
             for term, count in Counter(doc).items():
                 df = frequencies[term]
                 idf = log1p((len(docs) - df + 0.5) / (df + 0.5))
-                score = idf * (count * (K1 + 1)) / (count + normalizer)
+                score = idf * (count * (saturation + 1)) / (count + normalizer)
                 index[term].append((material.id, score * weight))
         indexes.append(index)
 
@@ -114,8 +131,17 @@ def make_bm25(catalog):
 _BM25_CACHE = {}
 
 
-def cached_bm25(catalog: Sequence[Material]):
+@lru_cache(maxsize=12)
+def _custom_bm25(
+    catalog: tuple[Material, ...], field_weights: tuple[float, float, float], length_penalty: float, saturation: float,
+):
+    return make_bm25(catalog, field_weights=field_weights, length_penalty=length_penalty, saturation=saturation)
+
+
+def cached_bm25(catalog: Sequence[Material], *, field_weights=FIELD_WEIGHTS, length_penalty=B, saturation=K1):
     cat_tuple = tuple(catalog) if not isinstance(catalog, tuple) else catalog
+    if field_weights != FIELD_WEIGHTS or length_penalty != B or saturation != K1:
+        return _custom_bm25(cat_tuple, field_weights, length_penalty, saturation)
     cat_key = (len(cat_tuple), getattr(cat_tuple[0], "id", None) if cat_tuple else None)
     if cat_key not in _BM25_CACHE:
         _BM25_CACHE[cat_key] = make_bm25(cat_tuple)

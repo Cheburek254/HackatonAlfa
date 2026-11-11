@@ -19,7 +19,10 @@ from app.contracts import (
     Recommendation,
     RecommendationResult,
 )
-from app.recommender.hybrid import acceptable, cached_bm25, constraints as hybrid_constraints, merge_orders
+from app.recommender.hybrid import (
+    B, FIELD_WEIGHTS, K1, acceptable, cached_bm25, constraints as hybrid_constraints, material_text_terms,
+    merge_orders, rare_query_terms,
+)
 from app.recommender.llm import refine_with_llm_if_configured
 from app.recommender.onboarding import onboarding
 from app.recommender.pacing import balance_first_page
@@ -31,6 +34,12 @@ HISTORY_EVENT_WEIGHTS = {"view": 0.08, "click": 1.0, "complete": 1.25}
 UNCONFIRMED_TOPIC_WEIGHT = 0.45
 TITLE_HISTORY_WEIGHT = 8.0
 STRONG_TASK_SCORE = 19.0
+ADAPTIVE_BM25_WEIGHT = 0.749
+BEGINNER_GOAL = re.compile(r"\b(?:с нуля|я новичок|без опыта|нет опыта|ничего не знаю|только начинаю)\b")
+PRACTICE_AFTER_THEORY = re.compile(
+    r"\b(?:после теории|после прочтения|от теории к практике|перейти к практике|применить на практике|"
+    r"(?:прочитал\w*|изучил\w*|разобрал\w*) .{0,90}\b(?:теперь|на практике))\b"
+)
 SESSION_GOAL_WORDS = frozenset((
     "шаг", "дальше", "начать", "план", "задача", "работа", "проверка", "система", "способ",
     "подход", "порядок", "проблема", "решение", "случай", "материал", "коллега", "команда",
@@ -632,6 +641,35 @@ def _history_signals(history, materials, links, as_of):
     return topic_scores, industry_scores, term_scores, linked_scores, seen, recent_clicks
 
 
+def _is_beginner(profile: Profile) -> bool:
+    return _normalize_text(profile.stage or "") in {"идея", "запуск"} or (
+        _normalize_text(profile.experience or "") in EXPERIENCE_ALIASES["начинающий"]
+    )
+
+
+def _adaptive_bm25_weight(base, profile, goal_norm, goal_clauses, recent_clicks, catalog_by_id, top_text, catalog):
+    if _is_beginner(profile) or BEGINNER_GOAL.search(goal_norm) or PRACTICE_AFTER_THEORY.search(goal_norm):
+        return base
+    theory_reads = sum(catalog_by_id[mid].entity_type in {"article", "lesson"} for mid in recent_clicks[:3])
+    if theory_reads >= 2:
+        return base
+    rare = rare_query_terms(tuple(catalog))
+    for material in top_text:
+        title_terms = _tokenize_stems(material.title)
+        headings, text_terms = material_text_terms(material.title, material.description, material.topics)
+        for terms in goal_clauses:
+            title_hits = len(terms & title_terms)
+            if title_hits >= 2 and title_hits * 3 >= len(terms) * 2:
+                return max(base, ADAPTIVE_BM25_WEIGHT)
+            matches = terms & text_terms
+            rare_matches = matches & rare
+            if len(matches) >= 3 and len(matches) * 2 >= len(terms) and (
+                len(rare_matches) >= 3 or (len(rare_matches) >= 2 and matches & headings)
+            ):
+                return max(base, ADAPTIVE_BM25_WEIGHT)
+    return base
+
+
 def recommend(
     catalog: Sequence[Material],
     profile: Profile,
@@ -645,6 +683,10 @@ def recommend(
     history_as_of: datetime | None = None,
     balance_access: bool = False,
     bm25_weight: float = 0.0,
+    bm25_field_weights: tuple[float, float, float] = FIELD_WEIGHTS,
+    bm25_length_penalty: float = B,
+    bm25_saturation: float = K1,
+    bm25_adaptive: bool = False,
 ) -> RecommendationResult:
     """Ранжирует материалы каталога с учётом задачи, профиля, истории и популярности."""
     if not 0 <= bm25_weight <= 1:
@@ -965,8 +1007,17 @@ def recommend(
         filters = hybrid_constraints(goal_raw)
         rankable = {row[1].id: row for row in ordered if acceptable(row[1], filters)}
         core_ids = tuple(rankable)
-        text_ids = tuple(mid for mid in cached_bm25(tuple(catalog))(goal_raw) if mid in rankable)
+        text_order = cached_bm25(catalog, field_weights=bm25_field_weights, length_penalty=bm25_length_penalty,
+                                 saturation=bm25_saturation)
+        text_ids = tuple(mid for mid in text_order(goal_raw) if mid in rankable)
         if text_ids:
+            if bm25_adaptive:
+                goal_clauses = tuple(_tokenize_stems(clause) - generic_goal_terms
+                                     for clause in re.split(r"[.!?;]+\s*", goal_raw))
+                bm25_weight = _adaptive_bm25_weight(
+                    bm25_weight, profile, goal_norm, goal_clauses,
+                    recent_clicks, catalog_by_id, (catalog_by_id[mid] for mid in text_ids[:5]), catalog,
+                )
             ranked_ids = merge_orders((core_ids, text_ids), weights=(1 - bm25_weight, bm25_weight))
             fused_ids = set(ranked_ids)
             replacement = iter(ranked_ids + [mid for mid in core_ids if mid not in fused_ids])
@@ -975,9 +1026,7 @@ def recommend(
     if balance_access and not browse_from_seed and not is_weak_match and not any(
         (constraints["only_free"], constraints["max_budget"] is not None, constraints["only_format"])
     ):
-        beginner = _normalize_text(profile.stage or "") in {"идея", "запуск"} or (
-            _normalize_text(profile.experience or "") in EXPERIENCE_ALIASES["начинающий"]
-        )
+        beginner = _is_beginner(profile)
         experienced = _normalize_text(profile.experience or "") in EXPERIENCE_ALIASES["опытный"]
         engaged = sum(kind in {"click", "complete"} for kind in seen_events.values()) >= 2
         growing = _normalize_text(profile.stage or "") in {"работающий бизнес", "рост"}

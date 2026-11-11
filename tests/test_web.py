@@ -15,8 +15,9 @@ from PIL import Image
 from app.contracts import Material, Profile, Recommendation, RecommendationResult
 from app.ctr_report import DailyActivity, Metrics, read_daily_activity, read_report, read_top_cards
 from app.live_data import LiveDataSnapshot
+from app.recommender.hybrid import merge_orders
 from app.ui.accounts import create_admin_account
-from app.ui.experiments import DAY, group_metrics
+from app.ui.experiments import DAY, end_experiment, group_metrics, start_experiment
 from app.ui.stub import recommend as stub_recommend
 from app.ui.web import create_app
 from evaluation.runner import EVALUATION_DIR, EvaluationReport, EvaluationRow, EvaluationSummary, summary_payload
@@ -103,6 +104,33 @@ class WebFlowTest(unittest.TestCase):
         self.assertNotEqual(cards(results(guest, "финансы")), cards(baseline))
         select("hybrid")
         self.assertIn("Подборка учитывает совпадения", results(guest, "финансы"))
+
+    def test_hybrid_uses_adaptive_weights_and_preserves_older_ab_arm(self):
+        catalog = (Material("template", "Акт сверки взаиморасчётов", "https://example.com/template",
+                            description="Помогает сверить задолженность контрагента."),)
+        with patch("app.ui.web.load_catalog", return_value=catalog):
+            app = create_app(database_path=self.database_path)
+        goal = {"goal": "Хочу сверить задолженность контрагента."}
+
+        def weight(client, profile):
+            with patch("app.recommender.engine.merge_orders", wraps=merge_orders) as fuse:
+                self.assertEqual(client.post("/", data={**goal, **profile}).status_code, 200)
+            return fuse.call_args.kwargs["weights"][1]
+
+        self.assertEqual(weight(app.test_client(), {}), 0.749)
+        self.assertEqual(weight(app.test_client(), {"experience": "начинающий"}), 0.25)
+        with closing(sqlite3.connect(self.database_path)) as connection, connection:
+            connection.execute("ALTER TABLE ab_experiments DROP COLUMN bm25_adaptive")
+            connection.execute("""INSERT INTO ab_experiments (mode_a, mode_b, share_a, traffic, bm25_weight, seed, started_at)
+                                  VALUES ('hybrid', 'recommend', 50, 100, 0.25, 'old-run', 1)""")
+        with patch("app.ui.web.load_catalog", return_value=catalog):
+            app = create_app(database_path=self.database_path)
+        with patch("app.ui.experiments._arm", return_value="A"):
+            self.assertEqual(weight(app.test_client(), {}), 0.25)
+            with app.app_context():
+                self.assertTrue(end_experiment(1))
+                self.assertTrue(start_experiment("hybrid", "recommend", 50, 100, 0.25))
+            self.assertEqual(weight(app.test_client(), {}), 0.749)
 
     def test_ab_enrollment_and_metrics_follow_guests_through_registration_and_stop(self):
         app = create_app(database_path=self.database_path)
@@ -283,7 +311,7 @@ class WebFlowTest(unittest.TestCase):
                                   None, None, None),) if suite == "demo" else ()
             report = EvaluationReport(tuple(EvaluationSummary(method, count, 1, 0.1, 0.1, 0.1, 0.1)
                                             for method in methods), rows, count)
-            payload = summary_payload(report, suite, .25, fingerprint, include_cases=True)
+            payload = summary_payload(report, suite, .25, fingerprint, include_cases=True, adaptive=True)
             (report_dir / f"ranking-{suite}.json").write_text(
                 json.dumps({**payload, "generated_at": generated_at}), encoding="utf-8",
             )

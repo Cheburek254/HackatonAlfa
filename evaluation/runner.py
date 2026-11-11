@@ -28,10 +28,10 @@ def _load_cases(suite: str) -> list[dict]:
     return json.loads((EVALUATION_DIR / f"profiles.{suite}.json").read_text(encoding="utf-8"))
 
 
-def _summary_identity(suite: str, weight: float, fingerprint: str | None) -> dict:
+def _summary_identity(suite: str, weight: float, fingerprint: str | None, *, adaptive: bool = False) -> dict:
     case_data = (EVALUATION_DIR / f"profiles.{suite}.json").read_bytes()
     return {"version": 1, "suite": suite, "bm25_weight": weight, "catalog": fingerprint,
-            "scenarios": sha256(case_data).hexdigest()}
+            "scenarios": sha256(case_data).hexdigest(), **({"bm25_adaptive": True} if adaptive else {})}
 
 
 def load_real_catalog(source: Path) -> tuple[Material, ...]:
@@ -40,6 +40,15 @@ def load_real_catalog(source: Path) -> tuple[Material, ...]:
     if not source.is_file():
         raise EvaluationDataError(f"Файл каталога не найден: {source}")
     return load_catalog(source)
+
+
+@dataclass(frozen=True)
+class EvaluationCase:
+    case_id: str
+    note: str
+    profile: Profile
+    history: tuple[InteractionEvent, ...]
+    relevant_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -80,8 +89,9 @@ class EvaluationReport:
 
 def summary_payload(
     report: EvaluationReport, suite: str, weight: float, fingerprint: str | None, *, include_cases: bool = False,
+    adaptive: bool = False,
 ) -> dict:
-    snapshot = {**_summary_identity(suite, weight, fingerprint), "scenario_count": report.scenario_count,
+    snapshot = {**_summary_identity(suite, weight, fingerprint, adaptive=adaptive), "scenario_count": report.scenario_count,
                 "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
                 "summaries": [asdict(row) | {"hit_rate": row.hit_rate} for row in report.summaries]}
     if include_cases:
@@ -89,12 +99,12 @@ def summary_payload(
     return snapshot
 
 
-def read_summary(path: Path, suite: str, weight: float, fingerprint: str | None) -> dict | None:
+def read_summary(path: Path, suite: str, weight: float, fingerprint: str | None, *, adaptive: bool = False) -> dict | None:
     try:
         report = json.loads(path.read_text(encoding="utf-8"))
-        identity = _summary_identity(suite, weight, fingerprint)
+        identity = _summary_identity(suite, weight, fingerprint, adaptive=adaptive)
         rows = report["summaries"]
-        if all(report.get(key) == value for key, value in identity.items()) and (
+        if all(report.get(key) == value for key, value in identity.items()) and bool(report.get("bm25_adaptive")) == adaptive and (
             [row["method"] for row in rows] == list(RANKING_MODES.values())
         ):
             return report
@@ -119,10 +129,9 @@ def _ranking_scores(ids: tuple[str, ...], relevant: set[str]) -> tuple[float, fl
     return reciprocal_rank, precision, ndcg, average_precision
 
 
-def run_evaluation(
-    recommender: Recommender, hybrid: Recommender | None = None, *, suite: str = "demo",
-    real_catalog: tuple[Material, ...] | None = None,
-) -> EvaluationReport:
+def load_evaluation_inputs(
+    suite: str, real_catalog: tuple[Material, ...] | None = None,
+) -> tuple[tuple[Material, ...], tuple[EvaluationCase, ...]]:
     if suite == "demo":
         catalog = load_catalog(DEMO_CATALOG_PATH) + load_catalog(EVALUATION_DIR / "catalog.extra.json")
     elif suite == "real":
@@ -131,15 +140,35 @@ def run_evaluation(
         catalog = real_catalog
     else:
         raise EvaluationDataError("Неизвестный набор сценариев.")
+    return catalog, build_cases(_load_cases(suite), catalog)
+
+
+def build_cases(raw_cases: list[dict], catalog: tuple[Material, ...]) -> tuple[EvaluationCase, ...]:
     catalog_ids = {material.id for material in catalog}
-    cases = _load_cases(suite)
-    for case in cases:
-        referenced = set(case["relevant_ids"]) | {event["material_id"] for event in case.get("history", ())}
+    cases = []
+    for case in raw_cases:
+        fixture = case.get("history_fixture")
+        history = load_history(FIXTURES_DIR / fixture) if fixture else tuple(
+            InteractionEvent(event["material_id"], event.get("kind", "view"),
+                             datetime.fromisoformat(event["occurred_at"]) if event.get("occurred_at") else None)
+            for event in case.get("history", ())
+        )
+        referenced = set(case["relevant_ids"]) | {event.material_id for event in history}
         if unknown_ids := referenced - catalog_ids:
             raise EvaluationDataError(
                 f"Каталог не совпадает с разметкой. В сценарии {case['id']} отсутствуют материалы: "
                 f"{', '.join(sorted(unknown_ids))}."
             )
+        cases.append(EvaluationCase(case["id"], case["note"], Profile(**case["profile"]), history,
+                                    tuple(case["relevant_ids"])))
+    return tuple(cases)
+
+
+def run_evaluation(
+    recommender: Recommender, hybrid: Recommender | None = None, *, suite: str = "demo",
+    real_catalog: tuple[Material, ...] | None = None,
+) -> EvaluationReport:
+    catalog, cases = load_evaluation_inputs(suite, real_catalog)
     popular_ids = tuple(item.material_id for item in recommend_popular_courses(catalog, TOP_K).items)
     rankers = ((RANKING_MODES["recommend"], recommender),)
     if hybrid is not None:
@@ -149,14 +178,9 @@ def run_evaluation(
     rows = []
 
     for case in cases:
-        relevant = set(case["relevant_ids"])
-        fixture = case.get("history_fixture")
-        history = load_history(FIXTURES_DIR / fixture) if fixture else tuple(
-            InteractionEvent(**event) for event in case.get("history", ())
-        )
-        profile = Profile(**case["profile"])
+        relevant = set(case.relevant_ids)
         orders = (popular_ids, *(
-            tuple(item.material_id for item in rank(catalog, profile, history, limit=TOP_K).items[:TOP_K])
+            tuple(item.material_id for item in rank(catalog, case.profile, case.history, limit=TOP_K).items[:TOP_K])
             for _, rank in rankers
         ))
         for name, ids in zip(methods, orders, strict=True):
@@ -164,7 +188,7 @@ def run_evaluation(
             if relevant and (name != methods[0] or popular_ids):
                 scores = _ranking_scores(ids, relevant)
                 scores_by_method[name].append(scores)
-            rows.append(EvaluationRow(case["id"], case["note"], profile.goal, tuple(case["relevant_ids"]), name, ids, *scores))
+            rows.append(EvaluationRow(case.case_id, case.note, case.profile.goal, case.relevant_ids, name, ids, *scores))
 
     summaries = []
     for name, scores in scores_by_method.items():

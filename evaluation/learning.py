@@ -6,6 +6,7 @@ import re
 from collections import Counter, defaultdict
 from dataclasses import replace
 from datetime import UTC, datetime
+from functools import partial
 from itertools import combinations
 from pathlib import Path
 from statistics import mean
@@ -14,7 +15,7 @@ from tempfile import TemporaryDirectory
 from app.catalog import load_catalog
 from app.catalog.normalizer import PgDumpReader
 from app.contracts import Profile
-from app.recommender.hybrid import configured_bm25_weight
+from app.recommender.hybrid import B, FIELD_WEIGHTS, K1, configured_bm25_weight
 from evaluation.catalog_quality import _semantic_vectors, catalog_fingerprint
 from evaluation.learning_cases import (
     ADVANCED, BASIC, INTERMEDIATE, Scenario, bridge_cases, classify, freshness_cases, glossary_materials,
@@ -184,8 +185,9 @@ def freshness_measure(rows):
     ]
 
 
-def build_report(backup, catalog_path):
-    bm25_weight = configured_bm25_weight()
+def build_report(backup, catalog_path, *, bm25_weight=None, bm25_field_weights=FIELD_WEIGHTS, bm25_length_penalty=B,
+                 bm25_saturation=K1, bm25_adaptive=False):
+    bm25_weight = configured_bm25_weight() if bm25_weight is None else bm25_weight
     catalog = load_catalog(catalog_path)
     reader = PgDumpReader(backup)
     quality = read_quality_data(backup, catalog, 0)
@@ -195,10 +197,12 @@ def build_report(backup, catalog_path):
     levels = {m.id: classify(m) for m in all_materials}
     groups = theme_groups(catalog)
     vectors = semantic_corpus(reader, quality, all_materials)
-    current = make_ranker(catalog, catalog_path.parent, bm25_weight=bm25_weight)
-    with_glossary = make_ranker(all_materials, catalog_path.parent, bm25_weight=bm25_weight)
-    balanced = make_ranker(tuple(replace(m, popularity=None, rating=None) for m in sorted(catalog, key=lambda m: m.id)),
-                           catalog_path.parent, bm25_weight=bm25_weight)
+    make = partial(make_ranker, links_directory=catalog_path.parent, bm25_weight=bm25_weight,
+                   bm25_field_weights=bm25_field_weights, bm25_length_penalty=bm25_length_penalty,
+                   bm25_saturation=bm25_saturation, bm25_adaptive=bm25_adaptive)
+    current = make(catalog)
+    with_glossary = make(all_materials)
+    balanced = make(tuple(replace(m, popularity=None, rating=None) for m in sorted(catalog, key=lambda m: m.id)))
 
     def top(ranker, case):
         orders = ranker(case.profile, case.history)
@@ -244,6 +248,7 @@ def build_report(backup, catalog_path):
     return {
         "version": REPORT_VERSION, "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "catalog_fingerprint": catalog_fingerprint(catalog), "suites": suites, "bm25_weight": bm25_weight,
+        "bm25_adaptive": bm25_adaptive,
     }
 
 
@@ -251,8 +256,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("backup", "catalog", "output"):
         parser.add_argument("--" + name, type=Path, required=True)
+    parser.add_argument("--adaptive-bm25", action="store_true")
     args = parser.parse_args()
-    report = build_report(args.backup, args.catalog)
+    report = build_report(args.backup, args.catalog, bm25_adaptive=args.adaptive_bm25)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(dir=args.output.parent) as temporary:
         staged = Path(temporary) / args.output.name

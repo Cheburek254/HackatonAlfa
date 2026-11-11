@@ -6,12 +6,13 @@ import os
 import re
 import urllib.error
 import urllib.request
+from collections.abc import Sequence
 from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, request, session
 
 from app.catalog.subscriptions import entitled_catalog
-from app.contracts import Profile
+from app.contracts import InteractionEvent, Profile
 from app.recommender import recommend
 from app.recommender.baseline import recommend_popular_courses
 from app.recommender.hybrid import DEFAULT_BM25_WEIGHT, acceptable, cached_bm25, constraints, merge_orders
@@ -101,6 +102,9 @@ def _find_relevant_materials(
     limit: int = 6,
     *,
     bm25_weight: float = DEFAULT_BM25_WEIGHT,
+    bm25_adaptive: bool = False,
+    history: Sequence[InteractionEvent] = (),
+    links_directory: Path | None = None,
 ) -> list:
     if not catalog:
         return []
@@ -114,12 +118,17 @@ def _find_relevant_materials(
         rec_profile = Profile(goal=query, **{field: profile.get(field) for field in (
             "industry", "stage", "experience", "team_size", "learning_topic", "preferred_format",
         )})
-        bm25_ids = cached_bm25(tuple(catalog))(query) if bm25_weight else ()
-        core_res = recommend(catalog, rec_profile, (), 30, explain_with_llm=False)
-        core_ids = tuple(r.material_id for r in core_res.items)
-        valid_bm25 = tuple(mid for mid in bm25_ids if acceptable(materials_map[mid], filters))
-        valid_core = tuple(mid for mid in core_ids if acceptable(materials_map[mid], filters))
-        hybrid_ids = merge_orders((valid_core, valid_bm25), weights=(1 - bm25_weight, bm25_weight))
+        if bm25_adaptive:
+            result = recommend(catalog, rec_profile, history, max(30, limit), explain_with_llm=False,
+                               links_directory=links_directory, bm25_weight=bm25_weight, bm25_adaptive=True)
+            hybrid_ids = tuple(item.material_id for item in result.items if acceptable(materials_map[item.material_id], filters))
+        else:
+            bm25_ids = cached_bm25(tuple(catalog))(query) if bm25_weight else ()
+            core_res = recommend(catalog, rec_profile, (), 30, explain_with_llm=False)
+            core_ids = tuple(r.material_id for r in core_res.items)
+            valid_bm25 = tuple(mid for mid in bm25_ids if acceptable(materials_map[mid], filters))
+            valid_core = tuple(mid for mid in core_ids if acceptable(materials_map[mid], filters))
+            hybrid_ids = merge_orders((valid_core, valid_bm25), weights=(1 - bm25_weight, bm25_weight))
         if hybrid_ids:
             ordered = [materials_map[mid] for mid in hybrid_ids]
             ordered.sort(key=lambda item: item.title.casefold() in viewed_set)
@@ -557,6 +566,8 @@ def chat():
         candidates = _find_relevant_materials(
             message, profile, catalog, viewed_titles, limit=5,
             bm25_weight=weight if mode == "hybrid" else 0.0,
+            bm25_adaptive=mode == "hybrid" and (variant is None or variant.bm25_adaptive),
+            history=interactions[::-1], links_directory=current_app.config["CATALOG_LINKS_DIR"],
         )
 
     api_key, model = _load_env_credentials()

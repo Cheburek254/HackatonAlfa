@@ -264,6 +264,7 @@ def create_app(
     materials_by_id = {material.id: material for material in catalog}
     publication_dates = load_publications(source.parent)
     app.config["CHAT_CATALOG"] = catalog
+    app.config["CATALOG_LINKS_DIR"] = source.parent
     programs = read_programs(source, {material.id for material in catalog if material.entity_type == "course"})
     covers = {} if is_demo_catalog else json.loads(COVER_METADATA.read_text(encoding="utf-8"))
     app.config["CATALOG_TITLES"] = {material.id: material.title for material in catalog}
@@ -531,13 +532,15 @@ def create_app(
         effective_algorithm = algorithm
         balance_access = (access_filters == all_access_filters and format_filter == "all" and result_order == "recommended")
         active_weight = (variant.bm25_weight if variant else bm25_weight) if mode == "hybrid" else 0.0
+        adaptive_bm25 = mode == "hybrid" and (variant is None or variant.bm25_adaptive)
 
         if mode == "popular":
             effective_algorithm = "app.recommender.baseline.recommend_popular_courses"
             result = recommend_popular_courses(candidates, len(candidates))
         elif recommender is recommend and candidates:
             if mode == "hybrid":
-                effective_algorithm += f":bm25-{active_weight:.12g}"
+                policy = "bm25-adaptive-v2" if adaptive_bm25 else "bm25"
+                effective_algorithm += f":{policy}-{active_weight:.12g}"
             cache_key = (
                 profile.goal or "",
                 tuple(sorted(values.items())),
@@ -546,7 +549,9 @@ def create_app(
                 balance_access,
                 mode,
                 active_weight,
-                tuple((h.material_id, h.kind) for h in history),
+                adaptive_bm25,
+                history,
+                now.date() if history and not is_demo_catalog else None,
             )
             if cache_key in recommend_cache:
                 result = recommend_cache[cache_key]
@@ -557,6 +562,7 @@ def create_app(
                     history_as_of=None if is_demo_catalog else now,
                     balance_access=balance_access,
                     bm25_weight=active_weight,
+                    bm25_adaptive=adaptive_bm25,
                 )
                 if len(recommend_cache) >= _MAX_RECOMMEND_CACHE:
                     recommend_cache.clear()

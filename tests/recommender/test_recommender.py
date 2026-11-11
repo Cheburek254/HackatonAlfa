@@ -1,11 +1,13 @@
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 from app.catalog import load_catalog, load_history
 from app.contracts import InteractionEvent, Material, Profile, Recommendation
 from app.recommender import recommend
 from app.recommender.engine import _expand_synonyms, _normalize_text, _tokenize_stems
+from app.recommender.hybrid import merge_orders
 from app.recommender.runtime import rerank_next_page
 
 
@@ -35,6 +37,32 @@ class RecommenderTest(unittest.TestCase):
         self.assertLessEqual(len(res3.items), 3)
         self.assertEqual(len(res6.items), 6)
         self.assertEqual(len({i.material_id for i in res6.items}), 6)
+
+    def test_adaptive_bm25_raises_weight_only_outside_protected_contexts(self):
+        catalog = (
+            Material("template", "Акт сверки взаиморасчётов", "https://example.com/template",
+                     description="<p>Помогает сверить задолженность контрагента.</p>", entity_type="document"),
+            Material("article-a", "Договор и расчёты с поставщиками", "https://example.com/a", entity_type="article"),
+            Material("article-b", "Взаиморасчёты с поставщиками", "https://example.com/b", entity_type="article"),
+        )
+        exact_goal = "Нужен акт сверки взаиморасчётов."
+        description_goal = "Хочу сверить задолженность контрагента."
+        history = (InteractionEvent("article-a", "click"), InteractionEvent("article-b", "click"))
+        for profile, events, enabled, expected in (
+            (Profile(goal=exact_goal), (), False, 0.25),
+            (Profile(goal=exact_goal), (), True, 0.749),
+            (Profile(goal=description_goal), (), True, 0.749),
+            (Profile(goal=description_goal, stage="запуск"), (), True, 0.25),
+            (Profile(goal=f"После теории. {description_goal}"), (), True, 0.25),
+            (Profile(goal=exact_goal, experience="без опыта"), (), True, 0.25),
+            (Profile(goal=f"После теории. {exact_goal}"), (), True, 0.25),
+            (Profile(goal=exact_goal), history, True, 0.25),
+            (Profile(goal="Взаиморасчёты"), (), True, 0.25),
+        ):
+            with self.subTest(profile=profile, events=events, enabled=enabled):
+                with patch("app.recommender.engine.merge_orders", wraps=merge_orders) as fuse:
+                    recommend(catalog, profile, events, 3, bm25_weight=0.25, bm25_adaptive=enabled)
+                self.assertEqual(fuse.call_args.kwargs["weights"][1], expected)
 
     def test_adaptive_access_mix_preserves_relevance_and_explicit_price(self):
         catalog = tuple(

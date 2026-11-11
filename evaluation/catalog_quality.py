@@ -19,7 +19,7 @@ from app.catalog.subscriptions import entitled_catalog
 from app.contracts import InteractionEvent, Material, Profile
 from app.recommender import recommend
 from app.recommender.engine import _tokenize_stems
-from app.recommender.hybrid import configured_bm25_weight, constraints
+from app.recommender.hybrid import B, FIELD_WEIGHTS, K1, configured_bm25_weight, constraints
 from app.recommender.onboarding import ONBOARDING_ITEMS
 from evaluation.quality_data import read_quality_data
 from evaluation.runner import TOP_K, _load_cases, run_evaluation
@@ -42,7 +42,8 @@ def catalog_fingerprint(catalog: tuple[Material, ...]) -> str:
     return sha256(json.dumps(payload, ensure_ascii=False).encode()).hexdigest()
 
 
-def read_report(path: Path | None, fingerprint: str | None, bm25_weight: float | None = None) -> dict | None:
+def read_report(path: Path | None, fingerprint: str | None, bm25_weight: float | None = None, *,
+                adaptive: bool | None = None) -> dict | None:
     if path is None or fingerprint is None:
         return None
     try:
@@ -52,6 +53,7 @@ def read_report(path: Path | None, fingerprint: str | None, bm25_weight: float |
     if (isinstance(report, dict) and report.get("version") == REPORT_VERSION
             and report.get("catalog_fingerprint") == fingerprint and isinstance(report.get("generated_at"), str)
             and (bm25_weight is None or report.get("bm25_weight") == bm25_weight)
+            and (adaptive is None or bool(report.get("bm25_adaptive")) == adaptive)
             and all(isinstance(report.get(key), dict) for key in ("catalog", "history", "cold_start", "expert"))):
         return report
     return None
@@ -164,12 +166,17 @@ def synthetic_paywall(catalog, rank):
     return {"profiles": len(unfiltered), "course_plus": len(members), "rows": rows, "groups": breakdown}
 
 
-def build_quality_report(backup: Path, catalog_path: Path, sample_size: int) -> dict:
+def build_quality_report(
+    backup: Path, catalog_path: Path, sample_size: int, *, bm25_weight: float | None = None,
+    bm25_field_weights=FIELD_WEIGHTS, bm25_length_penalty=B, bm25_saturation=K1, bm25_adaptive=False,
+) -> dict:
     catalog = load_catalog(catalog_path)
     data = read_quality_data(backup, catalog, sample_size)
-    bm25_weight = configured_bm25_weight()
+    bm25_weight = configured_bm25_weight() if bm25_weight is None else bm25_weight
     current = partial(recommend, links_directory=catalog_path.parent, explain_with_llm=False,
-                      balance_access=True, bm25_weight=bm25_weight)
+                      balance_access=True, bm25_weight=bm25_weight, bm25_field_weights=bm25_field_weights,
+                      bm25_length_penalty=bm25_length_penalty, bm25_saturation=bm25_saturation,
+                      bm25_adaptive=bm25_adaptive)
     materials = {item.id: item for item in catalog}
 
     def top(profile, history=(), algorithm=current):
@@ -226,6 +233,7 @@ def build_quality_report(backup: Path, catalog_path: Path, sample_size: int) -> 
     return {
         "version": REPORT_VERSION, "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "bm25_weight": bm25_weight,
+        "bm25_adaptive": bm25_adaptive,
         "catalog_fingerprint": catalog_fingerprint(catalog),
         "catalog": {
             "size": len(catalog), "scenario_count": len(authored), "slots": shown.total(),
@@ -252,7 +260,9 @@ def build_quality_report(backup: Path, catalog_path: Path, sample_size: int) -> 
             "rated_profiles": len(rated_lists),
         },
         "synthetic_paywall": synthetic_paywall(catalog, current),
-        "subscription_examples": check_subscriptions(catalog, bm25_weight),
+        "subscription_examples": check_subscriptions(catalog, bm25_weight, bm25_field_weights=bm25_field_weights,
+                                                     bm25_length_penalty=bm25_length_penalty, bm25_saturation=bm25_saturation,
+                                                     bm25_adaptive=bm25_adaptive),
         "cold_start": {"profiles": cold, "passed": _ratio(sum(len(row["items"]) == TOP_K and all(
             item["suitable"] for item in row["items"]) for row in cold), len(cold))},
         "expert": {
@@ -270,10 +280,11 @@ def main() -> None:
     parser.add_argument("--catalog", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--history-sample", type=int, default=300)
+    parser.add_argument("--adaptive-bm25", action="store_true")
     args = parser.parse_args()
     if args.history_sample < 1:
         parser.error("--history-sample должно быть положительным")
-    report = build_quality_report(args.backup, args.catalog, args.history_sample)
+    report = build_quality_report(args.backup, args.catalog, args.history_sample, bm25_adaptive=args.adaptive_bm25)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(dir=args.output.parent) as temporary:
         staged = Path(temporary) / args.output.name

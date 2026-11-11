@@ -5,7 +5,7 @@ import json
 from collections import Counter, defaultdict
 from dataclasses import replace
 from datetime import UTC, datetime
-from functools import cache
+from functools import cache, partial
 from pathlib import Path
 from statistics import mean
 from tempfile import TemporaryDirectory
@@ -14,7 +14,7 @@ from app.catalog import load_catalog
 from app.catalog.normalizer import PgDumpReader
 from app.contracts import InteractionEvent, Profile
 from app.recommender import RANKING_MODES, recommend
-from app.recommender.hybrid import configured_bm25_weight
+from app.recommender.hybrid import B, FIELD_WEIGHTS, K1, configured_bm25_weight
 from app.recommender.onboarding import ONBOARDING_ITEMS
 from evaluation.catalog_quality import catalog_fingerprint
 from evaluation.quality_data import read_quality_data
@@ -27,20 +27,23 @@ from evaluation.stress_report import REPORT_VERSION
 METHODS = (RANKING_MODES["recommend"], RANKING_MODES["hybrid"])
 
 
-def make_ranker(catalog, links_directory, *, bm25_weight, graph=None, exclude_sources=False):
+def make_ranker(catalog, links_directory, *, bm25_weight, bm25_field_weights=FIELD_WEIGHTS, bm25_length_penalty=B,
+                bm25_saturation=K1, bm25_adaptive=False, graph=None, exclude_sources=False):
     @cache
     def ranks(profile, history, candidate_ids=None):
         seen = {event.material_id for event in history} if exclude_sources else set()
         candidates = catalog if candidate_ids is None else tuple(m for m in catalog if m.id in candidate_ids)
         limit = len(candidates) if exclude_sources else TOP_K
 
-        def order(weight):
+        def order(weight, *, adaptive=False):
             result = recommend(candidates, profile, history, limit, explain_with_llm=False, balance_access=True,
-                               links_directory=links_directory, expert_links=graph, bm25_weight=weight)
+                               links_directory=links_directory, expert_links=graph, bm25_weight=weight,
+                               bm25_field_weights=bm25_field_weights, bm25_length_penalty=bm25_length_penalty,
+                               bm25_saturation=bm25_saturation, bm25_adaptive=adaptive)
             return tuple(item.material_id for item in result.items if item.material_id not in seen)
 
         current = order(0.0)
-        hybrid = order(bm25_weight) if profile.goal and bm25_weight else current
+        hybrid = order(bm25_weight, adaptive=bm25_adaptive) if profile.goal and bm25_weight else current
         return dict(zip(METHODS, (current, hybrid)))
 
     return ranks
@@ -131,13 +134,16 @@ def split_graph(expert):
     return {src: sorted(targets) for src, targets in train.items()}, hidden, cutoff, len(pairs) - cutoff
 
 
-def compare_graph(catalog, data, directory, bm25_weight):
+def compare_graph(catalog, data, directory, bm25_weight, bm25_field_weights=FIELD_WEIGHTS, bm25_length_penalty=B,
+                  bm25_saturation=K1, bm25_adaptive=False):
     train, hidden, train_count, test_count = split_graph(data.expert)
     incoming = Counter(target for src, targets in data.expert.items() for target in targets if target in train.get(src, ()))
     articles = sorted((m for m in catalog if m.entity_type == "article"),
                       key=lambda m: (-(m.popularity or 0), -incoming[m.id], m.id))
     materials = {m.id: m for m in catalog}
-    rank = make_ranker(catalog, directory, bm25_weight=bm25_weight, graph=train, exclude_sources=True)
+    rank = make_ranker(catalog, directory, bm25_weight=bm25_weight, bm25_field_weights=bm25_field_weights,
+                       bm25_length_penalty=bm25_length_penalty, bm25_saturation=bm25_saturation, bm25_adaptive=bm25_adaptive,
+                       graph=train, exclude_sources=True)
     probes = []
     for src in sorted(hidden, key=sample_key):
         if not train.get(src):
@@ -170,8 +176,9 @@ def compare_graph(catalog, data, directory, bm25_weight):
     }
 
 
-def build_report(backup, catalog_path):
-    bm25_weight = configured_bm25_weight()
+def build_report(backup, catalog_path, *, bm25_weight=None, bm25_field_weights=FIELD_WEIGHTS, bm25_length_penalty=B,
+                 bm25_saturation=K1, bm25_adaptive=False):
+    bm25_weight = configured_bm25_weight() if bm25_weight is None else bm25_weight
     catalog = load_catalog(catalog_path)
     data = read_quality_data(backup, catalog, 0)
     directory = catalog_path.parent
@@ -183,12 +190,14 @@ def build_report(backup, catalog_path):
     cold = cold_cases(catalog, data.topics)
     # Наблюдения после границы могут влиять на агрегаты популярности и связи. Убираем их и порядок экспорта.
     historical_catalog = tuple(replace(m, popularity=None, rating=None) for m in sorted(catalog, key=lambda m: m.id))
-    current_rank = make_ranker(catalog, directory, bm25_weight=bm25_weight)
-    rare_rank = make_ranker(catalog + glossary, directory, bm25_weight=bm25_weight)
+    make = partial(make_ranker, bm25_weight=bm25_weight, bm25_field_weights=bm25_field_weights,
+                   bm25_length_penalty=bm25_length_penalty, bm25_saturation=bm25_saturation, bm25_adaptive=bm25_adaptive)
+    current_rank = make(catalog, directory)
+    rare_rank = make(catalog + glossary, directory)
 
     @cache
     def historical_ranker(available):
-        return make_ranker(tuple(m for m in historical_catalog if m.id in available), directory, bm25_weight=bm25_weight, graph={})
+        return make(tuple(m for m in historical_catalog if m.id in available), directory, graph={})
 
     def temporal_orders(case):
         available = frozenset(m.id for m in historical_catalog if m.id in published and published[m.id] < case.cutoff)
@@ -230,7 +239,9 @@ def build_report(backup, catalog_path):
     return {
         "version": REPORT_VERSION, "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "catalog_fingerprint": catalog_fingerprint(catalog), "suites": suites, "bm25_weight": bm25_weight,
-        "graph": compare_graph(catalog, data, directory, bm25_weight),
+        "bm25_adaptive": bm25_adaptive,
+        "graph": compare_graph(catalog, data, directory, bm25_weight, bm25_field_weights, bm25_length_penalty,
+                               bm25_saturation, bm25_adaptive),
     }
 
 
@@ -238,8 +249,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("backup", "catalog", "output"):
         parser.add_argument("--" + name, type=Path, required=True)
+    parser.add_argument("--adaptive-bm25", action="store_true")
     args = parser.parse_args()
-    report = build_report(args.backup, args.catalog)
+    report = build_report(args.backup, args.catalog, bm25_adaptive=args.adaptive_bm25)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(dir=args.output.parent) as temporary:
         staged = Path(temporary) / args.output.name

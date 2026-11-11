@@ -5,7 +5,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from app.contracts import Material
+from app.contracts import InteractionEvent, Material
+from app.recommender.hybrid import merge_orders
 from app.ui.chat import _fallback_reply, _linkify_materials
 from app.ui.web import create_app
 
@@ -71,6 +72,21 @@ class ChatApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.get_json().get("ok"))
         self.assertEqual(self.client.post("/api/chat", json={"message": 123}).status_code, 400)
+
+    def test_chat_uses_adaptive_weight_and_reading_history(self):
+        self.app.config["CHAT_CATALOG"] = (
+            Material("template", "Акт сверки взаиморасчётов", "https://example.com/template", access="free",
+                     description="Помогает сверить задолженность контрагента."),
+            Material("first", "Договор с поставщиком", "https://example.com/first", access="free", entity_type="article"),
+            Material("second", "Работа с контрагентами", "https://example.com/second", access="free", entity_type="article"),
+        )
+        history = (InteractionEvent("first", "click"), InteractionEvent("second", "click"))
+        for events, expected in (((), 0.749), (history, 0.25)):
+            with self.subTest(events=events), patch("app.ui.chat.recent_interactions", return_value=events), \
+                 patch("app.recommender.engine.merge_orders", wraps=merge_orders) as fuse:
+                response = self.client.post("/api/chat", json={"message": "Хочу сверить задолженность контрагента."})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(fuse.call_args.kwargs["weights"][1], expected)
 
     def test_chat_uses_entitled_catalog_and_filters_model_links(self):
         self.app.config["CHAT_CATALOG"] = (
