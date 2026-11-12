@@ -1,6 +1,5 @@
 const materialPreview = document.querySelector("#material-preview");
 const seenCards = new WeakSet();
-const dailyTrack = document.querySelector("#daily-track");
 const VIEWED_STORAGE_KEY = "alfa_viewed_materials";
 
 function getSessionViewedIds() {
@@ -22,16 +21,16 @@ function addSessionViewedId(materialId) {
     } catch {}
 }
 
-if (dailyTrack) {
-    const dragHint = document.querySelector("#daily-drag-hint");
-    const originals = [...dailyTrack.children];
+function initCarouselTrack(track) {
+    const dragHint = track.closest(".daily-picks-card")?.querySelector(".daily-drag-hint");
+    const originals = [...track.children];
     let clones = [];
     let cycle = 0;
     let scrollTimer;
     let drag;
     let suppressClick = false;
     const modulo = (value, width) => ((value % width) + width) % width;
-    const jump = (left) => dailyTrack.scrollTo({ left, behavior: "instant" });
+    const jump = (left) => track.scrollTo({ left, behavior: "instant" });
     const inMainCycle = (left) => cycle + modulo(left - cycle, cycle);
     const cloneCards = () => originals.map((card) => {
         const copy = card.cloneNode(true);
@@ -45,9 +44,11 @@ if (dailyTrack) {
         }
         const first = originals[0];
         const last = originals.at(-1);
-        const overflow = last.offsetLeft + last.offsetWidth - first.offsetLeft > dailyTrack.clientWidth - 6;
-        dragHint.hidden = !overflow;
-        dailyTrack.classList.toggle("daily-interactive", overflow);
+        const overflow = last.offsetLeft + last.offsetWidth - first.offsetLeft > track.clientWidth - 6;
+        if (dragHint) {
+            dragHint.hidden = !overflow;
+        }
+        track.classList.toggle("daily-interactive", overflow);
         if (!overflow) {
             clones.forEach((card) => card.remove());
             clones = [];
@@ -55,35 +56,35 @@ if (dailyTrack) {
             jump(0);
             return;
         }
-        const progress = cycle ? modulo(dailyTrack.scrollLeft - cycle, cycle) / cycle : 0;
+        const progress = cycle ? modulo(track.scrollLeft - cycle, cycle) / cycle : 0;
         if (!clones.length) {
             const preceding = cloneCards();
             const following = cloneCards();
-            dailyTrack.prepend(...preceding);
-            dailyTrack.append(...following);
+            track.prepend(...preceding);
+            track.append(...following);
             clones = [...preceding, ...following];
         }
         cycle = first.offsetLeft - clones[0].offsetLeft;
         jump(cycle * (1 + progress));
     };
     const recenter = () => {
-        const left = dailyTrack.scrollLeft;
+        const left = track.scrollLeft;
         if (cycle && !drag?.active && (left < cycle - 1 || left >= 2 * cycle)) {
             jump(inMainCycle(left));
         }
     };
 
-    dailyTrack.addEventListener("pointerdown", (event) => {
+    track.addEventListener("pointerdown", (event) => {
         if (!cycle || !event.isPrimary || event.button !== 0 || !event.target.closest(".daily-card")) {
             return;
         }
         suppressClick = false;
         drag = {
-            id: event.pointerId, x: event.clientX, y: event.clientY, left: dailyTrack.scrollLeft,
+            id: event.pointerId, x: event.clientX, y: event.clientY, left: track.scrollLeft,
             started: performance.now(), touch: event.pointerType === "touch", active: false,
         };
     });
-    dailyTrack.addEventListener("pointermove", (event) => {
+    track.addEventListener("pointermove", (event) => {
         if (!drag || drag.id !== event.pointerId) {
             return;
         }
@@ -101,8 +102,8 @@ if (dailyTrack) {
                 return;
             }
             drag.active = true;
-            dailyTrack.setPointerCapture(event.pointerId);
-            dailyTrack.classList.add("daily-dragging");
+            track.setPointerCapture(event.pointerId);
+            track.classList.add("daily-dragging");
         }
         jump(inMainCycle(drag.left - distance));
     });
@@ -112,38 +113,40 @@ if (dailyTrack) {
         }
         suppressClick = drag.active;
         drag = undefined;
-        dailyTrack.classList.remove("daily-dragging");
+        track.classList.remove("daily-dragging");
         recenter();
     };
-    dailyTrack.addEventListener("pointerup", finishDrag);
-    dailyTrack.addEventListener("pointercancel", finishDrag);
-    dailyTrack.addEventListener("lostpointercapture", finishDrag);
-    dailyTrack.addEventListener("pointerleave", () => {
+    track.addEventListener("pointerup", finishDrag);
+    track.addEventListener("pointercancel", finishDrag);
+    track.addEventListener("lostpointercapture", finishDrag);
+    track.addEventListener("pointerleave", () => {
         if (!drag?.active) {
             drag = undefined;
         }
     });
-    dailyTrack.addEventListener("click", (event) => {
+    track.addEventListener("click", (event) => {
         if (suppressClick && event.detail) {
             event.preventDefault();
             event.stopPropagation();
             suppressClick = false;
         }
     }, { capture: true });
-    dailyTrack.addEventListener("keydown", (event) => {
-        if (cycle && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+    track.addEventListener("keydown", (event) => {
+        if (cycle && originals.length > 1 && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
             const step = originals[1].offsetLeft - originals[0].offsetLeft;
             event.preventDefault();
-            jump(inMainCycle(dailyTrack.scrollLeft + (event.key === "ArrowLeft" ? -step : step)));
+            jump(inMainCycle(track.scrollLeft + (event.key === "ArrowLeft" ? -step : step)));
         }
     });
-    dailyTrack.addEventListener("scroll", () => {
+    track.addEventListener("scroll", () => {
         clearTimeout(scrollTimer);
         scrollTimer = setTimeout(recenter, 120);
     }, { passive: true });
     window.addEventListener("resize", arrange);
     arrange();
 }
+
+document.querySelectorAll(".daily-track").forEach(initCarouselTrack);
 
 const catalogPages = new Map();
 const exposureTimers = new Map();
