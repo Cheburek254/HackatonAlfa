@@ -90,7 +90,19 @@
     {% else %}
     <p class="account-muted">Для текущего каталога отчёт по синтетическим профилям ещё не загружен.</p>
     {% endif %}
-    <h3>Холодный старт и экспертные связи</h3>
+    {% if paywall and paywall.access_scenarios %}
+    <h3>Условия открытия материалов</h3>
+    <p>Синтетические сценарии по правилам Альфа-Курса. Карточки в каталоге видны независимо от права открыть материал.</p>
+    <div class="admin-table-wrap" tabindex="0" role="region" aria-label="Условия открытия материалов">
+        <table class="admin-table">
+            <thead><tr><th scope="col">Сценарий</th><th scope="col">Ожидание</th><th scope="col">Проверка</th></tr></thead>
+            <tbody>{% for row in paywall.access_scenarios %}
+                <tr><th scope="row">{{ row.label }}</th><td>{{ 'Открывается' if row.expected else 'Ограничен' }}</td><td>{{ 'Пройдено' if row.actual == row.expected else 'Ошибка' }}</td></tr>
+            {% endfor %}</tbody>
+        </table>
+    </div>
+    {% endif %}
+    <h3>Холодный старт и редакторские рекомендации</h3>
     <p>Критерий холодного старта выполнили {{ share(catalog_quality.cold_start.passed) }}. Для пустого профиля проверяется состав онбординг-пакета. Для остальных профилей ожидаются бесплатные вводные курсы или популярные статьи.</p>
     <details class="admin-evaluation-details">
         <summary>Карточки в проверках холодного старта</summary>
@@ -105,7 +117,7 @@
             </table>
         </div>
     </details>
-    <p>Экспертное совпадение в топ-3 — {{ share(expert.hit) }} по исходным карточкам и {{ share(expert.slots) }} по позициям. В расчёт вошли {{ expert.edges }} из {{ expert.raw_edges }} связей. Модель прошла этот тест с отключённым графом.</p>
+    <p>Совпадение с редакторскими рекомендациями в топ-3 — {{ share(expert.hit) }} по исходным карточкам и {{ share(expert.slots) }} по позициям. В расчёт вошли {{ expert.edges }} из {{ expert.raw_edges }} связей. Для этой диагностики граф отключён.</p>
     {% else %}
     <p class="admin-empty">Для этой версии каталога отчёт пока не загружен.</p>
     {% endif %}

@@ -535,7 +535,7 @@ def chat():
 
     profile = saved_profile(account) or {}
     has_plus = bool(account and account["has_course_plus"])
-    catalog = entitled_catalog(current_app.config["CHAT_CATALOG"], has_plus)
+    catalog = entitled_catalog(current_app.config["CHAT_CATALOG"], has_plus, signed_in=account is not None)
     if (position := _card_position(message)) is not None:
         if not remembered:
             return respond("Сначала попросите подборку, а затем укажите номер карточки.", "memory", "card_detail")

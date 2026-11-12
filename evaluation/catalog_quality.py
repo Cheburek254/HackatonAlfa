@@ -15,7 +15,8 @@ from statistics import mean
 from tempfile import TemporaryDirectory
 
 from app.catalog import load_catalog
-from app.catalog.subscriptions import entitled_catalog
+from app.catalog.lessons import can_open_lesson
+from app.catalog.subscriptions import can_open_material, entitled_catalog
 from app.contracts import InteractionEvent, Material, Profile
 from app.recommender import recommend
 from app.recommender.engine import _tokenize_stems
@@ -37,7 +38,8 @@ FORMAT_TYPES = {"статья": "article", "курс": "course", "урок": "le
 
 def catalog_fingerprint(catalog: tuple[Material, ...]) -> str:
     payload = [(m.id, m.title, m.url, m.description, m.topics, m.format, m.access, m.entity_type,
-                m.stages, m.industries, m.experience_levels, m.popularity, m.rating, m.cost, m.subscriptions)
+                m.stages, m.industries, m.experience_levels, m.popularity, m.rating, m.cost, m.subscriptions,
+                m.requires_login)
                for m in catalog]
     return sha256(json.dumps(payload, ensure_ascii=False).encode()).hexdigest()
 
@@ -128,6 +130,31 @@ def paywall_cases(catalog):
     }
 
 
+def access_scenarios(catalog):
+    article = next((m for m in catalog if m.entity_type == "article" and m.requires_login), None)
+    course = next((m for m in catalog if m.entity_type == "course" and m.access == "paid" and not m.subscriptions), None)
+    member = next((m for m in catalog if "Курс+" in m.subscriptions), None)
+    rows = []
+    if article:
+        for signed_in, label in ((False, "Гость"), (True, "Вход на Альфа-Курсе")):
+            actual = can_open_material(article, signed_in=signed_in)
+            rows.append({"label": f"{label} · бесплатная статья с обязательным входом", "expected": signed_in, "actual": actual})
+    if member:
+        for subscribed in (False, True):
+            actual = can_open_material(member, signed_in=True, course_plus=subscribed)
+            rows.append({"label": f"{'С' if subscribed else 'Без'} Курс+ · материал подписки",
+                         "expected": subscribed, "actual": actual})
+    if course:
+        for status, title, allowed in ((0, "Пробный доступ", False), (1, "Куплен", True), (2, "Через группу", True), (10, "Отозван", False)):
+            actual = can_open_lesson(course, {"trial": False, "closed": False}, signed_in=True, course_access=status)
+            rows.append({"label": f"{status} · {title} · обычный урок платного курса", "expected": allowed, "actual": actual})
+        for closed in (False, True):
+            actual = can_open_lesson(course, {"trial": True, "closed": closed}, signed_in=False)
+            rows.append({"label": "Гость · пробный урок платного курса" + (" · открытие отложено" if closed else ""),
+                         "expected": not closed, "actual": actual})
+    return rows
+
+
 def synthetic_paywall(catalog, rank):
     """Парные профили с одинаковым запросом и без покупок отдельных материалов."""
     members = [m for m in catalog if "Курс+" in m.subscriptions]
@@ -138,7 +165,7 @@ def synthetic_paywall(catalog, rank):
     unfiltered = {profile: top(catalog, profile) for cases in groups.values() for profile, _ in cases}
     rows, breakdown = [], {label: [] for label in groups}
     for subscribed, plan in ((False, "Без подписки"), (True, "С подпиской Курс+")):
-        candidates = entitled_catalog(catalog, subscribed)
+        candidates = entitled_catalog(catalog, subscribed, signed_in=True)
         allowed = {material.id for material in candidates}
         filtered = {profile: top(candidates, profile) for profile in unfiltered}
         for mode, orders in (("Подборка с учётом прав", filtered), ("Поиск по всем типам", unfiltered)):
@@ -163,7 +190,8 @@ def synthetic_paywall(catalog, rank):
             rows.append(summarize([case for cases in groups.values() for case in cases]))
             for label, cases in groups.items():
                 breakdown[label].append(summarize(cases))
-    return {"profiles": len(unfiltered), "course_plus": len(members), "rows": rows, "groups": breakdown}
+    return {"profiles": len(unfiltered), "course_plus": len(members), "rows": rows, "groups": breakdown,
+            "access_scenarios": access_scenarios(catalog)}
 
 
 def build_quality_report(

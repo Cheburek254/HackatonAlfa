@@ -21,15 +21,16 @@
 {% endmacro %}
 {% block admin_content %}
 <nav class="admin-section-links" aria-label="Наборы тестов">
-    <a href="#admin-evaluation">Сравнение ранжирования</a>
+    <a href="#admin-evaluation">Поиск по запросам</a>
+    <a href="#admin-stress">Прогноз следующего курса</a>
+    <a href="{{ url_for('admin.analytics') }}">CTR на сайте</a>
     {% if adaptive_comparisons %}<a href="#admin-adaptive">Проверки адаптивного BM25</a>{% endif %}
     <a href="#admin-catalog-quality">Качество каталога</a>
-    <a href="#admin-stress">Офлайн-проверки</a>
     <a href="#admin-learning">Сложные сценарии</a>
     <a href="#admin-paywall">Подписочные права</a>
 </nav>
 <section class="account-card" id="admin-evaluation" aria-labelledby="admin-evaluation-title">
-    <h2 id="admin-evaluation-title" class="account-section-title">Тесты рекомендаций</h2>
+    <h2 id="admin-evaluation-title" class="account-section-title">Тесты рекомендаций по размеченным запросам</h2>
     <p class="account-muted">{% if report_date %}Последнее тестирование · <strong>{{ report_date }}</strong>{% else %}Для текущего каталога пока нет сохранённых прогонов.{% endif %}</p>
     <p class="account-muted">Сохранённые прогоны сравнивают топ популярных курсов, персональный recommend и адаптивный гибрид с базовой долей BM25 {{ '%g' | format(100 * bm25_weight) }}%.</p>
     <p class="account-muted">Hit@3 и MRR@3 оценивают первое попадание. Precision@3 показывает долю подходящих карточек в тройке, nDCG@3 учитывает их позиции, MAP@3 усредняет точность на позициях попаданий.</p>

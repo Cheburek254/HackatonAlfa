@@ -14,7 +14,7 @@ class Material:
     description: str = ""
     topics: tuple[str, ...] = ()
     format: str | None = None
-    access: Literal["free", "paid", "unknown"] = "unknown"
+    access: Literal["free", "paid", "subscription", "unknown"] = "unknown"
     stages: tuple[str, ...] = ()
     industries: tuple[str, ...] = ()
     experience_levels: tuple[str, ...] = ()
@@ -26,6 +26,7 @@ class Material:
     authors: tuple[str, ...] = ()
     duration: str | None = None
     lesson_count: int | None = None
+    requires_login: bool = False
 
 
 @dataclass(frozen=True)

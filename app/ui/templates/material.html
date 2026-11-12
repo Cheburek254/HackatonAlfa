@@ -7,8 +7,8 @@
                 <p class="material-card-eyebrow">{{ material.format | upper if material.format else 'МАТЕРИАЛ' }}{% if material.duration %} · {{ material.duration | upper }}{% endif %}{% if material.lesson_count %} · {{ (material.lesson_count | format_lessons) | upper }}{% endif %}</p>
                 <h1 id="material-title" class="material-card-title">{{ material.title }}</h1>
                 {% if material.authors %}<p class="material-authors">Авторы · {{ material.authors | join(', ') }}</p>{% endif %}
-                {% if material.subscriptions %}<p class="tag paid">По подписке {{ material.subscriptions | join(', ') }}</p>{% endif %}
-                {% if access_required %}<p class="account-muted">Условия покупки или подписки можно проверить на Альфа-Курсе.</p>{% endif %}
+                <p class="tag{% if material_access_category(material) in ('paid', 'subscription') %} paid{% endif %}">{{ material_access_label(material) }}</p>
+                {% if access_required %}<p class="account-muted">Условия открытия можно проверить на Альфа-Курсе.</p>{% endif %}
                 {% if description_html %}
                 <div class="preview-description">{{ description_html | safe }}</div>
                 {% elif material.description %}
@@ -25,6 +25,7 @@
                             {% endif %}
                             <span class="lesson-title">{{ lesson.title }}</span>{% if lesson.type %} <small class="lesson-meta">· {{ lesson.type }}</small>{% endif %}
                             {% if lesson.trial %}<small class="lesson-trial"> · Пробный</small>{% endif %}
+                            {% if lesson.closed %}<small class="lesson-meta"> · {{ 'Откроется ' ~ lesson.opens_on if lesson.opens_on else 'Закрыт' }}</small>{% endif %}
                         </li>
                         {% endfor %}
                     </ol>
@@ -50,13 +51,7 @@
                             <p class="next-card-desc">{{ item.material.description | clean_text | truncate(110) }}</p>
                             {% endif %}
                             <div class="next-card-bottom">
-                                {% if item.material.subscriptions %}
-                                <span class="tag paid">По подписке Курс+</span>
-                                {% elif item.material.access == 'paid' %}
-                                <span class="tag paid">{{ '{:,.0f}'.format(item.material.cost).replace(',', ' ') ~ ' ₽' if item.material.cost is not none else 'Платно' }}</span>
-                                {% elif item.material.access == 'free' %}
-                                <span class="tag">Бесплатно</span>
-                                {% endif %}
+                                <span class="tag{% if material_access_category(item.material) in ('paid', 'subscription') %} paid{% endif %}">{{ material_access_label(item.material) }}</span>
                                 <span class="next-card-link-text">К материалу&nbsp;→</span>
                             </div>
                         </a>

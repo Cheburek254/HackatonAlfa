@@ -17,8 +17,8 @@
                         <h3>{{ material.title }}</h3>
                         <p class="daily-reason">{{ pick.reason }}</p>
                         {% if pick.published %}<time datetime="{{ pick.published.isoformat() }}">{{ pick.published.strftime('%d.%m.%Y') }}</time>{% endif %}
-                        {% if material.subscriptions or material.access == 'paid' %}
-                        <span class="daily-access">{{ 'По подписке ' ~ (material.subscriptions | join(', ')) if material.subscriptions else 'Платно' }}</span>
+                        {% if material.requires_login or material_access_category(material) != 'free' %}
+                        <span class="daily-access">{{ material_access_label(material) }}</span>
                         {% endif %}
                         <span class="daily-art" aria-hidden="true">
                             {% if covers.get(material.id) %}

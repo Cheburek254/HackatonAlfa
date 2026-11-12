@@ -1,5 +1,6 @@
 """Извлечение и нормализация каталога из PostgreSQL-бэкапа Альфа-Курса."""
 
+import argparse
 import json
 import re
 import sqlite3
@@ -8,11 +9,13 @@ import zlib
 from collections import defaultdict
 from pathlib import Path
 
+from app.catalog.editorial import editorial_links
 from app.catalog.lessons import store_lessons
 from app.catalog.publications import FILENAME, write_publications
 from app.catalog.subscriptions import subscription_memberships
 
 BASE_URL = "https://kurs.alfabank.ru"
+CONTENT_ACCESS = {"Открытый": "free", "Платный": "paid", "По подписке": "subscription", "Закрытый": "private"}
 
 
 def _read_int(buf: bytes, pos: int) -> tuple[int, int]:
@@ -277,13 +280,6 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
         if ent_id and a_name and a_name not in entity_authors[ent_id]:
             entity_authors[ent_id].append(a_name)
 
-    course_tariffs: dict[str, list[int]] = defaultdict(list)
-    for r in reader.load_rows("CourseTariffBindings"):
-        cid = r.get("CourseId")
-        cost = int(r["Cost"]) if r.get("Cost") and str(r["Cost"]).isdigit() else 0
-        if cid and cost > 0:
-            course_tariffs[cid].append(cost)
-
     def calc_pop(mid: str, table_rating: str | None = None) -> tuple[int, int, int, float | None, float]:
         starts = course_starts.get(mid, 0)
         comps = course_completions.get(mid, 0)
@@ -312,12 +308,11 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
             continue
         cost_val = int(r["Cost"]) if r.get("Cost") and str(r["Cost"]).lstrip("-").isdigit() else None
         ctype = course_types.get(r.get("TypeId") or "", "Открытый")
-        if (cost_val and cost_val > 0) or ctype in ("Платный", "По подписке") or mid in course_tariffs:
-            access = "paid"
-            if not cost_val and mid in course_tariffs:
-                cost_val = min(course_tariffs[mid])
-        else:
-            access = "free"
+        if CONTENT_ACCESS.get(ctype) == "private":
+            continue
+        access = "subscription" if CONTENT_ACCESS.get(ctype) == "subscription" else (
+            "paid" if cost_val is not None and cost_val > 0 else "free"
+        )
         slug = (r.get("Url") or mid).strip("/")
         url = slug if slug.startswith("http") else f"{BASE_URL}/courses/{slug}"
         title = (r.get("Title") or "").strip()
@@ -363,12 +358,15 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
         if not mid:
             continue
         subj = art_subjects.get(r.get("SubjectId") or "", "")
-        ctype = course_types.get(r.get("TypeId") or "", "Открытый")
-        access = "paid" if (r.get("IsClosed") == "t" or ctype in ("Платный", "По подписке")) else "free"
+        access = CONTENT_ACCESS.get(course_types.get(r.get("TypeId")), "unknown")
+        if access == "private":
+            continue
+        requires_login = access == "free" and r.get("IsClosed") == "t"
         slug = (r.get("Url") or mid).strip("/")
         url = slug if slug.startswith("http") else f"{BASE_URL}/articles/{slug}"
         title = (r.get("Title") or "").strip()
-        desc = (r.get("Description") or r.get("CardDescription") or r.get("DescriptionTag") or article_snippets.get(mid) or "").strip()
+        snippet = article_snippets.get(mid) if access == "free" and not requires_login else None
+        desc = (r.get("Description") or r.get("CardDescription") or r.get("DescriptionTag") or snippet or "").strip()
         raw_topics = _unique(([subj] if subj else []) + entity_topics.get(mid, []) + entity_tags.get(mid, []))
         topics = _infer_ui_topics(raw_topics, title, desc)
         exps, inds = _infer_industries(entity_industries.get(mid, []), topics, title, desc)
@@ -389,6 +387,7 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
             "description": desc,
             "url": url,
             "access": access,
+            "requires_login": requires_login,
             "cost": None,
             "authors": authors,
             "seller": "Альфа-Курс",
@@ -509,7 +508,9 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
             continue
         cost_val = int(r["Cost"]) if r.get("Cost") and str(r["Cost"]).lstrip("-").isdigit() else None
         ctype = course_types.get(r.get("TypeId") or "", "Открытый")
-        access = "paid" if ((cost_val and cost_val > 0) or r.get("IsClosed") == "t" or ctype in ("Платный", "По подписке")) else "free"
+        access = CONTENT_ACCESS.get(ctype, "unknown")
+        if access == "private":
+            continue
         slug = (r.get("Url") or mid).strip("/")
         url = slug if slug.startswith("http") else f"{BASE_URL}/podcasts/{slug}"
         title = (r.get("Title") or "").strip()
@@ -590,16 +591,7 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
     memberships = {mid: names for mid, names in subscription_memberships(reader).items() if mid in valid_ids}
     (out_dir / "subscriptions.json").write_text(json.dumps(memberships, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-    # Связи RecommendedItems (Id/CourseId <-> ItemId)
-    rec_links: dict[str, list[str]] = defaultdict(list)
-    for r in reader.load_rows("RecommendedItems"):
-        src_id = r.get("CourseId") or r.get("Id")
-        iid = r.get("ItemId")
-        if src_id in valid_ids and iid in valid_ids and src_id != iid:
-            if iid not in rec_links[src_id]:
-                rec_links[src_id].append(iid)
-            if src_id not in rec_links[iid]:
-                rec_links[iid].append(src_id)
+    rec_links = editorial_links(reader.load_rows("RecommendedItems"), {m["id"]: m["entity_type"] for m in materials})
 
     (out_dir / "recommended_links.json").write_text(
         json.dumps(rec_links, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -618,6 +610,7 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
             "topics": m["topics"],
             "format": m["format"],
             "access": m["access"],
+            "requires_login": m.get("requires_login", False),
             "stages": m["stages"],
             "industries": m["industries"],
             "experience_levels": m["experience_levels"],
@@ -660,12 +653,13 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
         completions_count INTEGER,
         ratings_count INTEGER,
         avg_rating REAL,
-        popularity_score REAL
+        popularity_score REAL,
+        requires_login INTEGER NOT NULL
     )
     """)
     for m in materials:
         cur.execute(
-            "INSERT INTO materials VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO materials VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 m["id"],
                 m["entity_type"],
@@ -689,6 +683,7 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
                 m["ratings_count"],
                 m["avg_rating"],
                 m["popularity_score"],
+                m.get("requires_login", False),
             ),
         )
     conn.commit()
@@ -701,5 +696,9 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
 
 if __name__ == "__main__":
     root = Path(__file__).resolve().parents[2] / "data"
-    stats = build_normalized_catalog(root / "alfa_course_hackathon.backup", root)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--backup", type=Path, default=root / "alfa_course_hackathon.backup")
+    parser.add_argument("--output", type=Path, default=root)
+    args = parser.parse_args()
+    stats = build_normalized_catalog(args.backup, args.output)
     print(f"Нормализация завершена: {stats['total']} материалов, {stats['links']} связей.")

@@ -84,14 +84,12 @@
                 {% if cards %}
                 <div class="card-grid" data-impression-url="{{ url_for('recommendation_impressions') }}" data-impression-csrf="{{ csrf_token() }}">
                     {% for material, item in cards %}
-                    {% set requires_access = not is_demo_catalog and material_access_category(material) not in available_access %}
+                    {% set requires_access = not is_demo_catalog and (material.requires_login or material_access_category(material) not in available_access) %}
                     <article class="card" id="result-card-{{ loop.index }}" data-material-id="{{ material.id }}" tabindex="-1">
                         <div class="card-cover cover-{{ loop.cycle(1, 2, 3) }}">
                             <div class="cover-labels">
                                 <span class="tag topic">{{ material.topics[0] | capitalize if material.topics else 'Материал' }}</span>
-                                {% if material.subscriptions %}<span class="tag paid">По подписке {{ material.subscriptions | join(', ') }}</span>
-                                {% elif material.access == 'paid' %}<span class="tag paid">{{ '{:,.0f}'.format(material.cost).replace(',', ' ') ~ ' ₽' if material.cost is not none else 'Платно' }}</span>
-                                {% elif material.access == 'free' %}<span class="tag">Бесплатно</span>{% endif %}
+                                <span class="tag{% if material_access_category(material) in ('paid', 'subscription') %} paid{% endif %}">{{ material_access_label(material) }}{% if material_access_category(material) == 'paid' and material.cost is not none %} · {{ '{:,.0f}'.format(material.cost).replace(',', ' ') }} ₽{% endif %}</span>
                             </div>
                             <div class="cover-art" aria-hidden="true"><span></span><span></span><span></span></div>
                             {% if covers.get(material.id) %}

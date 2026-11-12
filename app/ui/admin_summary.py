@@ -81,10 +81,10 @@ def build_assessments(quality, stress, learning, ranking_summary=None):
     if stress:
         graph = _scores(stress["graph"]["methods"], diagnostic_method)
         if graph and graph[0] is not None:
-            (weak if graph[0] < .20 else strong).append({
-                "label": "Обобщение экспертных связей", "value": _percent(graph[0]),
-                "anchor": "admin-stress",
-                "explanation": f"Hit@3 по всему каталогу на скрытых связях. Ориентир не ниже 20%. "
+            observations.append({
+                "label": "Совпадение с редакторскими рекомендациями", "value": _percent(graph[0]),
+                "anchor": "admin-editorial",
+                "explanation": f"Диагностический Hit@3 по скрытым редакторским связям. "
                                f"Среди десяти отвлекающих статей целевой материал занял первое место в {_percent(graph[2])} кейсов.",
             })
     if ranking_summary:

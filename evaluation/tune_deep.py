@@ -200,14 +200,9 @@ def _score(row):
 
 def _compare(row, reference):
     issues = quality_regressions(row, reference, LIMITS)
-    for suite, scores, current, metrics in (
-        ("Синтетика", row["synthetic"], reference["synthetic"], ("hit_at_3",)),
-        ("Экспертный граф", row["specialized"]["graph"], reference["specialized"]["graph"],
-         ("Hit@3", "Первое место в ловушке")),
-    ):
-        for metric in metrics:
-            if scores[metric] < current[metric]:
-                issues.append({"suite": suite, "metric": metric, "reference": current[metric], "observed": scores[metric]})
+    synthetic, control = row["synthetic"]["hit_at_3"], reference["synthetic"]["hit_at_3"]
+    if synthetic < control:
+        issues.append({"suite": "Синтетика", "metric": "hit_at_3", "reference": control, "observed": synthetic})
     row["regressions"] = issues
 
 

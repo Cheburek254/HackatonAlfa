@@ -6,6 +6,7 @@ from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
 
+from app.catalog.editorial import editorial_links
 from app.catalog.normalizer import PgDumpReader
 from app.contracts import InteractionEvent, Material
 
@@ -143,15 +144,11 @@ def read_quality_data(backup: Path, catalog: tuple[Material, ...], sample_size: 
         liked = frozenset(tag for rated, tags in likes[user] if rated < cutoff for tag in tags)
         replay.append(ReplayCase(history, completed, completed_lessons, liked))
 
-    expert = defaultdict(set)
     links = reader.load_rows("RecommendedItems")
-    for row in links:
-        source, target = row["CourseId"] or row["Id"], row["ItemId"]
-        if source in catalog_ids and target in catalog_ids and source != target:
-            expert[source].add(target)
+    expert = editorial_links(links, {m.id: m.entity_type for m in catalog})
     return QualityData(
         replay, len(candidates), {event.material_id for activity in events.values() for event in activity},
-        dict(topics), dict(expert), len(links),
+        dict(topics), {source: set(targets) for source, targets in expert.items()}, len(links),
         {mid: " ".join(blocks[mid])[:8000] for mid in catalog_ids if mid in blocks},
         sum(bool(row["SubscriptionId"]) for row in bindings if row["IsDeleted"] != "t"),
     )

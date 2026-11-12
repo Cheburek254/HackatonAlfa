@@ -4,7 +4,8 @@ from contextlib import closing
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from app.catalog.lessons import read_programs, store_lessons
+from app.catalog.lessons import can_open_lesson, program_availability, read_programs, store_lessons
+from app.contracts import Material
 
 
 class Reader:
@@ -23,7 +24,7 @@ class Reader:
             {"Id": "b2", "LessonId": "second", "Order": "2", "ParentGroupId": "group-link"},
             {"Id": "b1", "LessonId": "first", "Order": "1", "ParentGroupId": "module", "IsTrial": "t"},
             {"Id": "group-link", "LessonId": "module", "Order": "1"},
-            {"Id": "b3", "LessonId": "closed-module", "Order": "2", "IsClosed": "t"},
+            {"Id": "b3", "LessonId": "closed-module", "Order": "2", "IsClosed": "t", "ClosedUntil": "2099-01-02 00:00:00+00"},
             {"Id": "b4", "LessonId": "restricted", "Order": "1", "ParentGroupId": "closed-module"},
             {"Id": "bd", "LessonId": "draft-lesson", "CourseId": "draft", "Order": "1"},
             {"Id": "removed", "LessonId": "deleted", "Order": "4"},
@@ -43,4 +44,13 @@ class CourseLessonsTest(unittest.TestCase):
             programs = read_programs(path, {"published"})
             self.assertEqual(list(programs), ["published"])
             self.assertEqual([(item["section"], item["title"], item["trial"]) for item in programs["published"]],
-                             [("Модуль", "Введение", True), ("Модуль", "Практика", False)])
+                             [("Модуль", "Введение", True), ("Модуль", "Практика", False),
+                              ("Закрытый модуль", "Закрытый урок", False)])
+            first, regular, scheduled = program_availability(programs["published"])
+            course = Material("published", "Платный курс", "https://example.com/course", entity_type="course", access="paid")
+            self.assertTrue(can_open_lesson(course, first, signed_in=False))
+            self.assertFalse(can_open_lesson(course, regular, signed_in=False))
+            for status, allowed in ((0, False), (1, True), (2, True), (10, False)):
+                self.assertEqual(can_open_lesson(course, regular, signed_in=True, course_access=status), allowed)
+            self.assertEqual(scheduled["opens_on"], "02.01.2099")
+            self.assertFalse(can_open_lesson(course, scheduled, signed_in=True, course_access=1))

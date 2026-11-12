@@ -408,7 +408,8 @@ if (typeof materialPreview?.showModal === "function") {
             }
             section = lesson.section;
             item.append(lesson.title);
-            const badges = [lesson.type, lesson.trial ? "Пробный" : ""].filter(Boolean);
+            const availability = lesson.closed ? (lesson.opens_on ? `Откроется ${lesson.opens_on}` : "Закрыт") : "";
+            const badges = [lesson.type, lesson.trial ? "Пробный" : "", availability].filter(Boolean);
             if (badges.length) {
                 const meta = document.createElement("small");
                 meta.textContent = ` · ${badges.join(" · ")}`;
@@ -478,16 +479,8 @@ if (typeof materialPreview?.showModal === "function") {
             bottom.className = "next-card-bottom";
 
             const tag = document.createElement("span");
-            if (Array.isArray(item.subscriptions) && item.subscriptions.length > 0) {
-                tag.className = "tag paid";
-                tag.textContent = "По подписке Курс+";
-            } else if (item.access === "paid") {
-                tag.className = "tag paid";
-                tag.textContent = item.cost != null ? `${Number(item.cost).toLocaleString("ru-RU").replace(/\s/g, "\u202f")} ₽` : "Платно";
-            } else {
-                tag.className = "tag";
-                tag.textContent = "Бесплатно";
-            }
+            tag.className = item.access === "paid" || item.access === "subscription" || item.subscriptions?.length ? "tag paid" : "tag";
+            tag.textContent = item.access_label ?? "";
 
             const linkText = document.createElement("span");
             linkText.className = "next-card-link-text";
@@ -541,9 +534,9 @@ if (typeof materialPreview?.showModal === "function") {
             const authors = currentPreview.authors ?? [];
             previewAuthors.hidden = authors.length === 0;
             previewAuthors.textContent = authors.length ? `Авторы · ${authors.join(", ")}` : "";
-            const subscriptions = currentPreview.subscriptions ?? [];
-            previewSubscription.hidden = subscriptions.length === 0;
-            previewSubscription.textContent = subscriptions.length ? `По подписке ${subscriptions.join(", ")}` : "";
+            previewSubscription.hidden = !currentPreview.access_label;
+            previewSubscription.textContent = currentPreview.access_label ?? "";
+            previewSubscription.classList.toggle("paid", ["paid", "subscription"].includes(currentPreview.access_category));
             previewAccess.hidden = !currentPreview.access_required;
             previewDescription.innerHTML = currentPreview.description_html;
             renderProgram(currentPreview.lessons ?? []);

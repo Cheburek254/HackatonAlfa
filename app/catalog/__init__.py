@@ -53,9 +53,10 @@ def _read_records(path: Path) -> list[dict]:
         authors = "authors_json" if "authors_json" in columns else "'[]' AS authors_json"
         duration = "duration" if "duration" in columns else "NULL AS duration"
         lesson_count = "lesson_count" if "lesson_count" in columns else "NULL AS lesson_count"
+        requires_login = "requires_login" if "requires_login" in columns else "0 AS requires_login"
         rows = connection.execute(
             f"""SELECT id, title, url, description, format, access, cost, popularity_score, avg_rating, {entity_type}, {authors}, {duration}, {lesson_count},
-                      topics_json, stages_json, industries_json, experience_levels_json
+                      topics_json, stages_json, industries_json, experience_levels_json, {requires_login}
                FROM materials ORDER BY popularity_score DESC, rowid"""
         ).fetchall()
     records = [dict(row) for row in rows]
@@ -86,7 +87,7 @@ def load_catalog(path: Path | str | None = None) -> tuple[Material, ...]:
             raise ValueError(f"Каталог содержит повторяющиеся ID: {target}")
         seen_ids.add(mid)
         access_raw = record.get("access", "unknown")
-        access = access_raw if access_raw in ("free", "paid", "unknown") else "unknown"
+        access = access_raw if access_raw in ("free", "paid", "subscription", "unknown") else "unknown"
         authors = dict.fromkeys(name.strip() for name in (record.get("authors") or ()) if isinstance(name, str) and name.strip())
         raw_duration = record.get("duration")
         duration = str(raw_duration).strip() if raw_duration and str(raw_duration).strip() else None
@@ -114,6 +115,7 @@ def load_catalog(path: Path | str | None = None) -> tuple[Material, ...]:
                 authors=tuple(authors),
                 duration=duration,
                 lesson_count=lesson_count,
+                requires_login=bool(record.get("requires_login")),
             )
         )
     return tuple(materials)

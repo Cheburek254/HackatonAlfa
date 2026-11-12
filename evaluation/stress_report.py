@@ -38,7 +38,7 @@ def check_subscriptions(catalog, bm25_weight=0.0, *, bm25_field_weights=FIELD_WE
     rows = []
     profile = Profile(goal=target.title)
     for subscribed in (False, True):
-        candidates = {m.id: m for m in entitled_catalog(catalog, subscribed)}
+        candidates = {m.id: m for m in entitled_catalog(catalog, subscribed, signed_in=True)}
         result = recommend(tuple(candidates.values()), profile, (), 3, explain_with_llm=False,
                            use_expert_links=False, bm25_weight=bm25_weight, bm25_field_weights=bm25_field_weights,
                            bm25_length_penalty=bm25_length_penalty, bm25_saturation=bm25_saturation,

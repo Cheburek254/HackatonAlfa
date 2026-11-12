@@ -592,6 +592,23 @@ class WebFlowTest(unittest.TestCase):
             self.assertEqual(runner.invoke(args=["admin", "course-plus", "demo", "--revoke"]).exit_code, 0)
             self.assertTrue(client.get("/materials/paid-low", headers={"Accept": "application/json"}).json["access_required"])
 
+    def test_login_required_article_is_in_the_free_filter_and_retains_its_link(self):
+        catalog_dir = self.database_path.parent / "login-catalog"
+        catalog_dir.mkdir()
+        url = "https://kurs.alfabank.ru/articles/example"
+        (catalog_dir / "catalog.norm.json").write_text(json.dumps([{
+            "id": "login-article", "title": "Статья с входом", "url": url, "format": "статья",
+            "entity_type": "article", "access": "free", "requires_login": True,
+        }]), encoding="utf-8")
+        with patch.dict("os.environ", {"ALFA_CATALOG_DIR": str(catalog_dir)}):
+            client = create_app(database_path=self.database_path).test_client()
+        page = client.post("/", data={"access_filters_set": "1", "access_filter": "free"}).get_data(as_text=True)
+        self.assertIn("Нужен вход на Альфа-Курсе", page)
+        preview = client.get("/materials/login-article", headers={"Accept": "application/json"}).json
+        self.assertTrue(preview["access_required"])
+        self.assertEqual(preview["access_label"], "Нужен вход на Альфа-Курсе")
+        self.assertEqual(client.post(preview["open_url"], data={"csrf_token": preview["csrf_token"]}).location, url)
+
     def test_show_more_appends_six_sorted_cards_until_the_selection_ends(self):
         catalog = tuple(
             Material(f"item-{index}", f"Материал {index}", f"https://example.com/{index}", popularity=index)

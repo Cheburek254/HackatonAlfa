@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from app.catalog import load_catalog, load_history
+from app.catalog import catalog_data_dir, load_catalog, load_history
 from app.contracts import InteractionEvent, Material, Profile, Recommendation
 from app.recommender import recommend
 from app.recommender.engine import _expand_synonyms, _normalize_text, _tokenize_stems
@@ -16,7 +16,6 @@ class RecommenderTest(unittest.TestCase):
     def setUpClass(cls):
         root = Path(__file__).resolve().parents[2]
         cls.fixtures_dir = root / "fixtures"
-        cls.data_dir = root / "data"
         cls.catalog = load_catalog(cls.fixtures_dir / "catalog.demo.json")
         cls.history = load_history(cls.fixtures_dir / "history.demo.json")
 
@@ -229,7 +228,7 @@ class RecommenderTest(unittest.TestCase):
         self.assertNotIn("paid-course", returned_ids)
 
     def test_real_normalized_catalog_if_present(self):
-        norm_path = self.data_dir / "catalog.norm.json"
+        norm_path = catalog_data_dir() / "catalog.norm.json"
         if not norm_path.exists():
             self.skipTest("Нормализованный каталог ещё не сгенерирован в data/catalog.norm.json")
         real_cat = load_catalog(norm_path)

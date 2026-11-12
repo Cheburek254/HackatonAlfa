@@ -14,9 +14,9 @@ from flask import Flask, Response, abort, redirect, render_template, request, ur
 
 from app.catalog import DEMO_CATALOG_PATH, catalog_source, load_catalog, load_history
 from app.catalog import material_format as _format_key
-from app.catalog.lessons import read_programs
+from app.catalog.lessons import program_availability, read_programs
 from app.catalog.publications import load_publications
-from app.catalog.subscriptions import ACCESS_LABELS, access_category, available_access
+from app.catalog.subscriptions import ACCESS_LABELS, access_category, access_label, available_access, can_open_material
 from app.contracts import Material, Profile, RecommendationResult, Recommender
 from app.ctr_report import ORDER_LABELS
 from app.live_data import LiveDataProvider
@@ -317,6 +317,7 @@ def create_app(
     app.jinja_env.globals["chat_pages"] = CHAT_PAGES
     app.jinja_env.globals["material_format"] = _format_key
     app.jinja_env.globals["material_access_category"] = access_category
+    app.jinja_env.globals["material_access_label"] = access_label
     app.jinja_env.filters["clean_text"] = clean_plain_text
     app.jinja_env.filters["format_lessons"] = format_lessons
 
@@ -447,10 +448,11 @@ def create_app(
                 record_impressions((impression,), account, previewed_material=material_id)
         open_url = url_for("open_material", material_id=material_id, impression=impression)
         description_html = format_description_html(material.description)
-        lessons = programs.get(material_id, ())
+        lessons = program_availability(programs.get(material_id, ()))
         allowed_access = available_access(account and account["has_course_plus"]) if not is_demo_catalog else None
-        category = access_category(material)
-        access_required = allowed_access is not None and category in {"paid", "subscription"} and category not in allowed_access
+        access_required = not is_demo_catalog and not can_open_material(
+            material, signed_in=account is not None, course_plus=bool(account and account["has_course_plus"]),
+        )
         seen_ids = {event.material_id for event in recent_interactions(account)}
         for seen_param in request.args.getlist("seen"):
             seen_ids.update(part.strip() for part in seen_param.split(",") if part.strip())
@@ -467,6 +469,8 @@ def create_app(
                 "description_html": description_html,
                 "subscriptions": material.subscriptions,
                 "access_required": access_required,
+                "access_category": access_category(material),
+                "access_label": access_label(material),
                 "lessons": lessons,
                 "authors": material.authors,
                 "duration": material.duration,
@@ -484,6 +488,7 @@ def create_app(
                         "duration": item["material"].duration,
                         "description": clean_plain_text(item["material"].description or "")[:110],
                         "access": item["material"].access,
+                        "access_label": access_label(item["material"]),
                         "cost": item["material"].cost,
                         "subscriptions": item["material"].subscriptions,
                         "step_label": item["step_label"],
