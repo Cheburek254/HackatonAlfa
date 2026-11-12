@@ -1,0 +1,34 @@
+<section id="next-courses" class="daily-picks next-courses" aria-labelledby="next-courses-title">
+    <div class="wrap">
+        <div class="daily-picks-card">
+            <p class="eyebrow">НОВЫЕ ПРОГРАММЫ</p>
+            <div class="daily-heading">
+                <h2 id="next-courses-title">Следующий курс</h2>
+            </div>
+            <div class="daily-carousel">
+                <ul class="daily-track" id="next-courses-track" aria-label="Доступные курсы, которые вы ещё не начинали" tabindex="0">
+                {% for pick in next_courses %}
+                {% set material = pick.material %}
+                <li class="card daily-card daily-color-{{ ((loop.index0) % 3) + 1 }}" data-next-course-kind="course">
+                    <a class="material-link daily-tile-link" href="{{ url_for('material_page', material_id=material.id) }}" draggable="false">
+                        <span class="daily-type">Курс{% if material.lesson_count %} · {{ material.lesson_count }} ур.{% elif material.duration %} · {{ material.duration }}{% endif %}</span>
+                        <h3>{{ material.title }}</h3>
+                        <p class="daily-reason">{{ pick.reason }}</p>
+                        {% if material.requires_login or material_access_category(material) != 'free' %}
+                        <span class="daily-access">{{ material_access_label(material) }}</span>
+                        {% endif %}
+                        <span class="daily-art" aria-hidden="true">
+                            {% if covers.get(material.id) %}
+                            <img src="{{ covers[material.id] }}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">
+                            {% else %}
+                            <svg viewBox="0 0 44 44" fill="none"><path d="M8 15l14-7 14 7-14 7-14-7Z" fill="currentColor" opacity=".24"/><path d="M13 20v9c0 3 4 6 9 6s9-3 9-6v-9" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+                            {% endif %}
+                        </span>
+                    </a>
+                </li>
+                {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </div>
+</section>

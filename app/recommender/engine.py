@@ -656,7 +656,7 @@ def _adaptive_bm25_weight(base, profile, goal_norm, goal_clauses, recent_clicks,
     rare = rare_query_terms(tuple(catalog))
     for material in top_text:
         title_terms = _tokenize_stems(material.title)
-        headings, text_terms = material_text_terms(material.title, material.description, material.topics)
+        headings, text_terms = material_text_terms(material.title, material.description, material.topics, material.search_text)
         for terms in goal_clauses:
             title_hits = len(terms & title_terms)
             if title_hits >= 2 and title_hits * 3 >= len(terms) * 2:
@@ -668,6 +668,52 @@ def _adaptive_bm25_weight(base, profile, goal_norm, goal_clauses, recent_clicks,
             ):
                 return max(base, ADAPTIVE_BM25_WEIGHT)
     return base
+
+
+def _is_tool_material(mat: Material) -> bool:
+    fmt = _normalize_text(mat.format or "")
+    return mat.entity_type in {"document", "calculator"} or fmt in {"шаблон", "чек-лист", "калькулятор", "документ"}
+
+
+def _are_near_duplicates(left: Material, right: Material) -> bool:
+    if _is_tool_material(left) != _is_tool_material(right):
+        return False
+    t_left = _tokenize_stems(left.title) - ACTION_VERB_STEMS
+    t_right = _tokenize_stems(right.title) - ACTION_VERB_STEMS
+    t_union = t_left | t_right
+    t_shared = t_left & t_right
+    jaccard_title = (len(t_shared) / len(t_union)) if t_union else 0.0
+    if len(t_shared) >= 2 and jaccard_title >= 0.50:
+        return True
+    if not left.description.strip() or not right.description.strip():
+        return False
+    d_left = _tokenize_stems(f"{left.title} {left.description}") - ACTION_VERB_STEMS
+    d_right = _tokenize_stems(f"{right.title} {right.description}") - ACTION_VERB_STEMS
+    d_union = d_left | d_right
+    jaccard_desc = (len(d_left & d_right) / len(d_union)) if d_union else 0.0
+    return jaccard_desc >= 0.45 or (jaccard_title >= 0.35 and jaccard_desc >= 0.25)
+
+
+def _deduplicate_top(ordered: list[tuple[float, Material, dict]], limit: int) -> list[tuple[float, Material, dict]]:
+    window = min(limit, 3)
+    if window < 2 or len(ordered) <= 1:
+        return ordered
+    chosen: list[tuple[float, Material, dict]] = []
+    deferred: list[tuple[float, Material, dict]] = []
+    for row in ordered:
+        if len(chosen) >= window:
+            deferred.append(row)
+            continue
+        mat, sig = row[1], row[2]
+        dup_idx = next((i for i, prev in enumerate(chosen) if _are_near_duplicates(prev[1], mat)), None)
+        if dup_idx is None:
+            chosen.append(row)
+        elif sig.get("fmt_matched") and not chosen[dup_idx][2].get("fmt_matched"):
+            deferred.append(chosen[dup_idx])
+            chosen[dup_idx] = row
+        else:
+            deferred.append(row)
+    return chosen + deferred
 
 
 def recommend(
@@ -789,6 +835,7 @@ def recommend(
                 or (shared >= 2 and shared * 3 >= len(goal_details) * 2)
             )
         desc_stems = _tokenize_stems(mat.description)
+        search_stems = _tokenize_stems(mat.search_text) if mat.search_text else frozenset()
         topic_stems = _tokenize_stems(" ".join(mat.topics))
         ind_stems = _tokenize_stems(" ".join(mat.industries))
         all_mat_stems = title_stems | desc_stems | topic_stems | ind_stems
@@ -836,6 +883,11 @@ def recommend(
                     for t_norm, t_orig in topics_norm_map.items():
                         if _tokenize_stems(t_norm) & goal_stems:
                             signals["matched_goal_topics"].append(t_orig)
+
+            if search_stems:
+                extra_search_hits = len((content_goal_stems - title_stems - topic_stems - desc_stems) & search_stems)
+                if extra_search_hits:
+                    task_score += min(extra_search_hits * 1.8, 5.4)
 
             # Синонимическое расширение (полезный шаг по широкой/смежной теме)
             unmatched_syn_stems = goal_expanded_stems - goal_stems
@@ -931,19 +983,47 @@ def recommend(
         # Практические форматы и фильтрация утилитарных шаблонов
         actionable_bonus = 0.0
         is_template_mat = "шаблон" in fmt_norm or "документ" in fmt_norm or mat.format in ("шаблон", "документ")
+        is_calc_mat = mat.entity_type == "calculator"
+        is_doc_mat = mat.entity_type == "document"
+        is_calc_requested = any(
+            w in goal_norm
+            for w in (
+                "калькулятор", "рассчита", "посчита", "подсчита", "вычисл", "расчёт", "расчет",
+                "пересчита", "перевести одно в другое", "без ндс", "с налогом и без",
+                "выделить налог", "на руки", "фонд оплаты", "до вычета", "налоговая разбивк",
+                "марж", "рентабельност", "безубыточност", "окупаемост",
+            )
+        )
         is_doc_requested = any(
-            w in goal_norm for w in ("шаблон", "документ", "бланк", "форма", "акт", "журнал", "образец", "договор", "скачать", "таблиц", "файл")
+            w in goal_norm
+            for w in (
+                "шаблон", "документ", "бланк", "форма", "акт", "журнал", "образец", "договор",
+                "скачать", "таблиц", "файл", "заявлен", "приказ", "устав", "кудир",
+                "декларац", "ордер", "чек-лист", "чеклист", "памятк",
+            )
         ) or bool(profile.preferred_format and "шаблон" in _normalize_text(profile.preferred_format))
+        theory_to_practice = bool(PRACTICE_AFTER_THEORY.search(goal_norm))
+        practical_cue = any(
+            w in goal_norm
+            for w in ("что взять", "что заполн", "что оформ", "как вести", "как сверить", "как оформит", "как зафиксир", "какой документ", "какая форма")
+        )
+        theory_reads_count = sum(catalog_by_id[mid].entity_type in {"article", "lesson"} for mid in recent_clicks[:3])
 
         if task_score > 0 and ("шаблон" in fmt_norm or "чек-лист" in fmt_norm):
             if signals["goal_direct"] or st_matched or ind_matched or signals["history_continuation_from"]:
                 actionable_bonus += 1.2
 
-        if is_template_mat and not is_doc_requested and not signals["history_continuation_from"] and hist_score < 2:
-            # Понижаем утилитарные документы при общих запросах на обучение/рост
-            actionable_bonus -= 2.8
+        if is_calc_requested and is_calc_mat:
+            actionable_bonus += 18.0 if task_score > 0 else 4.0
+        elif is_doc_requested and is_doc_mat:
+            actionable_bonus += 5.0 if task_score >= 4.0 else 2.5
         elif is_doc_requested and is_template_mat:
             actionable_bonus += 3.5
+        elif (theory_to_practice or (theory_reads_count >= 2 and practical_cue)) and (is_doc_mat or is_calc_mat) and task_score > 0:
+            actionable_bonus += 4.5
+        elif is_template_mat and not is_doc_requested and not is_calc_requested and not theory_to_practice and not (theory_reads_count >= 2 and practical_cue) and not signals["history_continuation_from"] and hist_score < 2:
+            # Понижаем утилитарные документы при общих запросах на обучение/рост
+            actionable_bonus -= 2.8
 
         # Популярность как тай-брейкер при близкой полезности
         pop_raw = mat.popularity or 0.0
@@ -1034,6 +1114,7 @@ def recommend(
         if not beginner:
             paid_target += int(experienced or engaged or growing) + int(experienced and growing and engaged)
         ordered = balance_first_page(ordered, paid_target=paid_target, seen=set(seen_events))
+    ordered = _deduplicate_top(ordered, limit)
     selected = ordered[:limit]
 
     recommendations: list[Recommendation] = []

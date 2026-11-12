@@ -85,21 +85,22 @@ def tokens(text):
 
 
 @lru_cache(maxsize=8192)
-def material_text_terms(title, description, topics):
+def material_text_terms(title, description, topics, search_text=""):
     headings = frozenset(tokens(title)) | frozenset(tokens(" ".join(topics)))
-    return headings, headings | frozenset(tokens(description))
+    body = f"{description} {search_text}".strip() if search_text else description
+    return headings, headings | frozenset(tokens(body))
 
 
 @lru_cache(maxsize=12)
 def rare_query_terms(catalog):
     frequencies = Counter(term for material in catalog
-                          for term in material_text_terms(material.title, material.description, material.topics)[1])
+                          for term in material_text_terms(material.title, material.description, material.topics, material.search_text)[1])
     return frozenset(term for term, count in frequencies.items() if count <= max(2, len(catalog) // 10))
 
 
 def make_bm25(catalog, *, field_weights=FIELD_WEIGHTS, length_penalty=B, saturation=K1):
     indexes = []
-    for field, weight in zip((lambda m: m.title, lambda m: m.description, lambda m: " ".join(m.topics)),
+    for field, weight in zip((lambda m: m.title, lambda m: f"{m.description} {m.search_text}".strip() if m.search_text else m.description, lambda m: " ".join(m.topics)),
                              field_weights, strict=True):
         if not weight:
             continue

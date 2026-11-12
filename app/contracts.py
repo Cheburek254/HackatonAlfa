@@ -27,6 +27,8 @@ class Material:
     duration: str | None = None
     lesson_count: int | None = None
     requires_login: bool = False
+    search_text: str = ""
+    recent_popularity: float | None = None
 
 
 @dataclass(frozen=True)

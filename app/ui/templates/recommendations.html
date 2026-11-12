@@ -56,6 +56,9 @@
             </div>
         </section>
 
+        {% if next_courses %}
+        {% include "next_courses.html" %}
+        {% endif %}
         <p id="recommendation-status" class="wrap recommendation-status" role="status"></p>
         {% include "recommendations_results.html" %}
 {% endblock %}

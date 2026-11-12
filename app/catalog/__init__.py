@@ -54,9 +54,11 @@ def _read_records(path: Path) -> list[dict]:
         duration = "duration" if "duration" in columns else "NULL AS duration"
         lesson_count = "lesson_count" if "lesson_count" in columns else "NULL AS lesson_count"
         requires_login = "requires_login" if "requires_login" in columns else "0 AS requires_login"
+        search_text = "search_text" if "search_text" in columns else "'' AS search_text"
+        recent_popularity = "recent_popularity_score" if "recent_popularity_score" in columns else "NULL AS recent_popularity_score"
         rows = connection.execute(
             f"""SELECT id, title, url, description, format, access, cost, popularity_score, avg_rating, {entity_type}, {authors}, {duration}, {lesson_count},
-                      topics_json, stages_json, industries_json, experience_levels_json, {requires_login}
+                      topics_json, stages_json, industries_json, experience_levels_json, {requires_login}, {search_text}, {recent_popularity}
                FROM materials ORDER BY popularity_score DESC, rowid"""
         ).fetchall()
     records = [dict(row) for row in rows]
@@ -116,6 +118,8 @@ def load_catalog(path: Path | str | None = None) -> tuple[Material, ...]:
                 duration=duration,
                 lesson_count=lesson_count,
                 requires_login=bool(record.get("requires_login")),
+                search_text=str(record.get("search_text", "") or "").strip(),
+                recent_popularity=_optional_metric(record.get("recent_popularity", record.get("recent_popularity_score"))),
             )
         )
     return tuple(materials)

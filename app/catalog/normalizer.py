@@ -1,12 +1,14 @@
 """Извлечение и нормализация каталога из PostgreSQL-бэкапа Альфа-Курса."""
 
 import argparse
+import html
 import json
 import re
 import sqlite3
 import struct
 import zlib
 from collections import defaultdict
+from datetime import date
 from pathlib import Path
 
 from app.catalog.editorial import editorial_links
@@ -204,14 +206,30 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
     # Популярность из CourseUserBindings и UserRatings
     course_starts: dict[str, int] = defaultdict(int)
     course_completions: dict[str, int] = defaultdict(int)
+    course_binding_events: list[tuple[str, date, bool]] = []
     for r in reader.load_rows("CourseUserBindings"):
         if r.get("IsDeleted") == "t":
             continue
         cid = r.get("CourseId")
         if cid:
             course_starts[cid] += 1
-            if r.get("IsCompleted") == "t":
+            completed = r.get("IsCompleted") == "t"
+            if completed:
                 course_completions[cid] += 1
+            raw_date = (r.get("StudyingStartDate") or r.get("Created") or "")[:10]
+            try:
+                if len(raw_date) == 10:
+                    course_binding_events.append((cid, date.fromisoformat(raw_date), completed))
+            except ValueError:
+                pass
+
+    recent_course_popularity: dict[str, float] = defaultdict(float)
+    if course_binding_events:
+        latest_course_dt = max(dt for _, dt, _ in course_binding_events)
+        for cid, dt, completed in course_binding_events:
+            age_days = max(0, (latest_course_dt - dt).days)
+            recent_course_popularity[cid] += (3.0 if completed else 1.0) * (2.0 ** (-age_days / 45.0))
+        recent_course_popularity = {cid: round(score, 2) for cid, score in recent_course_popularity.items()}
 
     entity_ratings: dict[str, list[int]] = defaultdict(list)
     for r in reader.load_rows("UserRatings"):
@@ -230,6 +248,21 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
             clean = re.sub(r"\s+", " ", clean).strip()
             if len(clean) > 30:
                 article_snippets[aid] = clean[:240].rstrip(" ,.;:") + "..."
+
+    doc_embed_chunks: dict[str, list[tuple[int, str]]] = defaultdict(list)
+    for r in reader.load_rows("DocumentEmbedItems"):
+        did = r.get("DocumentId")
+        raw_html = r.get("HtmlContent") or ""
+        if did and raw_html:
+            clean = html.unescape(re.sub(r"<[^>]+>", " ", raw_html))
+            clean = re.sub(r"\s+", " ", clean).strip()
+            if clean:
+                order_val = int(r["Order"]) if (r.get("Order") or "").lstrip("-").isdigit() else 0
+                doc_embed_chunks[did].append((order_val, clean))
+    doc_search_texts = {
+        did: " ".join(text for _, text in sorted(chunks, key=lambda item: item[0]))
+        for did, chunks in doc_embed_chunks.items()
+    }
 
     cs_rows = reader.load_rows("ContentSettings")
     cs_to_entity = {r["Id"]: r["EntityId"] for r in cs_rows if r.get("IsDeleted") != "t" and r.get("Id") and r.get("EntityId")}
@@ -329,6 +362,7 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
             "format_detail": f"Курс ({ctype})",
             "title": title,
             "description": desc,
+            "search_text": doc_search_texts.get(mid, ""),
             "url": url,
             "access": access,
             "cost": cost_val,
@@ -345,6 +379,7 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
             "ratings_count": r_count,
             "avg_rating": avg_r,
             "popularity_score": pop_score,
+            "recent_popularity_score": recent_course_popularity.get(mid, 0.0),
         })
 
     # 2. Articles
@@ -385,6 +420,7 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
             "format_detail": "Чек-лист / Статья" if fmt == "чек-лист" else "Статья",
             "title": title,
             "description": desc,
+            "search_text": doc_search_texts.get(mid, ""),
             "url": url,
             "access": access,
             "requires_login": requires_login,
@@ -402,6 +438,7 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
             "ratings_count": r_count,
             "avg_rating": avg_r,
             "popularity_score": pop_score,
+            "recent_popularity_score": recent_course_popularity.get(mid, 0.0),
         })
 
     # 3. Documents
@@ -432,6 +469,7 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
             "format_detail": f"Шаблон ({r.get('Extension') or 'документ'})",
             "title": title,
             "description": desc,
+            "search_text": doc_search_texts.get(mid, ""),
             "url": url,
             "access": "free",
             "cost": None,
@@ -448,6 +486,7 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
             "ratings_count": r_count,
             "avg_rating": avg_r,
             "popularity_score": pop_score,
+            "recent_popularity_score": recent_course_popularity.get(mid, 0.0),
         })
 
     # 4. Webinars
@@ -478,6 +517,7 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
             "format_detail": "Вебинар",
             "title": title,
             "description": desc,
+            "search_text": doc_search_texts.get(mid, ""),
             "url": url,
             "access": access,
             "cost": None,
@@ -494,6 +534,7 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
             "ratings_count": r_count,
             "avg_rating": avg_r,
             "popularity_score": pop_score,
+            "recent_popularity_score": recent_course_popularity.get(mid, 0.0),
         })
 
     # 5. Podcasts
@@ -527,6 +568,7 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
             "format_detail": "Подкаст",
             "title": title,
             "description": desc,
+            "search_text": doc_search_texts.get(mid, ""),
             "url": url,
             "access": access,
             "cost": cost_val,
@@ -543,6 +585,7 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
             "ratings_count": r_count,
             "avg_rating": avg_r,
             "popularity_score": pop_score,
+            "recent_popularity_score": recent_course_popularity.get(mid, 0.0),
         })
 
     # 6. Calculators
@@ -568,6 +611,7 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
             "format_detail": "Калькулятор",
             "title": title,
             "description": desc,
+            "search_text": doc_search_texts.get(mid, ""),
             "url": url,
             "access": "free",
             "cost": None,
@@ -584,6 +628,7 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
             "ratings_count": r_count,
             "avg_rating": avg_r,
             "popularity_score": pop_score,
+            "recent_popularity_score": recent_course_popularity.get(mid, 0.0),
         })
 
     materials.sort(key=lambda m: m["popularity_score"], reverse=True)
@@ -607,6 +652,7 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
             "title": m["title"],
             "url": m["url"],
             "description": m["description"],
+            "search_text": m.get("search_text", ""),
             "topics": m["topics"],
             "format": m["format"],
             "access": m["access"],
@@ -616,6 +662,7 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
             "experience_levels": m["experience_levels"],
             "authors": m["authors"],
             "popularity": m["popularity_score"],
+            "recent_popularity": m.get("recent_popularity_score"),
             "rating": m["avg_rating"],
             "cost": m["cost"],
         }
@@ -654,12 +701,14 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
         ratings_count INTEGER,
         avg_rating REAL,
         popularity_score REAL,
-        requires_login INTEGER NOT NULL
+        requires_login INTEGER NOT NULL,
+        search_text TEXT,
+        recent_popularity_score REAL
     )
     """)
     for m in materials:
         cur.execute(
-            "INSERT INTO materials VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO materials VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 m["id"],
                 m["entity_type"],
@@ -684,6 +733,8 @@ def build_normalized_catalog(backup_path: Path, out_dir: Path) -> dict[str, int]
                 m["avg_rating"],
                 m["popularity_score"],
                 m.get("requires_login", False),
+                m.get("search_text", ""),
+                m.get("recent_popularity_score"),
             ),
         )
     conn.commit()

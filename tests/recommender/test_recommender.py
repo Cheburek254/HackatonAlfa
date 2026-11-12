@@ -297,6 +297,57 @@ class RecommenderTest(unittest.TestCase):
         self.assertEqual(jumped[6:], cards[6:])
         self.assertEqual(len({material.id for material, _ in reranked}), len(cards))
 
+    def test_search_text_and_format_boost_surface_templates_and_calculators(self):
+        catalog = (
+            Material("art", "Статья о налогах", "https://example.com/art",
+                     description="Общий обзор налогов и отчётности.", entity_type="article", format="статья"),
+            Material("doc", "Акт сверки расчётов", "https://example.com/doc",
+                     description="Первичный документ для бизнеса.", entity_type="document", format="шаблон",
+                     search_text="Бланк акта сверки взаиморасчётов с контрагентом."),
+            Material("calc", "Калькулятор маржи", "https://example.com/calc",
+                     description="Помогает рассчитать маржинальность и наценку.", entity_type="calculator", format="шаблон"),
+        )
+        doc_res = recommend(catalog, Profile(goal="дай бланк акта сверки"), (), 3, explain_with_llm=False, bm25_weight=0.25)
+        self.assertEqual(doc_res.items[0].material_id, "doc")
+        calc_res = recommend(catalog, Profile(goal="помоги рассчитать маржу"), (), 3, explain_with_llm=False, bm25_weight=0.25)
+        self.assertEqual(calc_res.items[0].material_id, "calc")
+
+    def test_deduplicate_top_keeps_explanation_and_tool_but_drops_same_role_duplicate(self):
+        catalog = (
+            Material("art-1", "Производственный календарь на ноябрь 2025 года", "https://example.com/a1",
+                     description="Рабочие и выходные дни в ноябре.", entity_type="article", format="статья", popularity=100),
+            Material("art-2", "Производственный календарь на декабрь 2025 года", "https://example.com/a2",
+                     description="Рабочие и выходные дни в декабре.", entity_type="article", format="статья", popularity=90),
+            Material("doc-1", "Производственный календарь: табель", "https://example.com/d1",
+                     description="Рабочие и выходные дни для табеля.", entity_type="document", format="шаблон", popularity=80),
+            Material("art-3", "График отпусков и рабочие дни", "https://example.com/a3",
+                     description="Как учитывать рабочие дни в графике отпусков.", entity_type="article", format="статья", popularity=70),
+        )
+        res = recommend(catalog, Profile(goal="Производственный календарь рабочие дни"), (), 3, explain_with_llm=False)
+        ids = [item.material_id for item in res.items]
+        self.assertIn("art-1", ids)
+        self.assertIn("doc-1", ids)
+        self.assertNotIn("art-2", ids)
+
+    def test_next_course_picks_filters_started_and_inaccessible_and_sorts_by_recent_popularity(self):
+        from app.recommender.next_courses import next_course_picks
+
+        catalog = (
+            Material("c-started", "Уже начатый курс", "https://example.com/c0",
+                     entity_type="course", format="курс", access="free", popularity=900, recent_popularity=99.0),
+            Material("c-paid", "Платный курс", "https://example.com/cp",
+                     entity_type="course", format="курс", access="paid", popularity=800, recent_popularity=90.0),
+            Material("art-top", "Статья с высокой популярностью", "https://example.com/a",
+                     entity_type="article", format="статья", access="free", popularity=999, recent_popularity=95.0),
+            Material("c-old-hit", "Старый хит", "https://example.com/c1",
+                     entity_type="course", format="курс", access="free", popularity=500, recent_popularity=12.0),
+            Material("c-new-hit", "Свежий популярный курс", "https://example.com/c2",
+                     entity_type="course", format="курс", access="free", popularity=120, recent_popularity=45.0),
+        )
+        history = (InteractionEvent("c-started", "click"),)
+        picks = next_course_picks(catalog, history, ("free", "unknown"), limit=6)
+        self.assertEqual([p.material.id for p in picks], ["c-new-hit", "c-old-hit"])
+
 
 if __name__ == "__main__":
     unittest.main()

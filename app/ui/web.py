@@ -36,6 +36,7 @@ from app.ui.password_recovery import smtp_code_sender
 from app.recommender import recommend
 from app.recommender.baseline import recommend_popular_courses
 from app.recommender.daily import daily_picks
+from app.recommender.next_courses import next_course_picks
 from app.recommender.hybrid import cached_bm25, configured_bm25_weight
 from app.recommender.runtime import rank_catalog_pages
 from evaluation.catalog_quality import REPORT_NAME, catalog_fingerprint
@@ -659,6 +660,7 @@ def create_app(
         is_fragment = request.headers.get("X-Recommendation-Fragment") == "1"
         daily = daily_picks(materials_by_id, profile, history, publication_dates, available,
                             now=now, links_directory=source.parent) if request.method == "GET" and format_filter == "all" and not is_fragment else {}
+        next_courses = next_course_picks(catalog, history, available) if request.method == "GET" and format_filter == "all" and not is_fragment else ()
         return render_template(
             "recommendations_results.html" if is_fragment else "recommendations.html",
             profile=profile,
@@ -667,6 +669,7 @@ def create_app(
             show_profile_details=use_sample_history or (not skip_profile and values != stored_profile),
             quick_goals=QUICK_GOALS,
             daily=daily,
+            next_courses=next_courses,
             goal_max_length=GOAL_MAX_LENGTH,
             allow_sample_history=allow_sample_history,
             use_sample_history=use_sample_history,
