@@ -1133,3 +1133,31 @@ class WebFlowTest(unittest.TestCase):
         activated = self.client.get("/profile").get_data(as_text=True)
         self.assertIn("Подписка Курс+ активна", activated)
         self.assertNotIn(">Активировать Курс+<", activated)
+
+    def test_next_courses_declines_lesson_counts_without_abbreviation(self):
+        directory = self.database_path.parent / "next-courses-catalog"
+        directory.mkdir()
+        records = [
+            {"id": "course-1", "title": "Курс 1", "url": "https://example.com/c1",
+             "entity_type": "course", "format": "курс", "access": "free", "lesson_count": 1},
+            {"id": "course-4", "title": "Курс 4", "url": "https://example.com/c4",
+             "entity_type": "course", "format": "курс", "access": "free", "lesson_count": 4},
+            {"id": "course-5", "title": "Курс 5", "url": "https://example.com/c5",
+             "entity_type": "course", "format": "курс", "access": "free", "lesson_count": 5},
+            {"id": "course-12", "title": "Курс 12", "url": "https://example.com/c12",
+             "entity_type": "course", "format": "курс", "access": "free", "lesson_count": 12},
+            {"id": "course-duration", "title": "Курс без счётчика", "url": "https://example.com/cd",
+             "entity_type": "course", "format": "курс", "access": "free", "duration": "2 часа"},
+        ]
+        (directory / "catalog.norm.json").write_text(json.dumps(records), encoding="utf-8")
+        with patch.dict("os.environ", {"ALFA_CATALOG_DIR": str(directory)}):
+            client = create_app(database_path=self.database_path).test_client()
+
+        home = client.get("/").get_data(as_text=True)
+        section = home.split('id="next-courses"', 1)[1].split("</section>", 1)[0]
+        self.assertIn("Курс · 1 урок", section)
+        self.assertIn("Курс · 4 урока", section)
+        self.assertIn("Курс · 5 уроков", section)
+        self.assertIn("Курс · 12 уроков", section)
+        self.assertIn("Курс · 2 часа", section)
+        self.assertNotIn("ур.", section)

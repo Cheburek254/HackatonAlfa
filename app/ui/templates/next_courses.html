@@ -11,7 +11,7 @@
                 {% set material = pick.material %}
                 <li class="card daily-card daily-color-{{ ((loop.index0) % 3) + 1 }}" data-next-course-kind="course">
                     <a class="material-link daily-tile-link" href="{{ url_for('material_page', material_id=material.id) }}" draggable="false">
-                        <span class="daily-type">Курс{% if material.lesson_count %} · {{ material.lesson_count }} ур.{% elif material.duration %} · {{ material.duration }}{% endif %}</span>
+                        <span class="daily-type">Курс{% if material.lesson_count %} · {{ material.lesson_count | format_lessons }}{% elif material.duration %} · {{ material.duration }}{% endif %}</span>
                         <h3>{{ material.title }}</h3>
                         <p class="daily-reason">{{ pick.reason }}</p>
                         {% if material.requires_login or material_access_category(material) != 'free' %}
