@@ -9,7 +9,7 @@ from flask import session
 
 from app.contracts import InteractionEvent, Material, Profile
 from app.recommender import RANKING_MODES
-from app.recommender.engine import _normalize_text
+from app.recommender.engine import _affinity_index, _normalize_text
 from app.ui.accounts import PROFILE_FIELDS, profile_values
 
 SESSION_KEY = "jury_lab"
@@ -219,13 +219,65 @@ def _material_topic_score(material: Material, topic: str, preferred_kind: str | 
     )
 
 
+def _coherent_ids_for(catalog: Sequence[Material], anchor: Material) -> set[str]:
+    titles, topics, title_weights, topic_weights = _affinity_index(
+        tuple((mat.id, mat.title, mat.topics) for mat in catalog)
+    )
+    small_catalog = len(catalog) <= 20
+    a_titles, a_topics = titles[anchor.id], topics[anchor.id]
+    coherent: set[str] = set()
+    for mat in catalog:
+        if mat.id == anchor.id:
+            continue
+        shared_titles = a_titles & titles[mat.id]
+        shared_topics = a_topics & topics[mat.id]
+        if small_catalog:
+            matched = bool(shared_topics or shared_titles)
+        else:
+            matched = (
+                any(title_weights.get(term, 0.0) >= 3 for term in shared_titles)
+                or any(topic_weights.get(topic_name, 0.0) >= 2.35 for topic_name in shared_topics)
+            )
+        if matched:
+            coherent.add(mat.id)
+    return coherent
+
+
+def _find_anchor_click(
+    rows: Sequence[Sequence[Any]], catalog_by_id: dict[str, Material], topic: str, kind: str,
+) -> Material | None:
+    if kind != "click":
+        return None
+    for mid, row_kind, _ in reversed(rows):
+        if row_kind == "click" and mid in catalog_by_id:
+            candidate = catalog_by_id[mid]
+            if _material_topic_score(candidate, topic, None)[0] >= 6:
+                return candidate
+    return None
+
+
 def _pick_material_for_topic(
-    catalog: Sequence[Material], topic: str, *, exclude_ids: set[str], preferred_kind: str | None = None,
+    catalog: Sequence[Material],
+    topic: str,
+    *,
+    exclude_ids: set[str],
+    preferred_kind: str | None = None,
+    anchor_material: Material | None = None,
 ) -> Material | None:
     if not catalog:
         return None
     pool = [mat for mat in catalog if mat.id not in exclude_ids] or list(catalog)
-    return max(pool, key=lambda mat: _material_topic_score(mat, topic, preferred_kind))
+    coherent_ids = _coherent_ids_for(catalog, anchor_material) if anchor_material is not None else set()
+
+    def sort_key(mat: Material) -> tuple[int, int, int, int, int, int, str]:
+        base = _material_topic_score(mat, topic, preferred_kind)
+        if not coherent_ids:
+            return (0, 0, *base)
+        in_topic_coherent = 1 if (mat.id in coherent_ids and base[0] > 0) else 0
+        free_generic = base[1] if not preferred_kind else 0
+        return (in_topic_coherent, free_generic, *base)
+
+    return max(pool, key=sort_key)
 
 
 def _events_from_rows(rows: list[list[Any]]) -> tuple[InteractionEvent, ...]:
@@ -340,8 +392,12 @@ def apply_jury_action(form: Any, catalog: Sequence[Material], *, goal_max_length
         state["history"] = []
         base_ts = int(time()) - len(preset["history_specs"]) * 120
         used_ids: set[str] = set()
+        catalog_by_id = {mat.id: mat for mat in catalog}
         for idx, (topic, kind, preferred_kind) in enumerate(preset["history_specs"]):
-            picked = _pick_material_for_topic(catalog, topic, exclude_ids=used_ids, preferred_kind=preferred_kind)
+            anchor = _find_anchor_click(state["history"], catalog_by_id, topic, kind)
+            picked = _pick_material_for_topic(
+                catalog, topic, exclude_ids=used_ids, preferred_kind=preferred_kind, anchor_material=anchor,
+            )
             if picked is not None:
                 used_ids.add(picked.id)
                 state["history"].append([picked.id, kind, base_ts + idx * 60])
@@ -352,7 +408,11 @@ def apply_jury_action(form: Any, catalog: Sequence[Material], *, goal_max_length
             return False, False
         _, topic, kind, preferred_kind = spec
         exclude_ids = {row[0] for row in state["history"] if row[1] == kind}
-        picked = _pick_material_for_topic(catalog, topic, exclude_ids=exclude_ids, preferred_kind=preferred_kind)
+        catalog_by_id = {mat.id: mat for mat in catalog}
+        anchor = _find_anchor_click(state["history"], catalog_by_id, topic, kind)
+        picked = _pick_material_for_topic(
+            catalog, topic, exclude_ids=exclude_ids, preferred_kind=preferred_kind, anchor_material=anchor,
+        )
         if picked is not None:
             state["history_active"] = True
             state["history"].append([picked.id, kind, int(time())])

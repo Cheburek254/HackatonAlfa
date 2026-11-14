@@ -1312,3 +1312,44 @@ class WebFlowTest(unittest.TestCase):
         self.assertIn("Режим по умолчанию", reset_html)
         with client.session_transaction() as browser_session:
             self.assertNotIn("jury_lab", browser_session)
+
+    def test_jury_lab_coherent_pair_selection_on_large_catalog(self):
+        directory = self.database_path.parent / "jury-lab-large-catalog"
+        directory.mkdir()
+        records = [
+            {"id": f"mkt-filler-{idx}", "title": f"Заметка номер {idx} без пересечений",
+             "url": f"https://example.com/mf/{idx}", "entity_type": "article", "format": "статья",
+             "topics": ["маркетинг"], "access": "free", "popularity": 400 + idx}
+            for idx in range(34)
+        ] + [
+            {"id": "mkt-anchor", "title": "Где брать клиентов: продвижение в интернете",
+             "url": "https://example.com/ma", "entity_type": "article", "format": "статья",
+             "topics": ["маркетинг", "Продвижение продукта"], "access": "free", "popularity": 950},
+            {"id": "mkt-peer", "title": "Стратегия продвижения и привлечения трафика",
+             "url": "https://example.com/mp", "entity_type": "article", "format": "статья",
+             "topics": ["маркетинг", "Продвижение продукта"], "access": "free", "popularity": 120},
+            {"id": "mkt-next-1", "title": "Практика продвижения карточек товаров",
+             "url": "https://example.com/mn1", "entity_type": "template", "format": "шаблон",
+             "topics": ["маркетинг", "Продвижение продукта"], "access": "free", "popularity": 100},
+            {"id": "mkt-next-2", "title": "Чек-лист продвижения нового продукта",
+             "url": "https://example.com/mn2", "entity_type": "checklist", "format": "чек-лист",
+             "topics": ["маркетинг", "Продвижение продукта"], "access": "free", "popularity": 90},
+            {"id": "other-ops-1", "title": "Планирование работы цеха", "url": "https://example.com/oo1",
+             "entity_type": "article", "format": "статья", "topics": ["операционная работа"], "access": "free", "popularity": 300},
+            {"id": "other-fin-1", "title": "Финансовый календарь предпринимателя", "url": "https://example.com/of1",
+             "entity_type": "article", "format": "статья", "topics": ["финансы"], "access": "free", "popularity": 300},
+            {"id": "other-team-1", "title": "Поиск первого менеджера", "url": "https://example.com/ot1",
+             "entity_type": "article", "format": "статья", "topics": ["управление командой"], "access": "free", "popularity": 300},
+        ]
+        (directory / "catalog.norm.json").write_text(json.dumps(records), encoding="utf-8")
+        with patch.dict("os.environ", {"ALFA_CATALOG_DIR": str(directory)}):
+            client = create_app(database_path=self.database_path).test_client()
+
+        client.get("/")
+        with client.session_transaction() as browser_session:
+            token = browser_session["csrf"]
+
+        ctx_html = client.post("/demo-lab", data={
+            "csrf_token": token, "lab_action": "apply_preset", "preset_id": "history_context",
+        }, headers={"X-Jury-Panel": "1"}).get_data(as_text=True)
+        self.assertIn("Продолжение 2 недавних переходов", ctx_html)
