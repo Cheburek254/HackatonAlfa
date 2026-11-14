@@ -1679,7 +1679,7 @@ button.is-loading {
 }
 
 /* ==========================================================================
-   Пульт жюри (плавающий оверлей поверх страницы, не сжимающий контент)
+   Пульт жюри (справа поверх полноширинных фонов со сдвигом контента на десктопе)
    ========================================================================== */
 .hero-content .profile[open] {
     padding: 12px 14px;
@@ -2178,6 +2178,44 @@ button.is-loading {
 }
 .jury-reopen-btn:hover {
     background: var(--button);
+}
+
+@media (min-width: 1120px) {
+    body .hero,
+    body .daily-picks,
+    body .recommendation-status-band,
+    body .results,
+    body .site-footer {
+        transition: padding-right 180ms ease;
+    }
+    body:has(#jury-panel:not([hidden])) .hero,
+    body:has(#jury-panel:not([hidden])) .daily-picks,
+    body:has(#jury-panel:not([hidden])) .recommendation-status-band,
+    body:has(#jury-panel:not([hidden])) .results,
+    body:has(#jury-panel:not([hidden])) .site-footer {
+        padding-right: 384px;
+    }
+}
+
+@media (min-width: 1120px) and (max-width: 1380px) {
+    body:has(#jury-panel:not([hidden])) .hero-layout {
+        grid-template-columns: minmax(0, 1.55fr) minmax(0, .72fr);
+    }
+    body:has(#jury-panel:not([hidden])) .card-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    body:has(#jury-panel:not([hidden])) .profile-fields {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (min-width: 1120px) and (max-width: 1239px) {
+    body:has(#jury-panel:not([hidden])) .hero-layout {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    body:has(#jury-panel:not([hidden])) .hero-art {
+        display: none;
+    }
 }
 
 @media (max-width: 720px) {
