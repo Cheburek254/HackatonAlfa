@@ -32,12 +32,17 @@ from app.ui.avatars import AVATAR_MAX_BYTES, AVATAR_MAX_MB, prepare_avatar
 from app.ui.descriptions import clean_plain_text, format_description_html
 from app.ui.experiments import experiment_variant, track_experiment_activity
 from app.ui.impressions import issue_impression_tickets, record_impressions
+from app.ui.jury_lab import (
+    apply_jury_action, build_jury_view_context, effective_course_plus, get_jury_state,
+    jury_bm25_adaptive_override, jury_history_override, jury_mode_override, sync_jury_form_inputs,
+    sync_jury_interaction,
+)
 from app.ui.password_recovery import smtp_code_sender
 from app.recommender import recommend
 from app.recommender.baseline import recommend_popular_courses
 from app.recommender.daily import daily_picks
 from app.recommender.next_courses import next_course_picks
-from app.recommender.hybrid import cached_bm25, configured_bm25_weight
+from app.recommender.hybrid import DEFAULT_BM25_WEIGHT, cached_bm25, configured_bm25_weight
 from app.recommender.runtime import rank_catalog_pages
 from evaluation.catalog_quality import REPORT_NAME, catalog_fingerprint
 from evaluation.learning_report import REPORT_NAME as LEARNING_REPORT_NAME
@@ -50,7 +55,9 @@ RESULTS_PER_PAGE = 6
 PAGE_SIZES = (6, 12, 24)
 COVER_ORIGIN = "https://s19060.cdn.ngenix.net"
 COVER_METADATA = Path(__file__).with_name("public-covers.json")
-CHAT_PAGES = frozenset({"index", "material_page", "profile_page", "profile_settings", "accounts.login", "accounts.register"})
+CHAT_PAGES = frozenset({
+    "index", "demo_lab", "material_page", "profile_page", "profile_settings", "accounts.login", "accounts.register",
+})
 _MAX_RECOMMEND_CACHE = 128
 
 FORMAT_LABELS = {
@@ -267,7 +274,7 @@ def create_app(
     static = Path(app.static_folder)
     app.jinja_env.globals["catalog_asset_versions"] = {
         name: sha256((static / name).read_bytes()).hexdigest()[:12]
-        for name in ("recommendations.css", "material-preview.js", "chat-widget.js")
+        for name in ("recommendations.css", "material-preview.js", "chat-widget.js", "jury-panel.js")
     }
     app.config["MAX_CONTENT_LENGTH"] = 4 * 1024 * 1024
     app.config["PASSWORD_CODE_SENDER"] = password_code_sender or smtp_code_sender()
@@ -301,7 +308,7 @@ def create_app(
         except Exception:
             pass
     sample_history = load_history(FIXTURES / "history.demo.json") if is_demo_catalog else ()
-    recommend_cache: dict[tuple, RecommendationResult] = {}
+    recommend_cache: dict[tuple, tuple[RecommendationResult, dict]] = {}
     configure_accounts(app, database_path or account_database_path())
     app.register_blueprint(admin)
     app.register_blueprint(chat_bp)
@@ -332,7 +339,7 @@ def create_app(
             response.headers["Cache-Control"] = "no-store"
             response.headers["X-Frame-Options"] = "DENY"
             response.headers["X-Content-Type-Options"] = "nosniff"
-            cover_source = f" {COVER_ORIGIN}" if request.endpoint == "index" and covers else ""
+            cover_source = f" {COVER_ORIGIN}" if request.endpoint in {"index", "demo_lab"} and covers else ""
             response.headers["Content-Security-Policy"] = (
                 f"default-src 'none'; img-src 'self'{cover_source}; style-src 'self'; "
                 "base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
@@ -445,16 +452,19 @@ def create_app(
             "prefetch" in request.headers.get(header, "").lower() for header in ("Sec-Purpose", "Purpose")
         ):
             record_interaction(account, material_id, "view")
+            sync_jury_interaction(material_id, "view")
             if impression:
                 record_impressions((impression,), account, previewed_material=material_id)
         open_url = url_for("open_material", material_id=material_id, impression=impression)
         description_html = format_description_html(material.description)
         lessons = program_availability(programs.get(material_id, ()))
-        allowed_access = available_access(account and account["has_course_plus"]) if not is_demo_catalog else None
+        has_course_plus, cp_overridden = effective_course_plus(account)
+        allowed_access = available_access(has_course_plus) if not is_demo_catalog else None
         access_required = not is_demo_catalog and not can_open_material(
-            material, signed_in=account is not None, course_plus=bool(account and account["has_course_plus"]),
+            material, signed_in=(account is not None or cp_overridden), course_plus=has_course_plus,
         )
-        seen_ids = {event.material_id for event in recent_interactions(account)}
+        jury_hist = jury_history_override()
+        seen_ids = {event.material_id for event in (jury_hist if jury_hist is not None else recent_interactions(account))}
         for seen_param in request.args.getlist("seen"):
             seen_ids.update(part.strip() for part in seen_param.split(",") if part.strip())
         seen_ids.discard(material_id)
@@ -518,6 +528,7 @@ def create_app(
         target = _material_destination(material.url)
         check_csrf()
         record_interaction(account, material_id, "click")
+        sync_jury_interaction(material_id, "click")
         record_impressions((request.args.get("impression"),), account, clicked_material=material_id)
         if request.accept_mimetypes.best == "application/json":
             return "", 204
@@ -529,24 +540,43 @@ def create_app(
         record_impressions(request.form.getlist("impression"), current_account())
         return "", 204
 
-    @app.route("/", methods=["GET", "POST"])
-    def index():
+    def _render_index(*, from_lab: bool = False, force_shelves: bool = False):
         form = request.form
-        quick_goal = form.get("quick_goal")
-        goal = quick_goal if quick_goal in QUICK_GOALS else form.get("goal", "")
-        skip_profile = form.get("action") == "skip_profile"
         account = current_account()
         now = datetime.now(UTC)
         stored_profile = saved_profile(account)
-        values = profile_values({} if skip_profile else {**stored_profile, **form})
+        skip_profile = (not from_lab) and form.get("action") == "skip_profile"
+        lab_state = get_jury_state()
+        if not from_lab and request.method == "POST":
+            quick_goal = form.get("quick_goal")
+            goal = quick_goal if quick_goal in QUICK_GOALS else form.get("goal", "")
+            values = profile_values({} if skip_profile else {**stored_profile, **form})
+            sync_jury_form_inputs(
+                goal=goal.strip()[:GOAL_MAX_LENGTH],
+                values=values,
+                skip_profile=skip_profile,
+                has_profile_fields=any(k in form for k in ("goal", "quick_goal", *PROFILE_FIELDS)),
+            )
+        elif lab_state is not None:
+            goal = lab_state.get("goal") if lab_state.get("goal") is not None else ""
+            lab_prof = lab_state.get("profile") if isinstance(lab_state.get("profile"), dict) else None
+            values = profile_values({**stored_profile, **lab_prof} if lab_prof is not None else stored_profile)
+        else:
+            goal = ""
+            values = profile_values(stored_profile)
         profile = Profile(goal=goal.strip()[:GOAL_MAX_LENGTH] or None, **values)
         allow_sample_history = is_demo_catalog and (account is None or account["username"] == DEMO_USERNAME)
-        use_sample_history = allow_sample_history and form.get("history") == "sample" and not skip_profile
-        history = sample_history if use_sample_history else ()
-        if not skip_profile and not allow_sample_history:
-            # В движке события в конце последовательности имеют больший вес.
-            history = recent_interactions(account)[::-1]
-        has_course_plus = bool(account and account["has_course_plus"])
+        use_sample_history = (not from_lab) and allow_sample_history and form.get("history") == "sample" and not skip_profile
+        lab_history = None if skip_profile else jury_history_override()
+        lab_history_active = lab_history is not None
+        if lab_history_active:
+            history = lab_history
+        else:
+            history = sample_history if use_sample_history else ()
+            if not skip_profile and not allow_sample_history:
+                # В движке события в конце последовательности имеют больший вес.
+                history = recent_interactions(account)[::-1]
+        has_course_plus, cp_overridden = effective_course_plus(account)
         available = available_access(has_course_plus)
         all_access_filters = tuple(ACCESS_LABELS)
         access_filters = all_access_filters
@@ -563,12 +593,23 @@ def create_app(
         format_filter = form.get("selected_format") or form.get("format_filter", request.args.get("format", "all"))
         if format_filter not in FORMAT_LABELS:
             format_filter = "all"
-        variant = experiment_variant(account) if recommender is recommend else None
-        mode = variant.mode if variant else recommendation_mode() if recommender is recommend else "recommend"
+        lab_mode = jury_mode_override()
+        lab_adaptive = jury_bm25_adaptive_override()
+        variant = experiment_variant(account) if (recommender is recommend and lab_mode is None) else None
+        mode = lab_mode or (variant.mode if variant else recommendation_mode() if recommender is recommend else "recommend")
         effective_algorithm = algorithm
         balance_access = (access_filters == all_access_filters and format_filter == "all" and result_order == "recommended")
-        active_weight = (variant.bm25_weight if variant else bm25_weight) if mode == "hybrid" else 0.0
-        adaptive_bm25 = mode == "hybrid" and (variant is None or variant.bm25_adaptive)
+        base_weight = (
+            variant.bm25_weight if variant
+            else (bm25_weight or DEFAULT_BM25_WEIGHT) if lab_mode == "hybrid"
+            else bm25_weight
+        )
+        active_weight = base_weight if mode == "hybrid" else 0.0
+        adaptive_bm25 = (
+            (lab_adaptive if lab_adaptive is not None else True) if lab_mode == "hybrid"
+            else (variant is None or variant.bm25_adaptive)
+        ) if mode == "hybrid" else False
+        trace: dict = {}
 
         if mode == "popular":
             effective_algorithm = "app.recommender.baseline.recommend_popular_courses"
@@ -587,22 +628,24 @@ def create_app(
                 active_weight,
                 adaptive_bm25,
                 history,
-                now.date() if history and not is_demo_catalog else None,
+                now.date() if history and (not is_demo_catalog or lab_history_active) else None,
             )
             if cache_key in recommend_cache:
-                result = recommend_cache[cache_key]
+                result, cached_trace = recommend_cache[cache_key]
+                trace = dict(cached_trace)
             else:
                 result = recommend(
                     candidates, profile, history, len(candidates),
                     links_directory=source.parent,
-                    history_as_of=None if is_demo_catalog else now,
+                    history_as_of=None if (is_demo_catalog and not lab_history_active) else now,
                     balance_access=balance_access,
                     bm25_weight=active_weight,
                     bm25_adaptive=adaptive_bm25,
+                    trace=trace,
                 )
                 if len(recommend_cache) >= _MAX_RECOMMEND_CACHE:
                     recommend_cache.clear()
-                recommend_cache[cache_key] = result
+                recommend_cache[cache_key] = (result, dict(trace))
         else:
             result = recommender(candidates, profile, history, len(candidates)) if candidates else RecommendationResult((), "")
 
@@ -629,8 +672,10 @@ def create_app(
         page = min(max(1, form.get("show_page", default=1, type=int)), total_pages)
         page_scope = ""
         if result_order == "recommended" and mode != "popular" and recommender is recommend:
-            scope = (profile, format_filter, access_filters, page_size, effective_algorithm, skip_profile,
-                     use_sample_history, variant.experiment_id if variant else None)
+            scope = (
+                profile, format_filter, access_filters, page_size, effective_algorithm, skip_profile,
+                use_sample_history, variant.experiment_id if variant else None, has_course_plus, len(history),
+            )
             page_scope = sha256(repr(scope).encode()).hexdigest()[:24]
             if form.get("page_scope") == page_scope:
                 cards = rank_catalog_pages(
@@ -658,15 +703,32 @@ def create_app(
             start_position=page_start + 1,
         )
         is_fragment = request.headers.get("X-Recommendation-Fragment") == "1"
+        include_shelves = (not is_fragment) and (force_shelves or (request.method == "GET" and format_filter == "all"))
         daily = daily_picks(materials_by_id, profile, history, publication_dates, available,
-                            now=now, links_directory=source.parent) if request.method == "GET" and format_filter == "all" and not is_fragment else {}
-        next_courses = next_course_picks(catalog, history, available) if request.method == "GET" and format_filter == "all" and not is_fragment else ()
+                            now=now, links_directory=source.parent) if include_shelves else {}
+        next_courses = next_course_picks(catalog, history, available) if include_shelves else ()
+        jury = build_jury_view_context(
+            mode=mode,
+            mode_is_overridden=lab_mode is not None,
+            bm25_weight=base_weight,
+            adaptive_bm25=adaptive_bm25,
+            has_course_plus=has_course_plus,
+            course_plus_overridden=cp_overridden,
+            recommender_is_custom=(recommender is not recommend),
+            trace=trace,
+            profile=profile,
+            profile_values_map=values,
+            history=history,
+            materials_by_id=materials_by_id,
+            cards=cards,
+        )
+        jury_state_json = json.dumps(jury["state_json_payload"], ensure_ascii=False)
         return render_template(
             "recommendations_results.html" if is_fragment else "recommendations.html",
             profile=profile,
             profile_values=values,
             profile_fields=PROFILE_FIELDS,
-            show_profile_details=use_sample_history or (not skip_profile and values != stored_profile),
+            show_profile_details=not skip_profile,
             quick_goals=QUICK_GOALS,
             daily=daily,
             next_courses=next_courses,
@@ -702,6 +764,35 @@ def create_app(
             page_end=page_start + len(visible_cards),
             prev_page=page - 1 if page > 1 else None,
             next_page=page + 1 if page < total_pages else None,
+            jury=jury,
+            jury_state_json=jury_state_json,
         )
+
+    @app.route("/", methods=["GET", "POST"])
+    def index():
+        return _render_index()
+
+    @app.post("/demo-lab")
+    def demo_lab():
+        check_csrf()
+        account = current_account()
+        stored = saved_profile(account)
+        action = request.form.get("lab_action", "")
+        if request.form.get("hero_sync") == "1" and action not in {"apply_preset", "reset_all", "sync_view"}:
+            quick_goal = request.form.get("quick_goal")
+            hero_goal = quick_goal if quick_goal in QUICK_GOALS else request.form.get("goal", "")
+            hero_values = profile_values({**stored, **request.form})
+            if get_jury_state() is not None or hero_goal.strip() or any(hero_values.values()):
+                sync_jury_form_inputs(
+                    goal=hero_goal.strip()[:GOAL_MAX_LENGTH],
+                    values=hero_values,
+                    skip_profile=False,
+                    has_profile_fields=any(k in request.form for k in ("goal", "quick_goal", *PROFILE_FIELDS)),
+                    force=True,
+                )
+        apply_jury_action(request.form, catalog, goal_max_length=GOAL_MAX_LENGTH)
+        if request.headers.get("X-Jury-Panel") == "1":
+            return _render_index(from_lab=(action != "sync_view"), force_shelves=True)
+        return redirect(url_for("index"), code=303)
 
     return app

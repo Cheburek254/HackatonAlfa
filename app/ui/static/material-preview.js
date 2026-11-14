@@ -22,6 +22,10 @@ function addSessionViewedId(materialId) {
 }
 
 function initCarouselTrack(track) {
+    if (track.dataset.carouselReady === "1") {
+        return;
+    }
+    track.dataset.carouselReady = "1";
     const dragHint = track.closest(".daily-picks-card")?.querySelector(".daily-drag-hint");
     const originals = [...track.children];
     let clones = [];
@@ -39,7 +43,7 @@ function initCarouselTrack(track) {
         return copy;
     });
     const arrange = () => {
-        if (!originals.length) {
+        if (!track.isConnected || !originals.length) {
             return;
         }
         const first = originals[0];
@@ -238,6 +242,10 @@ document.addEventListener("error", (event) => {
     }
 }, true);
 prepareCards();
+document.addEventListener("alfa:dom-updated", () => {
+    prepareCards();
+    document.querySelectorAll(".daily-track").forEach(initCarouselTrack);
+});
 
 let activeUpdate;
 document.addEventListener("submit", async (event) => {
@@ -304,6 +312,9 @@ document.addEventListener("submit", async (event) => {
             throw new Error("Выдача недоступна");
         }
 
+        const previousTopIds = [...section.querySelectorAll(".card[data-material-id]")]
+            .slice(0, 6)
+            .map((card) => card.dataset.materialId);
         section.replaceWith(next);
         prepareCards();
 
@@ -346,6 +357,13 @@ document.addEventListener("submit", async (event) => {
             );
             matching?.focus({ preventScroll: true });
         }
+        document.dispatchEvent(new CustomEvent("alfa:jury-sync", {
+            detail: {
+                isQuery,
+                previousTopIds,
+                juryState: next.dataset.juryState || "",
+            },
+        }));
     } catch {
         if (!update.signal.aborted) {
             status.textContent = "Не удалось обновить подборку. Попробуйте ещё раз.";
@@ -569,7 +587,11 @@ if (typeof materialPreview?.showModal === "function") {
             headers: { Accept: "application/json" },
             body: new URLSearchParams({ csrf_token: currentPreview.csrf_token }),
             keepalive: true,
-        }).catch(() => {});
+        })
+            .catch(() => {})
+            .finally(() => {
+                document.dispatchEvent(new CustomEvent("alfa:jury-behavior"));
+            });
     }
 
     materialLink.addEventListener("click", recordClick);
@@ -583,5 +605,6 @@ if (typeof materialPreview?.showModal === "function") {
         prepareCards();
         if (previewEyebrow) previewEyebrow.textContent = "О МАТЕРИАЛЕ";
         openingLink?.focus({ preventScroll: true });
+        document.dispatchEvent(new CustomEvent("alfa:jury-behavior"));
     });
 }

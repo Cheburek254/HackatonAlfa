@@ -1,7 +1,12 @@
-        <section class="results recommendations-results" id="recommendations" aria-labelledby="results-title" data-impression-batch="{{ impression_batch_id }}" data-result-page="{{ current_page }}" data-page-scope="{{ page_scope }}">
+        <section class="results recommendations-results" id="recommendations" aria-labelledby="results-title" data-impression-batch="{{ impression_batch_id }}" data-result-page="{{ current_page }}" data-page-scope="{{ page_scope }}" data-jury-state="{{ jury_state_json | default('') }}">
             <div class="wrap">
                 <div class="results-heading">
-                    <p class="eyebrow">АЛЬФА-КУРС</p>
+                    <div class="results-eyebrow-row">
+                        <p class="eyebrow">АЛЬФА-КУРС</p>
+                        {% if jury %}
+                        <span class="results-algo-badge">{{ jury.mode_label }}</span>
+                        {% endif %}
+                    </div>
                     <h2 id="results-title">Рекомендации для вас</h2>
                     {% if profile.goal %}<p class="goal-caption">Задача · {{ profile.goal }}</p>{% endif %}
                     {% set selected_profile = profile_values.values() | select | list %}

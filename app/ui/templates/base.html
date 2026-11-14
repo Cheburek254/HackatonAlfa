@@ -81,6 +81,9 @@
             </div>
         </dialog>
         <script src="{{ url_for('static', filename='material-preview.js', v=catalog_asset_versions['material-preview.js']) }}" defer></script>
+        {% if request.endpoint in ('index', 'demo_lab') %}
+        <script src="{{ url_for('static', filename='jury-panel.js', v=catalog_asset_versions['jury-panel.js']) }}" defer></script>
+        {% endif %}
         {% include "chat_widget.html" %}
         <script src="{{ url_for('static', filename='chat-widget.js', v=catalog_asset_versions['chat-widget.js']) }}" defer></script>
     {% endif %}

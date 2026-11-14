@@ -716,6 +716,23 @@ def _deduplicate_top(ordered: list[tuple[float, Material, dict]], limit: int) ->
     return chosen + deferred
 
 
+def _trace_constraints(constraints: dict) -> list[str]:
+    tags: list[str] = []
+    if constraints["only_free"]:
+        tags.append("только бесплатно")
+    if constraints["max_budget"] is not None:
+        tags.append(f"бюджет до {constraints['max_budget']} ₽")
+    if constraints["only_format"]:
+        tags.append(f"формат: {constraints['only_format']}")
+    if constraints["prefer_video"]:
+        tags.append("видео/вебинар")
+    if constraints["strict_ip"]:
+        tags.append("только ИП")
+    if constraints["strict_ooo"]:
+        tags.append("только ООО")
+    return tags
+
+
 def recommend(
     catalog: Sequence[Material],
     profile: Profile,
@@ -733,6 +750,7 @@ def recommend(
     bm25_length_penalty: float = B,
     bm25_saturation: float = K1,
     bm25_adaptive: bool = False,
+    trace: dict | None = None,
 ) -> RecommendationResult:
     """Ранжирует материалы каталога с учётом задачи, профиля, истории и популярности."""
     if not 0 <= bm25_weight <= 1:
@@ -772,6 +790,23 @@ def recommend(
     # 2. Разбор сигналов истории (только по существующим в каталоге ID)
     valid_history = [ev for ev in history if ev.material_id in catalog_by_id]
     if not valid_history and (starter := onboarding(catalog, profile, limit)) is not None:
+        if trace is not None:
+            trace.update({
+                "scenario": "onboarding",
+                "used_hybrid": False,
+                "bm25_base": bm25_weight,
+                "bm25_applied": 0.0,
+                "bm25_adaptive": False,
+                "confirmed_topics": [],
+                "history_count": 0,
+                "constraints": _trace_constraints(constraints),
+                "paid_target": 0,
+                "dedup_swapped": 0,
+                "top_signals": [
+                    ["Онбординг", "Бесплатный старт"]
+                    for _ in starter.items[:3]
+                ],
+            })
         return starter
     topic_scores, industry_scores, term_scores, linked_scores, seen_events, recent_clicks = _history_signals(
         valid_history, catalog_by_id, rec_links, history_as_of,
@@ -1083,6 +1118,8 @@ def recommend(
     selected_ids = {mat.id for _, mat, _ in context_items}
     ordered = context_items + [row for row in scored_items if row[1].id not in selected_ids]
     used_hybrid = False
+    bm25_base = bm25_weight
+    bm25_applied = 0.0
     if bm25_weight and goal_norm and not is_weak_match and not context_items:
         filters = hybrid_constraints(goal_raw)
         rankable = {row[1].id: row for row in ordered if acceptable(row[1], filters)}
@@ -1103,6 +1140,8 @@ def recommend(
             replacement = iter(ranked_ids + [mid for mid in core_ids if mid not in fused_ids])
             ordered = [rankable[next(replacement)] if row[1].id in rankable else row for row in ordered]
             used_hybrid = True
+            bm25_applied = bm25_weight
+    paid_target = None
     if balance_access and not browse_from_seed and not is_weak_match and not any(
         (constraints["only_free"], constraints["max_budget"] is not None, constraints["only_format"])
     ):
@@ -1114,7 +1153,9 @@ def recommend(
         if not beginner:
             paid_target += int(experienced or engaged or growing) + int(experienced and growing and engaged)
         ordered = balance_first_page(ordered, paid_target=paid_target, seen=set(seen_events))
+    before_dedup = [row[1].id for row in ordered[:3]]
     ordered = _deduplicate_top(ordered, limit)
+    dedup_swapped = len(set(before_dedup) - {row[1].id for row in ordered[:3]})
     selected = ordered[:limit]
 
     recommendations: list[Recommendation] = []
@@ -1128,6 +1169,50 @@ def recommend(
 
     if not recommendations:
         return RecommendationResult((), "")
+
+    if trace is not None:
+        confirmed_topics = sorted(topic for topic, (score, _) in topic_scores.items() if score >= 6.0)[:5]
+        scenario = (
+            "history_context" if context_items
+            else "hybrid" if used_hybrid
+            else "weak_match" if is_weak_match
+            else "cold_start" if is_cold_start
+            else "history" if valid_history
+            else "profile_goal"
+        )
+        top_signals = []
+        for _, _, sig in selected[:3]:
+            tags = []
+            if sig.get("goal_direct") or sig.get("matched_goal_topics"):
+                tags.append("Задача")
+            if sig.get("matched_learning_topic"):
+                tags.append("Тема профиля")
+            if sig.get("stage_matched"):
+                tags.append("Стадия")
+            if sig.get("industry_matched"):
+                tags.append("Сфера")
+            if sig.get("exp_matched"):
+                tags.append("Опыт")
+            if sig.get("fmt_matched"):
+                tags.append("Формат")
+            if sig.get("history_continuation_from"):
+                tags.append("История")
+            if not tags:
+                tags.append("Холодный старт" if is_cold_start else "Базовая выдача")
+            top_signals.append(tags)
+        trace.update({
+            "scenario": scenario,
+            "used_hybrid": used_hybrid,
+            "bm25_base": bm25_base,
+            "bm25_applied": bm25_applied,
+            "bm25_adaptive": bool(bm25_adaptive and used_hybrid),
+            "confirmed_topics": confirmed_topics,
+            "history_count": len(valid_history),
+            "constraints": _trace_constraints(constraints),
+            "paid_target": paid_target,
+            "dedup_swapped": dedup_swapped,
+            "top_signals": top_signals,
+        })
 
     first_mat = selected_materials[0]
     if context_items:

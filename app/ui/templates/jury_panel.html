@@ -1,0 +1,208 @@
+<aside class="jury-panel{% if jury.active %} is-session-active{% endif %}" id="jury-panel" aria-label="Пульт проверки алгоритма">
+    <div class="jury-panel-inner">
+        <div class="jury-panel-header">
+            <div class="jury-header-top">
+                <span class="jury-eyebrow">LIVE-ПРОВЕРКА АЛГОРИТМА</span>
+                <div class="jury-header-actions">
+                    <span class="jury-session-badge">{{ 'Сессия изменена' if jury.active else 'Режим по умолчанию' }}</span>
+                    <button type="button" class="jury-collapse-btn" id="jury-collapse-btn" aria-expanded="true" aria-controls="jury-panel-body">Свернуть</button>
+                </div>
+            </div>
+            <div class="jury-title-row">
+                <h2 class="jury-title">Пульт жюри</h2>
+                {% if jury.active %}
+                <form method="post" action="{{ url_for('demo_lab') }}" class="jury-reset-form" data-jury-action="reset_all">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="lab_action" value="reset_all">
+                    <button type="submit" class="jury-reset-btn">Сбросить всё</button>
+                </form>
+                {% endif %}
+            </div>
+            <p class="jury-subtitle">Переключения изолированы в вашей сессии и мгновенно перестраивают выдачу.</p>
+        </div>
+
+        <div class="jury-panel-body" id="jury-panel-body">
+            <section class="jury-block" aria-labelledby="jury-presets-heading">
+                <div class="jury-block-head">
+                    <h3 id="jury-presets-heading">1. Пресеты аккаунтов</h3>
+                    <span>1 клик</span>
+                </div>
+                <div class="jury-preset-list">
+                    {% for preset in jury.presets %}
+                    <form method="post" action="{{ url_for('demo_lab') }}" class="jury-preset-form" data-jury-action="apply_preset">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="lab_action" value="apply_preset">
+                        <input type="hidden" name="preset_id" value="{{ preset.id }}">
+                        <button type="submit" class="jury-preset-btn{{ ' active' if preset.active else '' }}" aria-pressed="{{ 'true' if preset.active else 'false' }}">
+                            <span class="jury-preset-top">
+                                <strong>{{ preset.label }}</strong>
+                                <span class="jury-preset-badge">{{ preset.badge }}</span>
+                            </span>
+                            <span class="jury-preset-desc">{{ preset.summary }}</span>
+                        </button>
+                    </form>
+                    {% endfor %}
+                </div>
+            </section>
+
+            <section class="jury-block" aria-labelledby="jury-algo-heading">
+                <div class="jury-block-head">
+                    <h3 id="jury-algo-heading">2. Алгоритм и доступ</h3>
+                    <span>{{ jury.mode_label }}</span>
+                </div>
+                <div class="jury-pill-grid" role="group" aria-label="Режим ранжирования">
+                    {% for mode_key, mode_name in jury.modes %}
+                    <form method="post" action="{{ url_for('demo_lab') }}" class="jury-inline-form" data-jury-action="set_mode" data-sync-hero="1">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="lab_action" value="set_mode">
+                        <input type="hidden" name="mode" value="{{ mode_key }}">
+                        <button type="submit" class="jury-pill{{ ' active' if jury.mode == mode_key else '' }}" aria-pressed="{{ 'true' if jury.mode == mode_key else 'false' }}">{{ mode_name }}</button>
+                    </form>
+                    {% endfor %}
+                </div>
+
+                <div class="jury-toggles-row">
+                    {% if jury.mode == 'hybrid' %}
+                    <form method="post" action="{{ url_for('demo_lab') }}" class="jury-inline-form" data-jury-action="toggle_bm25_adaptive" data-sync-hero="1">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="lab_action" value="toggle_bm25_adaptive">
+                        <input type="hidden" name="bm25_adaptive" value="{{ 'off' if jury.adaptive_bm25 else 'on' }}">
+                        <button type="submit" class="jury-toggle-btn{{ ' active' if jury.adaptive_bm25 else '' }}" aria-pressed="{{ 'true' if jury.adaptive_bm25 else 'false' }}">
+                            Адаптивный BM25: {{ 'Вкл' if jury.adaptive_bm25 else 'Выкл' }}
+                        </button>
+                    </form>
+                    {% endif %}
+
+                    <form method="post" action="{{ url_for('demo_lab') }}" class="jury-inline-form" data-jury-action="toggle_course_plus" data-sync-hero="1">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="lab_action" value="toggle_course_plus">
+                        <input type="hidden" name="course_plus" value="{{ 'off' if jury.course_plus else 'on' }}">
+                        <button type="submit" class="jury-toggle-btn{{ ' active' if jury.course_plus else '' }}" aria-pressed="{{ 'true' if jury.course_plus else 'false' }}">
+                            Подписка Курс+: {{ 'Активна' if jury.course_plus else 'Нет' }}
+                        </button>
+                    </form>
+
+                    {% if jury.course_plus_overridden %}
+                    <form method="post" action="{{ url_for('demo_lab') }}" class="jury-inline-form" data-jury-action="toggle_course_plus" data-sync-hero="1">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="lab_action" value="toggle_course_plus">
+                        <input type="hidden" name="course_plus" value="default">
+                        <button type="submit" class="jury-mini-link">Как у аккаунта</button>
+                    </form>
+                    {% endif %}
+                </div>
+            </section>
+
+            <section class="jury-block" aria-labelledby="jury-history-heading">
+                <div class="jury-block-head">
+                    <h3 id="jury-history-heading">3. Поведение в сессии</h3>
+                    <span>{{ jury.history_count }} соб.</span>
+                </div>
+                <div class="jury-sim-actions">
+                    {% for btn in jury.sim_buttons %}
+                    <form method="post" action="{{ url_for('demo_lab') }}" class="jury-inline-form" data-jury-action="add_event" data-sync-hero="1">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="lab_action" value="add_event">
+                        <input type="hidden" name="sim_event" value="{{ btn.id }}">
+                        <button type="submit" class="jury-sim-btn jury-sim-{{ btn.kind }}">{{ btn.label }}</button>
+                    </form>
+                    {% endfor %}
+                </div>
+
+                <div class="jury-history-controls">
+                    <form method="post" action="{{ url_for('demo_lab') }}" class="jury-inline-form" data-jury-action="clear_history" data-sync-hero="1">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="lab_action" value="clear_history">
+                        <button type="submit" class="jury-mini-link">Очистить историю (0)</button>
+                    </form>
+                    {% if jury.history_simulated %}
+                    <form method="post" action="{{ url_for('demo_lab') }}" class="jury-inline-form" data-jury-action="restore_live_history" data-sync-hero="1">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="lab_action" value="restore_live_history">
+                        <button type="submit" class="jury-mini-link">Вернуть реальную</button>
+                    </form>
+                    {% endif %}
+                </div>
+
+                {% if jury.history_items %}
+                <ul class="jury-history-list">
+                    {% for event in jury.history_items %}
+                    <li class="jury-history-item">
+                        <span class="jury-history-kind jury-kind-{{ event.kind }}">{{ event.kind_label }}</span>
+                        <span class="jury-history-title" title="{{ event.title }}">{{ event.title }}</span>
+                        <form method="post" action="{{ url_for('demo_lab') }}" class="jury-inline-form" data-jury-action="remove_event" data-sync-hero="1">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="lab_action" value="remove_event">
+                            <input type="hidden" name="event_index" value="{{ event.index }}">
+                            <button type="submit" class="jury-history-remove" aria-label="Удалить событие «{{ event.title }}»">×</button>
+                        </form>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="jury-empty-history">История пуста — алгоритм опирается на задачу, профиль и холодный старт.</p>
+                {% endif %}
+            </section>
+
+            <section class="jury-block jury-telemetry" aria-labelledby="jury-telemetry-heading">
+                <div class="jury-block-head">
+                    <h3 id="jury-telemetry-heading">4. Что сработало сейчас</h3>
+                    <span>Live trace</span>
+                </div>
+                <div id="jury-diff-banner" class="jury-diff-banner" aria-live="polite" hidden></div>
+                <dl class="jury-metrics">
+                    <div>
+                        <dt>Сценарий</dt>
+                        <dd>{{ jury.telemetry.scenario_label }}</dd>
+                    </div>
+                    <div>
+                        <dt>BM25-текст</dt>
+                        <dd>
+                            {% if jury.telemetry.used_hybrid %}
+                            вклад {{ '%.2f'|format(jury.telemetry.bm25_applied) }} (база {{ '%.2f'|format(jury.telemetry.bm25_base) }}{{ ', адаптивный' if jury.telemetry.bm25_adaptive else ', фиксированный' }})
+                            {% elif jury.telemetry.mode == 'hybrid' %}
+                            не применялся (пустой / слабый запрос или фокус истории)
+                            {% else %}
+                            выключен в выбранном режиме
+                            {% endif %}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt>Фильтры из запроса</dt>
+                        <dd>{{ jury.telemetry.constraints | join(', ') if jury.telemetry.constraints else 'нет жёстких ограничений' }}</dd>
+                    </div>
+                    <div>
+                        <dt>Темы истории</dt>
+                        <dd>{{ jury.telemetry.confirmed_topics | join(', ') if jury.telemetry.confirmed_topics else 'пока не подтверждены' }}</dd>
+                    </div>
+                    <div>
+                        <dt>Баланс и дедуп</dt>
+                        <dd>{{ ('цель платных в топ-6: ' ~ jury.telemetry.paid_target) if jury.telemetry.paid_target is not none else 'без квоты платных' }} · дедуп: {{ jury.telemetry.dedup_swapped }}</dd>
+                    </div>
+                </dl>
+
+                {% if jury.top_preview %}
+                <div class="jury-top-wrap">
+                    <p class="jury-top-label">Топ-3 прямо сейчас</p>
+                    <ol class="jury-top-list">
+                        {% for item in jury.top_preview %}
+                        <li>
+                            <a class="jury-top-item" href="#result-card-{{ item.pos }}">
+                                <span class="jury-top-head">
+                                    <span class="jury-top-pos">#{{ item.pos }}</span>
+                                    <span class="jury-top-title">{{ item.title }}</span>
+                                    <span class="jury-rank-badge" data-top-id="{{ item.id }}" hidden></span>
+                                </span>
+                                {% if item.signals %}
+                                <span class="jury-top-signals">{{ item.signals | join(' · ') }}</span>
+                                {% endif %}
+                            </a>
+                        </li>
+                        {% endfor %}
+                    </ol>
+                </div>
+                {% endif %}
+            </section>
+        </div>
+    </div>
+</aside>

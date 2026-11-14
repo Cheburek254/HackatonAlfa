@@ -278,7 +278,7 @@ class WebFlowTest(unittest.TestCase):
             ) if entry_kind == kind]
 
         home = client.get("/").get_data(as_text=True)
-        self.assertLess(home.index('id="daily-track"'), home.index('id="recommendation-query"'))
+        self.assertLess(home.index('id="recommendation-query"'), home.index('id="daily-track"'))
         self.assertEqual(re.findall(r'data-daily-kind="([^"]+)"', home),
                          ["article"] * 3 + ["podcast"] * 3 + ["article"] * 2 + ["podcast"] * 2)
         self.assertIn('datetime="2026-01-08"', home)
@@ -1161,3 +1161,154 @@ class WebFlowTest(unittest.TestCase):
         self.assertIn("Курс · 12 уроков", section)
         self.assertIn("Курс · 2 часа", section)
         self.assertNotIn("ур.", section)
+
+    def test_hero_profile_expanded_by_default_and_collapsed_on_skip(self):
+        home = self.client.get("/").get_data(as_text=True)
+        self.assertIn('<details class="profile" open>', home)
+        self.assertIn('id="jury-panel"', home)
+        self.assertLess(home.index('id="recommendation-query"'), home.index('id="recommendations"'))
+        self.assertEqual(len(re.findall(r'data-material-id="([^"]+)"', home)), 1)
+        self.assertNotIn('data-material-id', home.split('id="jury-panel"', 1)[1])
+
+        skipped = self.client.post("/", data={"goal": "Продажи", "action": "skip_profile"}).get_data(as_text=True)
+        self.assertIn('<details class="profile">', skipped)
+        self.assertNotIn('<details class="profile" open>', skipped)
+
+    def test_jury_lab_requires_csrf_and_isolates_sessions_from_global_mode(self):
+        real_app = create_app(database_path=self.database_path)
+        judge = real_app.test_client()
+        other = real_app.test_client()
+
+        self.assertEqual(judge.post("/demo-lab", data={"lab_action": "set_mode", "mode": "popular"}).status_code, 400)
+
+        judge.get("/")
+        with judge.session_transaction() as browser_session:
+            token = browser_session["csrf"]
+
+        redirected = judge.post("/demo-lab", data={
+            "csrf_token": token, "lab_action": "set_mode", "mode": "popular",
+        })
+        self.assertEqual(redirected.status_code, 303)
+
+        popular_html = judge.get("/").get_data(as_text=True)
+        self.assertIn('<span class="results-algo-badge">Бейзлайн · популярные курсы</span>', popular_html)
+        self.assertIn("Сессия изменена", popular_html)
+
+        other_html = other.get("/").get_data(as_text=True)
+        self.assertIn('<span class="results-algo-badge">BM25 + recommend</span>', other_html)
+        self.assertIn("Режим по умолчанию", other_html)
+
+        switched = judge.post("/demo-lab", data={
+            "csrf_token": token,
+            "lab_action": "set_mode",
+            "mode": "hybrid",
+            "hero_sync": "1",
+            "goal": '"><script>alert(1)</script> продажи',
+            "stage": "рост",
+        }, headers={"X-Jury-Panel": "1"})
+        self.assertEqual(switched.status_code, 200)
+        switched_html = switched.get_data(as_text=True)
+        self.assertIn('<span class="results-algo-badge">BM25 + recommend</span>', switched_html)
+        self.assertNotIn('"><script>alert(1)</script>', switched_html)
+        self.assertIn("адаптивный", switched_html)
+
+        fixed = judge.post("/demo-lab", data={
+            "csrf_token": token,
+            "lab_action": "toggle_bm25_adaptive",
+            "bm25_adaptive": "off",
+            "hero_sync": "1",
+            "goal": "продажи",
+        }, headers={"X-Jury-Panel": "1"}).get_data(as_text=True)
+        self.assertIn("фиксированный", fixed)
+
+    def test_jury_lab_presets_simulated_history_and_course_plus_access(self):
+        directory = self.database_path.parent / "jury-lab-catalog"
+        directory.mkdir()
+        records = [
+            {"id": "art-mkt", "title": "Статья: реклама и продвижение", "url": "https://example.com/am",
+             "entity_type": "article", "format": "статья", "topics": ["маркетинг", "реклама"], "access": "free", "popularity": 400},
+            {"id": "art-fin", "title": "Учёт денег в малом бизнесе", "url": "https://example.com/af",
+             "entity_type": "article", "format": "статья", "topics": ["финансы"], "access": "free", "popularity": 300},
+            {"id": "pod-mkt", "title": "Подкаст про рекламу и продвижение", "url": "https://example.com/pm",
+             "entity_type": "podcast", "format": "подкаст", "topics": ["маркетинг", "реклама"], "access": "free", "popularity": 350},
+            {"id": "web-mkt", "title": "Вебинар: каналы привлечения клиентов", "url": "https://example.com/wm",
+             "entity_type": "article", "format": "вебинар", "topics": ["маркетинг", "реклама"], "access": "free", "popularity": 320},
+            {"id": "crs-sales", "title": "Курс по повторным продажам", "url": "https://example.com/cs",
+             "entity_type": "course", "format": "курс", "topics": ["продажи"], "access": "free", "lesson_count": 5, "popularity": 500},
+            {"id": "sub-sales", "title": "Подписной курс: реклама и клиентский сервис", "url": "https://example.com/ss",
+             "entity_type": "course", "format": "курс", "topics": ["продажи", "маркетинг", "реклама"],
+             "access": "paid", "lesson_count": 6, "popularity": 700},
+            {"id": "tpl-mkt", "title": "Шаблон рекламы и продвижения", "url": "https://example.com/tm",
+             "entity_type": "template", "format": "шаблон", "topics": ["маркетинг", "реклама"], "access": "free", "popularity": 450},
+            {"id": "chk-start", "title": "Чек-лист запуска", "url": "https://example.com/cs0",
+             "entity_type": "checklist", "format": "чек-лист", "topics": ["запуск бизнеса"], "access": "free", "popularity": 600},
+            {"id": "art-ops", "title": "Регламенты и планирование смены", "url": "https://example.com/ao",
+             "entity_type": "article", "format": "статья", "topics": ["операционная работа"], "access": "free", "popularity": 250},
+            {"id": "art-team", "title": "Как нанять первого сотрудника", "url": "https://example.com/at",
+             "entity_type": "article", "format": "статья", "topics": ["управление командой"], "access": "free", "popularity": 260},
+        ]
+        (directory / "catalog.norm.json").write_text(json.dumps(records), encoding="utf-8")
+        (directory / "subscriptions.json").write_text(json.dumps({"sub-sales": ["Курс+"]}), encoding="utf-8")
+        (directory / "publication-dates.json").write_text(
+            json.dumps({"art-mkt": "2026-01-08", "art-fin": "2026-01-05", "pod-mkt": "2026-01-07"}),
+            encoding="utf-8",
+        )
+        with patch.dict("os.environ", {"ALFA_CATALOG_DIR": str(directory)}):
+            client = create_app(database_path=self.database_path).test_client()
+
+        client.get("/")
+        with client.session_transaction() as browser_session:
+            token = browser_session["csrf"]
+
+        preset_resp = client.post("/demo-lab", data={
+            "csrf_token": token,
+            "lab_action": "apply_preset",
+            "preset_id": "growth_retail_plus",
+        }, headers={"X-Jury-Panel": "1"})
+        self.assertEqual(preset_resp.status_code, 200)
+        preset_html = preset_resp.get_data(as_text=True)
+        self.assertIn("Подписка Курс+: Активна", preset_html)
+        self.assertIn('id="daily-picks"', preset_html)
+        self.assertIn('id="next-courses"', preset_html)
+        self.assertIn("Подписной курс: реклама и клиентский сервис", preset_html.split('id="next-courses"', 1)[1].split("</section>", 1)[0])
+        self.assertNotIn('name="history"', preset_html)
+        self.assertIn('<option value="рост" selected>', preset_html)
+
+        sub_preview = client.get("/materials/sub-sales", headers={"Accept": "application/json"}).json
+        self.assertFalse(sub_preview["access_required"])
+
+        no_plus_html = client.post("/demo-lab", data={
+            "csrf_token": token, "lab_action": "toggle_course_plus", "course_plus": "off", "hero_sync": "1",
+        }, headers={"X-Jury-Panel": "1"}).get_data(as_text=True)
+        self.assertNotIn('id="next-courses"', no_plus_html)
+        self.assertTrue(client.get("/materials/sub-sales", headers={"Accept": "application/json"}).json["access_required"])
+
+        ctx_html = client.post("/demo-lab", data={
+            "csrf_token": token,
+            "lab_action": "apply_preset",
+            "preset_id": "history_context",
+        }, headers={"X-Jury-Panel": "1"}).get_data(as_text=True)
+        self.assertIn("<span>2 соб.</span>", ctx_html)
+        self.assertIn("Продолжение 2 недавних переходов", ctx_html)
+
+        added_html = client.post("/demo-lab", data={
+            "csrf_token": token, "lab_action": "add_event", "sim_event": "click_finance", "hero_sync": "1", "goal": "",
+        }, headers={"X-Jury-Panel": "1"}).get_data(as_text=True)
+        self.assertIn("<span>3 соб.</span>", added_html)
+
+        removed_html = client.post("/demo-lab", data={
+            "csrf_token": token, "lab_action": "remove_event", "event_index": "0", "hero_sync": "1",
+        }, headers={"X-Jury-Panel": "1"}).get_data(as_text=True)
+        self.assertIn("<span>2 соб.</span>", removed_html)
+
+        cleared_html = client.post("/demo-lab", data={
+            "csrf_token": token, "lab_action": "clear_history", "hero_sync": "1",
+        }, headers={"X-Jury-Panel": "1"}).get_data(as_text=True)
+        self.assertIn("<span>0 соб.</span>", cleared_html)
+
+        reset_html = client.post("/demo-lab", data={
+            "csrf_token": token, "lab_action": "reset_all",
+        }, headers={"X-Jury-Panel": "1"}).get_data(as_text=True)
+        self.assertIn("Режим по умолчанию", reset_html)
+        with client.session_transaction() as browser_session:
+            self.assertNotIn("jury_lab", browser_session)
