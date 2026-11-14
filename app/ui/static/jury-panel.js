@@ -18,12 +18,10 @@ function currentVisibleTopIds(root = document, limit = 6) {
 }
 
 function setPanelCollapsed(collapsed) {
-    const workspace = document.querySelector(".jury-workspace");
     const panel = document.querySelector("#jury-panel");
     const collapseBtn = document.querySelector("#jury-collapse-btn");
     const reopenBtn = document.querySelector("#jury-reopen-btn");
-    if (!workspace || !panel) return;
-    workspace.classList.toggle("is-panel-collapsed", collapsed);
+    if (!panel) return;
     panel.hidden = collapsed;
     if (collapseBtn) collapseBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
     if (reopenBtn) reopenBtn.hidden = !collapsed;
@@ -280,6 +278,15 @@ document.addEventListener("click", (event) => {
         setPanelCollapsed(true);
     } else if (target.closest("#jury-reopen-btn")) {
         setPanelCollapsed(false);
+    }
+});
+
+document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    if (document.querySelector("dialog[open]")) return;
+    const panel = document.querySelector("#jury-panel");
+    if (panel && !panel.hidden) {
+        setPanelCollapsed(true);
     }
 });
 

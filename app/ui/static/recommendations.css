@@ -1679,66 +1679,16 @@ button.is-loading {
 }
 
 /* ==========================================================================
-   Компоновка для жюри: форма наверху + правый live-пульт проверки
+   Пульт жюри (плавающий оверлей поверх страницы, не сжимающий контент)
    ========================================================================== */
-.jury-workspace {
-    width: min(100% - 28px, 1560px);
-    margin-inline: auto;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 368px;
-    gap: 22px;
-    align-items: start;
-}
-.jury-workspace.is-panel-collapsed {
-    grid-template-columns: minmax(0, 1fr);
-}
-.jury-main {
-    min-width: 0;
-}
-.jury-main .wrap {
-    width: 100%;
-}
-.jury-main .hero {
-    padding-block: 30px 20px;
-}
-.jury-main .hero-layout {
-    display: block;
-}
-.hero-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 24px;
-    margin-bottom: 20px;
-}
-.hero-intro {
-    min-width: 0;
-    max-width: 760px;
-}
-.jury-main .hero-copy {
-    max-width: 560px;
-    margin: 12px 0 0;
-}
-.jury-main .hero-art {
-    width: 210px;
-    max-width: 210px;
-    margin-top: 0;
-    flex: 0 0 auto;
-    opacity: .92;
-}
-.jury-main .profile {
-    margin-top: 16px;
-    padding: 14px 16px;
+.hero-content .profile[open] {
+    padding: 12px 14px;
     border: 1px solid #2c2d33;
     border-radius: 14px;
     background: #17181c;
 }
-.jury-main .profile-fields {
+.hero-content .profile[open] .profile-fields {
     margin-block: 12px;
-}
-.jury-main .results {
-    border-radius: 30px;
-    margin-bottom: 28px;
 }
 .results-eyebrow-row {
     display: flex;
@@ -1763,17 +1713,19 @@ button.is-loading {
 }
 
 .jury-panel {
-    position: sticky;
-    top: 14px;
-    margin-top: 16px;
-    margin-bottom: 96px;
-    max-height: calc(100vh - 110px);
+    position: fixed;
+    top: 86px;
+    right: 20px;
+    width: min(352px, calc(100vw - 32px));
+    max-height: calc(100vh - 188px);
+    z-index: 9500;
     overflow-y: auto;
-    border: 1px solid #2e3038;
+    border: 1px solid rgba(255, 255, 255, .14);
     border-radius: 20px;
-    background: #17181d;
+    background: rgba(23, 24, 29, .96);
     color: #f4f4f6;
-    box-shadow: 0 18px 42px rgba(0, 0, 0, .34);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, .48);
+    backdrop-filter: blur(12px);
     scrollbar-width: thin;
     scrollbar-color: #3c3e48 transparent;
 }
@@ -1784,9 +1736,9 @@ button.is-loading {
     display: none;
 }
 .jury-panel-inner {
-    padding: 16px;
+    padding: 15px;
     display: grid;
-    gap: 14px;
+    gap: 13px;
 }
 .jury-panel-header {
     padding-bottom: 12px;
@@ -1800,23 +1752,26 @@ button.is-loading {
     margin-bottom: 8px;
 }
 .jury-eyebrow {
-    font-size: 10.5px;
+    font-size: 10px;
     font-weight: 800;
-    letter-spacing: .09em;
+    letter-spacing: .07em;
+    line-height: 1.2;
     color: #ff7c72;
 }
 .jury-header-actions {
     display: flex;
     align-items: center;
     gap: 6px;
+    flex: 0 0 auto;
 }
 .jury-session-badge {
-    padding: 2px 8px;
+    padding: 3px 8px;
     border-radius: 999px;
     background: #262830;
     color: #d4d4dc;
-    font-size: 11px;
+    font-size: 10.5px;
     font-weight: 650;
+    white-space: nowrap;
 }
 .jury-panel.is-session-active .jury-session-badge {
     background: rgba(239, 49, 36, .18);
@@ -1828,8 +1783,9 @@ button.is-loading {
     border-radius: 8px;
     background: #23252c;
     color: #e4e4ea;
-    font-size: 11.5px;
+    font-size: 11px;
     font-weight: 650;
+    white-space: nowrap;
 }
 .jury-collapse-btn:hover {
     background: #30323c;
@@ -2207,45 +2163,33 @@ button.is-loading {
 }
 .jury-reopen-btn {
     position: fixed;
-    right: 24px;
+    right: 20px;
     top: 86px;
     z-index: 9500;
-    padding: 10px 14px;
-    border: 1px solid rgba(239, 49, 36, .6);
+    padding: 10px 15px;
+    border: 1px solid rgba(239, 49, 36, .65);
     border-radius: 999px;
-    background: #17181d;
+    background: rgba(23, 24, 29, .96);
     color: #fff;
     font-size: 13px;
     font-weight: 750;
-    box-shadow: 0 10px 26px rgba(0, 0, 0, .35);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, .38);
+    backdrop-filter: blur(10px);
 }
 .jury-reopen-btn:hover {
     background: var(--button);
 }
 
-@media (max-width: 1260px) and (min-width: 1120px) {
-    .jury-main .card-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-}
-
-@media (max-width: 1119px) {
-    .jury-workspace {
-        width: min(100% - 24px, 1280px);
-        grid-template-columns: minmax(0, 1fr);
-    }
-    .jury-panel {
-        position: static;
-        max-height: none;
-        margin: 0 0 28px;
-    }
-}
-
 @media (max-width: 720px) {
-    .hero-header {
-        align-items: start;
+    .jury-panel {
+        right: 12px;
+        left: 12px;
+        top: 72px;
+        width: auto;
+        max-height: calc(100vh - 170px);
     }
-    .jury-main .hero-art {
-        display: none;
+    .jury-reopen-btn {
+        right: 14px;
+        top: 74px;
     }
 }

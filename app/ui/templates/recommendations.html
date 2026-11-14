@@ -1,81 +1,73 @@
 {% extends "base.html" %}
 {% block content %}
-    <div class="jury-workspace">
-        <div class="jury-main">
-            <section class="hero" aria-labelledby="hero-title">
-                <div class="wrap hero-layout">
-                    <div class="hero-content">
-                        <div class="hero-header">
-                            <div class="hero-intro">
-                                <p class="eyebrow">ОБУЧЕНИЕ ДЛЯ ПРЕДПРИНИМАТЕЛЕЙ</p>
-                                <h1 id="hero-title">Что хотите решить<br class="hero-break"> в&nbsp;бизнесе?</h1>
-                                <p class="hero-copy">Опишите задачу и задайте параметры бизнеса — выдача ниже и телеметрия справа перестроятся сразу.</p>
-                            </div>
-                            <img class="hero-art" src="{{ url_for('static', filename='learning.svg') }}" alt="" width="240" height="190">
+        <section class="hero" aria-labelledby="hero-title">
+            <div class="wrap hero-layout">
+                <div class="hero-content">
+                    <p class="eyebrow">ОБУЧЕНИЕ ДЛЯ ПРЕДПРИНИМАТЕЛЕЙ</p>
+                    <h1 id="hero-title">Что хотите решить<br class="hero-break"> в&nbsp;бизнесе?</h1>
+                    <p class="hero-copy">Опишите задачу, и мы предложим материалы, с которых можно начать.</p>
+
+                    <form id="recommendation-query" method="post" action="{{ url_for('index', _anchor='recommendations') }}">
+                        <input type="hidden" name="result_order" value="{{ result_order }}">
+                        <input type="hidden" name="format_filter" value="{{ format_filter }}">
+                        <input type="hidden" name="page_size" value="{{ page_size }}">
+                        {% if not is_demo_catalog %}
+                        <div id="query-access-filters" hidden>
+                            <input type="hidden" name="access_filters_set" value="1">
+                            {% for category in access_filters %}
+                            <input type="hidden" name="access_filter" value="{{ category }}">
+                            {% endfor %}
                         </div>
-
-                        <form id="recommendation-query" method="post" action="{{ url_for('index', _anchor='recommendations') }}">
-                            <input type="hidden" name="result_order" value="{{ result_order }}">
-                            <input type="hidden" name="format_filter" value="{{ format_filter }}">
-                            <input type="hidden" name="page_size" value="{{ page_size }}">
-                            {% if not is_demo_catalog %}
-                            <div id="query-access-filters" hidden>
-                                <input type="hidden" name="access_filters_set" value="1">
-                                {% for category in access_filters %}
-                                <input type="hidden" name="access_filter" value="{{ category }}">
-                                {% endfor %}
-                            </div>
-                            {% endif %}
-                            <label class="sr-only" for="goal">Текущая задача</label>
-                            <div class="goal-row">
-                                <input id="goal" name="goal" type="text" maxlength="{{ goal_max_length }}"
-                                       placeholder="Например, найти первых клиентов" value="{{ profile.goal or '' }}">
-                                <button class="button button-primary" type="submit">Подобрать материалы</button>
-                            </div>
-                            <div class="quick-goals" aria-label="Примеры задач">
-                                {% for goal in quick_goals %}
-                                <button class="chip{% if goal == profile.goal %} chip-selected{% endif %}"
-                                        type="submit" name="quick_goal" value="{{ goal }}">{{ goal }}</button>
-                                {% endfor %}
-                            </div>
-                            <details class="profile"{% if show_profile_details %} open{% endif %}>
-                                <summary>Уточнить подборку <span>· параметры бизнеса и формата</span></summary>
-                                {% include "profile_fields.html" %}
-                                <div class="profile-actions">
-                                    {% if allow_sample_history %}
-                                    <label class="history-option">
-                                        <input type="checkbox" name="history" value="sample"{% if use_sample_history %} checked{% endif %}>
-                                        Учесть пример истории просмотров
-                                    </label>
-                                    {% endif %}
-                                    <div class="profile-buttons">
-                                        <button class="skip-button" type="submit" name="action" value="skip_profile">Пропустить</button>
-                                        <button class="button button-profile" type="submit">Обновить подборку</button>
-                                    </div>
+                        {% endif %}
+                        <label class="sr-only" for="goal">Текущая задача</label>
+                        <div class="goal-row">
+                            <input id="goal" name="goal" type="text" maxlength="{{ goal_max_length }}"
+                                   placeholder="Например, найти первых клиентов" value="{{ profile.goal or '' }}">
+                            <button class="button button-primary" type="submit">Подобрать материалы</button>
+                        </div>
+                        <div class="quick-goals" aria-label="Примеры задач">
+                            {% for goal in quick_goals %}
+                            <button class="chip{% if goal == profile.goal %} chip-selected{% endif %}"
+                                    type="submit" name="quick_goal" value="{{ goal }}">{{ goal }}</button>
+                            {% endfor %}
+                        </div>
+                        <details class="profile"{% if show_profile_details %} open{% endif %}>
+                            <summary>Уточнить подборку <span>· параметры бизнеса и формата</span></summary>
+                            {% include "profile_fields.html" %}
+                            <div class="profile-actions">
+                                {% if allow_sample_history %}
+                                <label class="history-option">
+                                    <input type="checkbox" name="history" value="sample"{% if use_sample_history %} checked{% endif %}>
+                                    Учесть пример истории просмотров
+                                </label>
+                                {% endif %}
+                                <div class="profile-buttons">
+                                    <button class="skip-button" type="submit" name="action" value="skip_profile">Пропустить</button>
+                                    <button class="button button-profile" type="submit">Обновить подборку</button>
                                 </div>
-                            </details>
-                        </form>
-                    </div>
+                            </div>
+                        </details>
+                    </form>
                 </div>
-            </section>
-
-            <div id="jury-daily-slot">
-            {% if daily.article or daily.podcast %}
-            {% include "daily_picks.html" %}
-            {% endif %}
+                <img class="hero-art" src="{{ url_for('static', filename='learning.svg') }}" alt="" width="520" height="410">
             </div>
+        </section>
 
-            <div id="jury-next-slot">
-            {% if next_courses %}
-            {% include "next_courses.html" %}
-            {% endif %}
-            </div>
-
-            <p id="recommendation-status" class="wrap recommendation-status" role="status"></p>
-            {% include "recommendations_results.html" %}
+        <div id="jury-daily-slot">
+        {% if daily.article or daily.podcast %}
+        {% include "daily_picks.html" %}
+        {% endif %}
         </div>
 
+        <div id="jury-next-slot">
+        {% if next_courses %}
+        {% include "next_courses.html" %}
+        {% endif %}
+        </div>
+
+        <p id="recommendation-status" class="wrap recommendation-status" role="status"></p>
+        {% include "recommendations_results.html" %}
+
         {% include "jury_panel.html" %}
-        <button type="button" class="jury-reopen-btn" id="jury-reopen-btn" hidden>Пульт жюри ↗</button>
-    </div>
+        <button type="button" class="jury-reopen-btn" id="jury-reopen-btn" hidden>Пульт жюри</button>
 {% endblock %}
