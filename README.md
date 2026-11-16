@@ -16,6 +16,33 @@ docker compose up --build -d --wait
 - **Своя БД / выгрузка каталога:** положите `catalog_slim.sqlite`, `catalog_slim.json` или `catalog.norm.json` (и при наличии `recommended_links.json`) в папку `data/` или укажите путь к ней через `ALFA_CATALOG_DIR` в `.env` (шаблон — `env.example`). Если в `data/` лежит только исходный `alfa_course_hackathon.backup`, экспорт можно собрать командой `python -X utf8 -m app.catalog.normalizer`. Без выгрузки в `data/` и без заданного `ALFA_CATALOG_DIR` сервис автоматически запустится на встроенном демо-каталоге из `fixtures/` (7 материалов). `/health` показывает `catalog: real` или `catalog: demo` и число загруженных материалов.
 - **Ключи LLM для чата:** без `ALFA_LLM_API_KEY` и `OPENROUTER_API_KEY` в `.env` чат-виджет не падает и работает в локальном резервном режиме (отдаёт релевантные карточки из каталога без генерации текста через LLM). Чтобы включить ответы моделей, скопируйте `env.example` в `.env` и укажите свой ключ Gemini или OpenRouter.
 
+## Развёртывание на сервере
+
+Разверните `main` в отдельном каталоге сервера. Compose использует имя проекта `alfahack-demo` и внутренний порт `8080`. Для настройки скопируйте `env.example` в `.env`. По умолчанию сервис слушает `127.0.0.1:18081`. Для доступа по домену направьте reverse proxy на этот адрес. Для прямого доступа по IP задайте `APP_BIND_ADDRESS=0.0.0.0` и откройте выбранный `APP_PUBLIC_PORT` в настройках сервера.
+
+```bash
+docker compose config --quiet
+docker compose up --build -d --wait --wait-timeout 90
+docker compose ps
+curl --fail http://127.0.0.1:18081/health
+```
+
+Положите экспорт каталога в `data/` или укажите путь к каталогу на хосте в `ALFA_CATALOG_DIR`. Compose монтирует эту папку только для чтения. Приложение берёт первый доступный файл в порядке `catalog_slim.sqlite`, `catalog_slim.json`, `catalog.norm.json`. Если есть `recommended_links.json`, положите его рядом, чтобы ранжирование учитывало связанные материалы. После обновления выгрузки перезапустите сервис `web`.
+
+Если в `data/` есть только исходный `alfa_course_hackathon.backup`, экспорт можно собрать командой `python -X utf8 -m app.catalog.normalizer`. Для веб-демо достаточно нормализованного каталога и файла связей. Исходный бэкап остаётся вне Git и Docker-образа.
+
+С отдельными путями используйте `python -X utf8 -m app.catalog.normalizer --backup path/to/alfa_course_hackathon.backup --output data/new-catalog`.
+
+Без экспорта и без заданного `ALFA_CATALOG_DIR` используется каталог из `fixtures/`. При явно заданном `ALFA_CATALOG_DIR` приложение требует доступный экспорт. `/health` сообщает `catalog: real` или `catalog: demo` и число загруженных материалов.
+
+Бесплатные статьи с обязательным входом входят в фильтр «Бесплатные». Каталог показывает карточки всех выбранных категорий и ведёт на Альфа-Курс, где проверяются права пользователя. Для отчётов в `/admin/tests` положите экспорт, направленные редакторские связи и JSON-прогоны по той же версии каталога в папку `ALFA_CATALOG_DIR`.
+
+Для входа и регистрации по публичному адресу настройте HTTPS. За reverse proxy оставьте порт приложения доступным прокси и настройте в Waitress `trusted_proxy` на его адрес, а в `trusted_proxy_headers` явно разрешите `X-Forwarded-Proto` и `X-Forwarded-For`. Для публичного HTTP доступна кнопка тестового входа.
+
+На сервере с уже настроенным обновлением сертификатов Let’s Encrypt используйте отдельный прокси. В `.env` задайте `ALFA_HTTPS_HOST` из сертификата и `ALFA_CERT_ROOT` с каталогами `live/` и `archive/`. Запустите `docker compose -f compose.yaml -f deploy/compose.https.yaml up --build -d --wait`. HTTPS по умолчанию использует порт `18443`. Старый HTTP-порт перенаправляет на него. Прокси перечитывает сертификат после обновления.
+
+Аккаунты сохраняются в SQLite в томе `accounts`. Сделайте резервную копию тома перед переносом на другой сервер. В серверном `.env` задайте постоянный случайный `ALFA_SECRET_KEY`, например сгенерируйте его командой `python -c "import secrets; print(secrets.token_hex(32))"`. С постоянным ключом сессии сохраняются при перезапуске контейнера.
+
 ## Запуск без Docker
 
 Из корня репозитория с Python 3.12.
